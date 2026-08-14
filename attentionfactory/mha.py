@@ -8,16 +8,22 @@ from .base import BaseAttention
 
 class MultiHeadAttention(BaseAttention):
     """
-    Multi-Head Attention module as described in "Attention is All You Need" (Vaswani et al., 2017).
+    Multi-Head Attention module as described in "Attention is All You Need"
+    (Vaswani et al., 2017).
 
-    This implementation splits the input into multiple heads, computes attention independently for each head,
-    and then concatenates the results. This allows the model to focus on different parts of the input simultaneously.
+    This implementation splits the input into multiple heads, computes
+    attention independently for each head, and then concatenates the results.
+    This allows the model to focus on different parts of the input
+    simultaneously.
 
     Args:
         hidden_size (int): Dimensionality of the input and output features.
-        num_heads (int): Number of attention heads to use. Must divide hidden_size evenly.
-        dropout (float, optional): Dropout probability for attention weights. Defaults to 0.1.
-        bias (bool, optional): Whether to use bias in linear projections. Defaults to True.
+        num_heads (int): Number of attention heads to use. Must divide
+            hidden_size evenly.
+        dropout (float, optional): Dropout probability for attention weights.
+            Defaults to 0.1.
+        bias (bool, optional): Whether to use bias in linear projections.
+            Defaults to True.
 
     Attributes:
         num_heads (int): Number of attention heads.
@@ -63,15 +69,20 @@ class MultiHeadAttention(BaseAttention):
         Forward pass of the Multi-Head Attention module.
 
         Args:
-            hidden_state (torch.Tensor): Input tensor of shape (batch_size, seq_len, hidden_size).
-            attention_mask (Optional[torch.Tensor]): Attention mask of shape (batch_size, 1, 1, seq_len)
-                or (batch_size, 1, seq_len, seq_len). 1 indicates positions to attend to, 0 indicates positions to mask out.
-            return_attention_weights (bool): Whether to return attention weights along with the output. Defaults to False.
+            hidden_state (torch.Tensor): Input tensor of shape (batch_size,
+                seq_len, hidden_size).
+            attention_mask (Optional[torch.Tensor]): Attention mask of shape
+                (batch_size, 1, 1, seq_len) or (batch_size, 1, seq_len, seq_len).
+                1 indicates positions to attend to, 0 indicates positions to
+                mask out.
+            return_attention_weights (bool): Whether to return attention
+                weights along with the output. Defaults to False.
 
         Returns:
             Union[torch.Tensor, Tuple[torch.Tensor, torch.Tensor]]:
                 Output tensor of shape (batch_size, seq_len, hidden_size).
-                If return_attention_weights is True, returns a tuple (output, attention_weights).
+                If return_attention_weights is True, returns a tuple
+                (output, attention_weights).
         """
         batch_size, seq_len, _ = hidden_state.size()
 
@@ -87,7 +98,8 @@ class MultiHeadAttention(BaseAttention):
         value = self.split_head(value)
 
         # Compute scaled dot-product attention
-        # Matrix multiplication: (batch_size, num_heads, seq_len, head_dim) * (batch_size, num_heads, head_dim, seq_len)
+        # Matrix multiplication: (batch_size, num_heads, seq_len, head_dim)
+        # * (batch_size, num_heads, head_dim, seq_len)
         # Resulting shape: (batch_size, num_heads, seq_len, seq_len)
         attention_scores = (
             torch.matmul(query, key.transpose(-1, -2)) * self.scale_factor
@@ -99,7 +111,8 @@ class MultiHeadAttention(BaseAttention):
             expected_mask_shape = (batch_size, self.num_heads, seq_len, seq_len)
             if attention_mask.size() != expected_mask_shape:
                 raise ValueError(
-                    f"Attention mask size must match {expected_mask_shape}, got {attention_mask.size()}"
+                    f"Attention mask size must match {expected_mask_shape}, "
+                    f"got {attention_mask.size()}"
                 )
 
             attention_scores = torch.masked_fill(
@@ -114,7 +127,8 @@ class MultiHeadAttention(BaseAttention):
 
         # Weighted sum of values
         # Multiply attention weights with V:
-        # (batch_size, num_heads, seq_len, seq_len) * (batch_size, num_heads, seq_len, head_dim)
+        # (batch_size, num_heads, seq_len, seq_len)
+        # * (batch_size, num_heads, seq_len, head_dim)
         # -> (batch_size, num_heads, seq_len, head_dim)
         output = torch.matmul(attention_weights, value)
 

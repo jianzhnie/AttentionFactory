@@ -8,11 +8,14 @@ from torch import nn
 
 class GroupQueryAttention(nn.Module):
     """
-    Group Query Attention module as described in "GQA: Training Generalized Multi-Query Transformer Models from Multi-Head Checkpoints" (Chen et al., 2023).
+    Group Query Attention module as described in "GQA: Training Generalized
+    Multi-Query Transformer Models from Multi-Head Checkpoints" (Chen et al., 2023).
 
-    This implementation is a hybrid between Multi-Head Attention and Multi-Query Attention, where queries are grouped
-    and each group shares a single key and value head. This reduces memory usage and speeds up inference while
-    maintaining performance closer to Multi-Head Attention than Multi-Query Attention.
+    This implementation is a hybrid between Multi-Head Attention and
+    Multi-Query Attention, where queries are grouped and each group shares a
+    single key and value head. This reduces memory usage and speeds up
+    inference while maintaining performance closer to Multi-Head Attention
+    than Multi-Query Attention.
 
     By configuring `num_kv_groups` (G, the number of groups), this module supports:
         - When num_kv_groups == num_heads: Multi-Head Attention (MHA)
@@ -22,9 +25,12 @@ class GroupQueryAttention(nn.Module):
     Args:
         hidden_size (int): Dimensionality of the input and output features.
         num_heads (int): Number of query heads to use. Must divide hidden_size evenly.
-        num_kv_groups (int): Number of groups to divide query heads into. Must divide num_heads evenly.
-        dropout (float, optional): Dropout probability for attention weights. Defaults to 0.1.
-        bias (bool, optional): Whether to use bias in linear projections. Defaults to True.
+        num_kv_groups (int): Number of groups to divide query heads into.
+            Must divide num_heads evenly.
+        dropout (float, optional): Dropout probability for attention weights.
+            Defaults to 0.1.
+        bias (bool, optional): Whether to use bias in linear projections.
+            Defaults to True.
 
     Attributes:
         num_heads (int): Number of query heads.
@@ -50,11 +56,13 @@ class GroupQueryAttention(nn.Module):
         super().__init__()
         if hidden_size % num_heads != 0:
             raise ValueError(
-                f"hidden_size ({hidden_size}) must be divisible by num_heads ({num_heads})"
+                f"hidden_size ({hidden_size}) must be divisible "
+                f"by num_heads ({num_heads})"
             )
         if num_heads % num_kv_groups != 0:
             raise ValueError(
-                f"num_heads ({num_heads}) must be divisible by num_kv_groups ({num_kv_groups})"
+                f"num_heads ({num_heads}) must be divisible "
+                f"by num_kv_groups ({num_kv_groups})"
             )
 
         self.num_heads = num_heads
@@ -104,14 +112,19 @@ class GroupQueryAttention(nn.Module):
         Forward pass of the Group Query Attention module.
 
         Args:
-            hidden_state (torch.Tensor): Input tensor of shape (batch_size, seq_len, hidden_size).
-            attention_mask (Optional[torch.Tensor]): Attention mask of shape (batch_size, 1, 1, seq_len)
-                or (batch_size, 1, seq_len, seq_len). 1 indicates positions to attend to, 0 indicates positions to mask out.
-            return_attention_weights (bool, optional): Whether to return attention weights. Defaults to False.
+            hidden_state (torch.Tensor): Input tensor of shape (batch_size,
+                seq_len, hidden_size).
+            attention_mask (Optional[torch.Tensor]): Attention mask of shape
+                (batch_size, 1, 1, seq_len) or (batch_size, 1, seq_len, seq_len).
+                1 indicates positions to attend to, 0 indicates positions to
+                mask out.
+            return_attention_weights (bool, optional): Whether to return
+                attention weights. Defaults to False.
 
         Returns:
             torch.Tensor: Output tensor of shape (batch_size, seq_len, hidden_size).
-                If return_attention_weights is True, returns a tuple (output, attention_weights).
+                If return_attention_weights is True, returns a tuple
+                (output, attention_weights).
         """
         batch_size, seq_len, _ = hidden_state.size()
 
@@ -128,7 +141,8 @@ class GroupQueryAttention(nn.Module):
         value = self.split_head_grouped(value)
 
         # Compute scaled dot-product attention
-        # (batch_size, num_heads, seq_len, head_dim) * (batch_size, num_heads, head_dim, seq_len)
+        # (batch_size, num_heads, seq_len, head_dim)
+        # * (batch_size, num_heads, head_dim, seq_len)
         # -> (batch_size, num_heads, seq_len, seq_len)
         attention_scores = (
             torch.matmul(query, key.transpose(-1, -2)) * self.scale_factor
@@ -140,7 +154,8 @@ class GroupQueryAttention(nn.Module):
             expected_mask_shape = (batch_size, self.num_heads, seq_len, seq_len)
             if attention_mask.size() != expected_mask_shape:
                 raise ValueError(
-                    f"Attention mask size must match {expected_mask_shape}, got {attention_mask.size()}"
+                    f"Attention mask size must match {expected_mask_shape}, "
+                    f"got {attention_mask.size()}"
                 )
             attention_scores = torch.masked_fill(
                 attention_scores, attention_mask == 0, float("-inf")
@@ -153,7 +168,8 @@ class GroupQueryAttention(nn.Module):
         attention_weights = self.dropout(attention_weights)
 
         # Weighted sum of values
-        # (batch_size, num_heads, seq_len, seq_len) * (batch_size, num_heads, seq_len, head_dim)
+        # (batch_size, num_heads, seq_len, seq_len)
+        # * (batch_size, num_heads, seq_len, head_dim)
         # -> (batch_size, num_heads, seq_len, head_dim)
         output = torch.matmul(attention_weights, value)
 
@@ -188,23 +204,27 @@ class GroupQueryAttention(nn.Module):
         """
         Split the input tensor into grouped attention heads for keys and values.
 
-        This method splits keys/values into groups, then expands each to serve multiple query heads in the same group.
+        This method splits keys/values into groups, then expands each to serve
+        multiple query heads in the same group.
 
         Args:
-            x (torch.Tensor): Input tensor of shape (batch_size, seq_len, num_kv_groups * head_dim).
+            x (torch.Tensor): Input tensor of shape (batch_size, seq_len,
+                num_kv_groups * head_dim).
 
         Returns:
             torch.Tensor: Tensor of shape (batch_size, num_heads, seq_len, head_dim).
         """
         batch_size, seq_len, _ = x.size()
 
-        # Split into groups: (batch_size, seq_len, num_kv_groups * head_dim) -> (batch_size, num_kv_groups, seq_len, head_dim)
+        # Split into groups: (batch_size, seq_len, num_kv_groups * head_dim)
+        # -> (batch_size, num_kv_groups, seq_len, head_dim)
         x = x.view(batch_size, seq_len, self.num_kv_groups, self.head_dim).transpose(
             1, 2
         )
 
         # Expand each group's key/value to serve multiple query heads
-        # (batch_size, num_kv_groups, seq_len, head_dim) -> (batch_size, num_kv_groups, heads_per_group, seq_len, head_dim)
+        # (batch_size, num_kv_groups, seq_len, head_dim)
+        # -> (batch_size, num_kv_groups, heads_per_group, seq_len, head_dim)
         x = x.unsqueeze(2).expand(
             batch_size, self.num_kv_groups, self.heads_per_group, seq_len, self.head_dim
         )

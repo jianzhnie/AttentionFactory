@@ -10,14 +10,17 @@ class MultiHeadLatentAttention(nn.Module):
     """
     Multi-head Latent Attention module that operates on latent space representations.
 
-    This implementation extends the standard multi-head attention mechanism to work with
-    latent space representations, allowing for more flexible and powerful attention patterns.
+    This implementation extends the standard multi-head attention mechanism to
+    work with latent space representations, allowing for more flexible and
+    powerful attention patterns.
 
     Args:
         hidden_size (int): Dimensionality of the input and output features.
-        num_heads (int): Number of attention heads to use. Must divide hidden_size evenly.
+        num_heads (int): Number of attention heads to use. Must divide
+            hidden_size evenly.
         latent_size (int): Dimensionality of the latent space.
-        dropout (float, optional): Dropout probability for attention weights. Defaults to 0.0.
+        dropout (float, optional): Dropout probability for attention weights.
+            Defaults to 0.0.
 
     Attributes:
         num_heads (int): Number of attention heads.
@@ -44,7 +47,8 @@ class MultiHeadLatentAttention(nn.Module):
         super().__init__()
         if hidden_size % num_heads != 0:
             raise ValueError(
-                f"hidden_size ({hidden_size}) must be divisible by num_heads ({num_heads})"
+                f"hidden_size ({hidden_size}) must be divisible "
+                f"by num_heads ({num_heads})"
             )
 
         self.num_heads = num_heads
@@ -79,10 +83,14 @@ class MultiHeadLatentAttention(nn.Module):
         Forward pass of the Multi-head Latent Attention module.
 
         Args:
-            hidden_state (torch.Tensor): Input tensor of shape (batch_size, seq_len, hidden_size).
-            attention_mask (Optional[torch.Tensor]): Attention mask of shape (batch_size, 1, 1, seq_len)
-                or (batch_size, 1, seq_len, seq_len). 1 indicates positions to attend to, 0 indicates positions to mask out.
-            return_attention_weights (bool, optional): If True, returns attention weights. Defaults to False.
+            hidden_state (torch.Tensor): Input tensor of shape (batch_size,
+                seq_len, hidden_size).
+            attention_mask (Optional[torch.Tensor]): Attention mask of shape
+                (batch_size, 1, 1, seq_len) or (batch_size, 1, seq_len, seq_len).
+                1 indicates positions to attend to, 0 indicates positions to
+                mask out.
+            return_attention_weights (bool, optional): If True, returns
+                attention weights. Defaults to False.
         Returns:
             torch.Tensor: Output tensor of shape (batch_size, seq_len, hidden_size).
         """

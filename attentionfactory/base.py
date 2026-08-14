@@ -34,7 +34,8 @@ class BaseAttention(nn.Module, ABC):
 
         if hidden_size % num_heads != 0:
             raise ValueError(
-                f"hidden_size ({hidden_size}) must be divisible by num_heads ({num_heads})"
+                f"hidden_size ({hidden_size}) must be divisible "
+                f"by num_heads ({num_heads})"
             )
 
         self.hidden_size = hidden_size

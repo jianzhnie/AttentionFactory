@@ -8,16 +8,20 @@ from torch import nn
 
 class MultiQueryAttention(nn.Module):
     """
-    Multi-Query Attention module as described in "Fast Transformer Decoding: One Write-Head is All You Need" (Shazeer, 2019).
+    Multi-Query Attention module as described in "Fast Transformer Decoding:
+    One Write-Head is All You Need" (Shazeer, 2019).
 
-    This implementation uses a single key and value head for all query heads, which reduces memory usage and speeds up inference
-    compared to standard Multi-Head Attention.
+    This implementation uses a single key and value head for all query heads,
+    which reduces memory usage and speeds up inference compared to standard
+    Multi-Head Attention.
 
     Args:
         hidden_size (int): Dimensionality of the input and output features.
         num_heads (int): Number of query heads to use. Must divide hidden_size evenly.
-        dropout (float, optional): Dropout probability for attention weights. Defaults to 0.1.
-        bias (bool, optional): Whether to use bias in linear projections. Defaults to True.
+        dropout (float, optional): Dropout probability for attention weights.
+            Defaults to 0.1.
+        bias (bool, optional): Whether to use bias in linear projections.
+            Defaults to True.
 
     Attributes:
         num_heads (int): Number of query heads.
@@ -36,7 +40,8 @@ class MultiQueryAttention(nn.Module):
         super().__init__()
         if hidden_size % num_heads != 0:
             raise ValueError(
-                f"hidden_size ({hidden_size}) must be divisible by num_heads ({num_heads})"
+                f"hidden_size ({hidden_size}) must be divisible "
+                f"by num_heads ({num_heads})"
             )
 
         self.num_heads = num_heads
@@ -47,7 +52,8 @@ class MultiQueryAttention(nn.Module):
         # Scaling factor for attention scores (pre-compute for efficiency)
         self.scale_factor = 1.0 / math.sqrt(self.head_dim)
 
-        # Projection matrices: multiple heads for queries, single head for keys and values
+        # Projection matrices: multiple heads for queries, single head for
+        # keys and values
         self.q_proj = nn.Linear(hidden_size, hidden_size, bias=bias)
         self.k_proj = nn.Linear(hidden_size, self.head_dim, bias=bias)
         self.v_proj = nn.Linear(hidden_size, self.head_dim, bias=bias)
@@ -78,15 +84,20 @@ class MultiQueryAttention(nn.Module):
         Forward pass of the Multi-Query Attention module.
 
         Args:
-            hidden_state (torch.Tensor): Input tensor of shape (batch_size, seq_len, hidden_size).
-            attention_mask (Optional[torch.Tensor]): Attention mask of shape (batch_size, 1, 1, seq_len)
-                or (batch_size, 1, seq_len, seq_len). 1 indicates positions to attend to, 0 indicates positions to mask out.
-            return_attention_weights (bool): Whether to return attention weights along with the output. Defaults to False.
+            hidden_state (torch.Tensor): Input tensor of shape (batch_size,
+                seq_len, hidden_size).
+            attention_mask (Optional[torch.Tensor]): Attention mask of shape
+                (batch_size, 1, 1, seq_len) or (batch_size, 1, seq_len, seq_len).
+                1 indicates positions to attend to, 0 indicates positions to
+                mask out.
+            return_attention_weights (bool): Whether to return attention
+                weights along with the output. Defaults to False.
 
         Returns:
             Union[torch.Tensor, Tuple[torch.Tensor, torch.Tensor]]:
                 Output tensor of shape (batch_size, seq_len, hidden_size).
-                If return_attention_weights is True, returns a tuple (output, attention_weights).
+                If return_attention_weights is True, returns a tuple
+                (output, attention_weights).
         """
         batch_size, seq_len, _ = hidden_state.size()
 
@@ -101,7 +112,8 @@ class MultiQueryAttention(nn.Module):
         value = self.split_head(value, head_num=1)
 
         # Compute scaled dot-product attention
-        # (batch_size, num_heads, seq_len, head_dim) * (batch_size, 1, head_dim, seq_len)
+        # (batch_size, num_heads, seq_len, head_dim)
+        # * (batch_size, 1, head_dim, seq_len)
         # -> (batch_size, num_heads, seq_len, seq_len)
         attention_scores = (
             torch.matmul(query, key.transpose(-1, -2)) * self.scale_factor
@@ -118,7 +130,8 @@ class MultiQueryAttention(nn.Module):
         attention_weights = self.dropout(attention_weights)
 
         # Weighted sum of values
-        # (batch_size, num_heads, seq_len, seq_len) * (batch_size, 1, seq_len, head_dim)
+        # (batch_size, num_heads, seq_len, seq_len)
+        # * (batch_size, 1, seq_len, head_dim)
         # -> (batch_size, num_heads, seq_len, head_dim)
         output = torch.matmul(attention_weights, value)
 
@@ -139,8 +152,10 @@ class MultiQueryAttention(nn.Module):
         Split the input tensor into multiple attention heads.
 
         Args:
-            x (torch.Tensor): Input tensor of shape (batch_size, seq_len, hidden_size) or (batch_size, seq_len, head_dim).
-            head_num (Optional[int]): Number of heads to split into. If None, uses self.num_heads.
+            x (torch.Tensor): Input tensor of shape (batch_size, seq_len,
+                hidden_size) or (batch_size, seq_len, head_dim).
+            head_num (Optional[int]): Number of heads to split into. If None,
+                uses self.num_heads.
 
         Returns:
             torch.Tensor: Tensor of shape (batch_size, num_heads, seq_len, head_dim).
