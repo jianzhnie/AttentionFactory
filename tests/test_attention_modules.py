@@ -1,0 +1,184 @@
+"""Behavioral and numerical tests for the attention module implementations.
+
+Covers MHA, GQA, MQA and MLA: output shapes, masking semantics, attention
+weight properties, gradient flow, constructor validation, and numerical
+equivalence between related variants and against PyTorch's SDPA.
+"""
+
+import pytest
+import torch
+import torch.nn.functional as F
+
+from attentionfactory import (
+    GroupQueryAttention,
+    MultiHeadAttention,
+    MultiHeadLatentAttention,
+    MultiQueryAttention,
+)
+
+HIDDEN = 64
+HEADS = 4
+BATCH = 2
+SEQ = 7
+
+MODULE_FACTORIES = {
+    "mha": lambda: MultiHeadAttention(HIDDEN, HEADS, dropout=0.0),
+    "gqa": lambda: GroupQueryAttention(HIDDEN, HEADS, num_kv_groups=2, dropout=0.0),
+    "mqa": lambda: MultiQueryAttention(HIDDEN, HEADS, dropout=0.0),
+    "mla": lambda: MultiHeadLatentAttention(
+        HIDDEN, HEADS, q_latent_size=16, kv_latent_size=24, dropout=0.0
+    ),
+}
+
+
+def make_input(seed=0):
+    generator = torch.Generator().manual_seed(seed)
+    return torch.randn(BATCH, SEQ, HIDDEN, generator=generator)
+
+
+def make_causal_mask():
+    causal = torch.tril(torch.ones(SEQ, SEQ, dtype=torch.bool))
+    return causal.expand(BATCH, 1, SEQ, SEQ)
+
+
+def make_padding_mask():
+    # (batch, 1, 1, seq) padding mask; every row keeps at least one valid key.
+    mask = torch.ones(BATCH, 1, 1, SEQ, dtype=torch.bool)
+    mask[0, 0, 0, -2:] = False
+    return mask
+
+
+@pytest.fixture(params=list(MODULE_FACTORIES), ids=list(MODULE_FACTORIES))
+def module(request):
+    mod = MODULE_FACTORIES[request.param]()
+    mod.eval()
+    return mod
+
+
+def test_output_shape_and_finiteness(module):
+    out = module(make_input())
+    assert out.shape == (BATCH, SEQ, HIDDEN)
+    assert torch.isfinite(out).all()
+
+
+def test_eval_mode_is_deterministic(module):
+    x = make_input()
+    torch.testing.assert_close(module(x), module(x))
+
+
+def test_causal_mask_zeroes_future_attention(module):
+    out, weights = module(
+        make_input(), attention_mask=make_causal_mask(), return_attention_weights=True
+    )
+
+    assert out.shape == (BATCH, SEQ, HIDDEN)
+    assert weights.shape == (BATCH, HEADS, SEQ, SEQ)
+    # Rows are valid probability distributions...
+    torch.testing.assert_close(
+        weights.sum(dim=-1), torch.ones(BATCH, HEADS, SEQ), atol=1e-6, rtol=1e-5
+    )
+    # ...and no attention leaks to future positions.
+    future = torch.triu(torch.ones(SEQ, SEQ, dtype=torch.bool), diagonal=1)
+    assert weights[:, :, future].abs().max().item() == 0.0
+
+
+def test_padding_mask_shape_is_supported(module):
+    """A broadcastable (batch, 1, 1, seq) padding mask must work, as documented."""
+    out, weights = module(
+        make_input(), attention_mask=make_padding_mask(), return_attention_weights=True
+    )
+    assert out.shape == (BATCH, SEQ, HIDDEN)
+    # Masked key positions receive zero weight in the masked batch row.
+    assert weights[0, :, :, -2:].abs().max().item() == 0.0
+    # The unmasked batch row is free to attend everywhere.
+    assert weights[1].sum().item() == pytest.approx(HEADS * SEQ, rel=1e-4)
+
+
+def test_return_attention_weights_flag(module):
+    x = make_input()
+    assert isinstance(module(x), torch.Tensor)
+    out, weights = module(x, return_attention_weights=True)
+    assert isinstance(out, torch.Tensor)
+    assert isinstance(weights, torch.Tensor)
+
+
+def test_gradient_flows_to_inputs_and_parameters(module):
+    x = make_input().requires_grad_(True)
+    module(x).sum().backward()
+
+    assert x.grad is not None and torch.isfinite(x.grad).all()
+    for name, param in module.named_parameters():
+        assert param.grad is not None, f"no gradient for {name}"
+        assert torch.isfinite(param.grad).all(), f"non-finite gradient for {name}"
+
+
+def test_train_mode_dropout_is_stochastic():
+    mod = MultiHeadAttention(HIDDEN, HEADS, dropout=0.5)
+    mod.train()
+    x = make_input()
+    assert not torch.allclose(mod(x), mod(x))
+
+
+def test_constructor_rejects_indivisible_hidden_size():
+    with pytest.raises(ValueError, match="divisible"):
+        MultiHeadAttention(30, HEADS)
+    with pytest.raises(ValueError, match="divisible"):
+        MultiQueryAttention(30, HEADS)
+    with pytest.raises(ValueError, match="divisible"):
+        GroupQueryAttention(30, HEADS, num_kv_groups=1)
+    with pytest.raises(ValueError, match="divisible"):
+        MultiHeadLatentAttention(30, HEADS, q_latent_size=8, kv_latent_size=8)
+
+
+def test_gqa_rejects_indivisible_groups():
+    with pytest.raises(ValueError, match="divisible"):
+        GroupQueryAttention(HIDDEN, HEADS, num_kv_groups=3)
+
+
+def test_gqa_with_full_groups_equals_mha():
+    """GQA with num_kv_groups == num_heads must reduce to exact MHA."""
+    mha = MultiHeadAttention(HIDDEN, HEADS, dropout=0.0)
+    gqa = GroupQueryAttention(HIDDEN, HEADS, num_kv_groups=HEADS, dropout=0.0)
+    gqa.load_state_dict(mha.state_dict())
+    mha.eval()
+    gqa.eval()
+
+    x = make_input()
+    torch.testing.assert_close(gqa(x), mha(x))
+
+
+def test_gqa_with_single_group_equals_mqa():
+    """GQA with num_kv_groups == 1 must reduce to exact MQA."""
+    mqa = MultiQueryAttention(HIDDEN, HEADS, dropout=0.0)
+    gqa = GroupQueryAttention(HIDDEN, HEADS, num_kv_groups=1, dropout=0.0)
+    gqa.load_state_dict(mqa.state_dict())
+    mqa.eval()
+    gqa.eval()
+
+    x = make_input()
+    torch.testing.assert_close(gqa(x), mqa(x))
+
+
+@pytest.mark.parametrize("use_mask", [False, True], ids=["no-mask", "causal"])
+def test_mha_matches_pytorch_sdpa(use_mask):
+    """MHA output must match F.scaled_dot_product_attention on the same projections."""
+    mha = MultiHeadAttention(HIDDEN, HEADS, dropout=0.0)
+    mha.eval()
+    x = make_input()
+
+    query = mha.split_head(mha.q_proj(x))
+    key = mha.split_head(mha.k_proj(x))
+    value = mha.split_head(mha.v_proj(x))
+    mask = make_causal_mask() if use_mask else None
+
+    ref = F.scaled_dot_product_attention(query, key, value, attn_mask=mask)
+    ref = mha.o_proj(mha.combine_head(ref))
+
+    torch.testing.assert_close(mha(x, attention_mask=mask), ref)
+
+
+def test_attention_mask_actually_changes_output(module):
+    x = make_input()
+    plain = module(x)
+    masked = module(x, attention_mask=make_causal_mask())
+    assert not torch.allclose(plain, masked)

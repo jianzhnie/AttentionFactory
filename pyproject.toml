@@ -36,7 +36,7 @@ Issues = "https://gitee.com/jianzhnie/AttentionFactory/issues"
 
 [tool.setuptools.packages.find]
 where = ["."]
-include = ["attenionfactory*"]
+include = ["attentionfactory*"]
 
 [tool.ruff]
 line-length = 88
@@ -71,7 +71,7 @@ ignore = [
 ]
 
 [tool.ruff.lint.isort]
-known-first-party = ["attenionfactory"]
+known-first-party = ["attentionfactory"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

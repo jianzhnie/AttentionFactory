@@ -105,16 +105,10 @@ class MultiHeadAttention(BaseAttention):
             torch.matmul(query, key.transpose(-1, -2)) * self.scale_factor
         )
 
-        # Apply attention mask if provided
+        # Apply attention mask if provided. The mask is broadcast against the
+        # scores, so both (batch_size, 1, 1, seq_len) padding masks and full
+        # (batch_size, num_heads, seq_len, seq_len) masks are supported.
         if attention_mask is not None:
-            # Ensure mask has correct shape
-            expected_mask_shape = (batch_size, self.num_heads, seq_len, seq_len)
-            if attention_mask.size() != expected_mask_shape:
-                raise ValueError(
-                    f"Attention mask size must match {expected_mask_shape}, "
-                    f"got {attention_mask.size()}"
-                )
-
             attention_scores = torch.masked_fill(
                 attention_scores, attention_mask == 0, float("-inf")
             )
