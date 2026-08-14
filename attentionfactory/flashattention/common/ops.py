@@ -9,16 +9,24 @@ fully masked rows are defined to contribute zeros and never produce NaNs.
 from __future__ import annotations
 
 import math
+from typing import Any
 
 import torch
 
 from .masking import build_block_mask
+from .types import ForwardResult
 
 
 def scaled_scores(q_block: torch.Tensor, k_block: torch.Tensor) -> torch.Tensor:
-    """Scaled dot-product scores ``Q K^T / sqrt(d)``, computed in float32."""
+    """Scaled dot-product scores ``Q K^T / sqrt(d)``, computed in float32.
+
+    Inputs are upcast to float32 *before* the matmul so the score tile stays
+    accurate for 16-bit inputs, mirroring the fp32-accumulation behavior of
+    real GPU kernels.
+    """
     scale = 1.0 / math.sqrt(q_block.shape[-1])
-    return torch.einsum("bhid,bhjd->bhij", q_block * scale, k_block).to(torch.float32)
+    q_fp32 = q_block.to(torch.float32) * scale
+    return torch.einsum("bhid,bhjd->bhij", q_fp32, k_block.to(torch.float32))
 
 
 def block_scores_and_mask(
@@ -34,10 +42,8 @@ def block_scores_and_mask(
     scores = scaled_scores(q[:, :, q_slice, :], k[:, :, k_slice, :])
     mask = build_block_mask(
         batch_size=q.shape[0],
-        q_start=q_slice.start or 0,
-        q_end=q_slice.stop or q.shape[2],
-        k_start=k_slice.start or 0,
-        k_end=k_slice.stop or k.shape[2],
+        q_slice=q_slice,
+        k_slice=k_slice,
         q_len=q.shape[2],
         kv_len=k.shape[2],
         causal=causal,
@@ -154,6 +160,34 @@ def lse_from_state(normalizers: torch.Tensor, row_max: torch.Tensor) -> torch.Te
     )
     lse = row_max + torch.log(safe_normalizers)
     return torch.where(normalizers > 0, lse, torch.zeros_like(lse))
+
+
+def assemble_forward_result(
+    out_blocks: list[torch.Tensor],
+    normalizer_blocks: list[torch.Tensor],
+    row_max_blocks: list[torch.Tensor],
+    *,
+    normalized: bool,
+    out_dtype: torch.dtype,
+    saved_state: dict[str, Any],
+) -> ForwardResult:
+    """Concatenate per-tile state and build the `ForwardResult`.
+
+    With ``normalized=False`` the deferred softmax division (FA2-style) is
+    applied here. Accumulators are float32; the output is cast back to
+    ``out_dtype`` so it matches the input precision.
+    """
+    out_acc = torch.cat(out_blocks, dim=2)
+    normalizers = torch.cat(normalizer_blocks, dim=2)
+    row_max = torch.cat(row_max_blocks, dim=2)
+    out = out_acc if normalized else finalize_unnormalized(out_acc, normalizers)
+    return ForwardResult(
+        out=out.to(out_dtype),
+        lse=lse_from_state(normalizers, row_max),
+        normalizers=normalizers,
+        row_max=row_max,
+        saved_state=saved_state,
+    )
 
 
 def probabilities_from_lse(

@@ -13,6 +13,7 @@ from .masking import (
     normalize_key_padding_mask,
 )
 from .ops import (
+    assemble_forward_result,
     backward_step,
     block_scores_and_mask,
     compute_local_statistics,
@@ -26,6 +27,7 @@ from .ops import (
 from .reference import reference_attention
 from .tiles import (
     init_block_state,
+    init_gradients,
     iter_block_slices,
     prepare_inputs,
 )
@@ -35,6 +37,7 @@ __all__ = [
     "BackwardResult",
     "FlashAttentionConfig",
     "ForwardResult",
+    "assemble_forward_result",
     "backward_step",
     "block_scores_and_mask",
     "build_block_mask",
@@ -42,6 +45,7 @@ __all__ = [
     "compute_local_statistics",
     "finalize_unnormalized",
     "init_block_state",
+    "init_gradients",
     "iter_block_slices",
     "lse_from_state",
     "merge_state_normalized",

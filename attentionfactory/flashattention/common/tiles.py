@@ -63,7 +63,9 @@ def init_block_state(
 
     Returns one ``(output accumulator, normalizer, row max)`` triple per query
     tile. The output accumulator has V's head dimension, which may differ from
-    Q/K's. Normalizer and row max are kept in float32 for numerical stability.
+    Q/K's. All three are float32 accumulators, matching the fp32-accumulator
+    convention of real kernels; the output is cast back to the input dtype in
+    `assemble_forward_result`.
     """
     out_blocks = [
         torch.zeros(
@@ -72,7 +74,7 @@ def init_block_state(
             q_slice.stop - q_slice.start,
             v.shape[-1],
             device=q.device,
-            dtype=q.dtype,
+            dtype=torch.float32,
         )
         for q_slice in q_slices
     ]
@@ -91,3 +93,20 @@ def init_block_state(
         torch.full_like(block, float("-inf")) for block in normalizer_blocks
     ]
     return out_blocks, normalizer_blocks, row_max_blocks
+
+
+def init_gradients(
+    q: torch.Tensor,
+    k: torch.Tensor,
+    v: torch.Tensor,
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    """Allocate float32 gradient accumulators matching the shapes of q/k/v.
+
+    Gradients are accumulated in float32 for numerical stability and cast
+    back to the input dtype when the `BackwardResult` is returned.
+    """
+    return (
+        torch.zeros_like(q, dtype=torch.float32),
+        torch.zeros_like(k, dtype=torch.float32),
+        torch.zeros_like(v, dtype=torch.float32),
+    )

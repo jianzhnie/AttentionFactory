@@ -33,13 +33,13 @@ from .common import (
     BackwardResult,
     FlashAttentionConfig,
     ForwardResult,
+    assemble_forward_result,
     backward_step,
     build_block_mask,
     compute_local_statistics,
-    finalize_unnormalized,
     init_block_state,
+    init_gradients,
     iter_block_slices,
-    lse_from_state,
     merge_state_unnormalized,
     prepare_inputs,
     scaled_scores,
@@ -101,10 +101,8 @@ def _compute_scores_from_blocks(
     scores = scaled_scores(q_block, k_block)
     valid_mask = build_block_mask(
         batch_size=q_block.shape[0],
-        q_start=q_slice.start or 0,
-        q_end=q_slice.stop or q_len,
-        k_start=k_slice.start or 0,
-        k_end=k_slice.stop or kv_len,
+        q_slice=q_slice,
+        k_slice=k_slice,
         q_len=q_len,
         kv_len=kv_len,
         causal=causal,
@@ -289,15 +287,13 @@ def forward(
             if active_buffer is None:
                 break
 
-    out_acc = torch.cat(out_acc_blocks, dim=2)
-    normalizers = torch.cat(normalizer_blocks, dim=2)
-    row_max = torch.cat(row_max_blocks, dim=2)
-    out = finalize_unnormalized(out_acc, normalizers)
-    return ForwardResult(
-        out=out,
-        lse=lse_from_state(normalizers, row_max),
-        normalizers=normalizers,
-        row_max=row_max,
+    # The deferred softmax division is applied inside `assemble_forward_result`.
+    return assemble_forward_result(
+        out_acc_blocks,
+        normalizer_blocks,
+        row_max_blocks,
+        normalized=False,
+        out_dtype=q.dtype,
         saved_state={
             "pipeline_trace": pipeline_trace,
             "fp8_enabled": config.fp8,
@@ -350,9 +346,7 @@ def backward(
         key_padding_mask=key_padding_mask,
     )
 
-    dQ = torch.zeros_like(q)
-    dK = torch.zeros_like(k)
-    dV = torch.zeros_like(v)
+    dQ, dK, dV = init_gradients(q, k, v)
     q_slices = iter_block_slices(q.shape[2], config.block_size_q)
     k_slices = iter_block_slices(k.shape[2], config.block_size_kv)
     pipeline_trace: list[dict[str, Any]] = []
@@ -365,7 +359,7 @@ def backward(
         # Backward keeps the same staged interpretation: consume one active tile,
         # optionally prepare the next tile, then fold the local derivatives into
         # the running dQ / dK / dV accumulators.
-        dQ_block = torch.zeros_like(q_block)
+        dQ_block = torch.zeros_like(q_block, dtype=torch.float32)
         active_buffer = _load_tile(
             buffer_id=0,
             tile_id=0,
@@ -427,9 +421,9 @@ def backward(
         dQ[:, :, q_slice, :] = dQ_block
 
     return BackwardResult(
-        dQ=dQ,
-        dK=dK,
-        dV=dV,
+        dQ=dQ.to(q.dtype),
+        dK=dK.to(k.dtype),
+        dV=dV.to(v.dtype),
         debug_state={"pipeline_trace": pipeline_trace}
         if config.keep_debug_state
         else {},

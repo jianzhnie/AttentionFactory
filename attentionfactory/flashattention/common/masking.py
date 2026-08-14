@@ -30,10 +30,8 @@ def normalize_key_padding_mask(
 def build_block_mask(
     *,
     batch_size: int,
-    q_start: int,
-    q_end: int,
-    k_start: int,
-    k_end: int,
+    q_slice: slice,
+    k_slice: slice,
     q_len: int,
     kv_len: int,
     causal: bool,
@@ -41,6 +39,10 @@ def build_block_mask(
     device: torch.device,
 ) -> torch.Tensor | None:
     """Build the validity mask for one (query tile, key tile) pair.
+
+    ``q_slice`` / ``k_slice`` locate the tile within the full sequences and
+    must have concrete ``start``/``stop`` values (as produced by
+    `iter_block_slices`).
 
     Returns ``None`` when no masking applies at all, so callers can skip the
     masking path entirely. When ``kv_len > q_len`` the causal diagonal is
@@ -50,17 +52,21 @@ def build_block_mask(
     block_mask = None
 
     if key_padding_mask is not None:
-        block_mask = key_padding_mask[:, None, None, k_start:k_end]
+        block_mask = key_padding_mask[:, None, None, k_slice]
 
     if causal:
-        q_positions = torch.arange(q_start, q_end, device=device) + (kv_len - q_len)
-        k_positions = torch.arange(k_start, k_end, device=device)
+        q_positions = torch.arange(q_slice.start, q_slice.stop, device=device) + (
+            kv_len - q_len
+        )
+        k_positions = torch.arange(k_slice.start, k_slice.stop, device=device)
         causal_mask = (q_positions[:, None] >= k_positions[None, :])[None, None]
         block_mask = causal_mask if block_mask is None else block_mask & causal_mask
 
     if block_mask is None:
         return None
-    return block_mask.expand(batch_size, 1, q_end - q_start, k_end - k_start)
+    return block_mask.expand(
+        batch_size, 1, q_slice.stop - q_slice.start, k_slice.stop - k_slice.start
+    )
 
 
 def build_full_mask(
@@ -75,10 +81,8 @@ def build_full_mask(
     """Build the validity mask for the whole score matrix at once."""
     return build_block_mask(
         batch_size=batch_size,
-        q_start=0,
-        q_end=q_len,
-        k_start=0,
-        k_end=kv_len,
+        q_slice=slice(0, q_len),
+        k_slice=slice(0, kv_len),
         q_len=q_len,
         kv_len=kv_len,
         causal=causal,

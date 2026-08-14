@@ -25,13 +25,13 @@ from .common import (
     BackwardResult,
     FlashAttentionConfig,
     ForwardResult,
+    assemble_forward_result,
     backward_step,
     block_scores_and_mask,
     compute_local_statistics,
-    finalize_unnormalized,
     init_block_state,
+    init_gradients,
     iter_block_slices,
-    lse_from_state,
     merge_state_unnormalized,
     prepare_inputs,
 )
@@ -125,12 +125,6 @@ def forward(
                 weighted_values,
             )
 
-    out_acc = torch.cat(out_acc_blocks, dim=2)
-    normalizers = torch.cat(normalizer_blocks, dim=2)
-    row_max = torch.cat(row_max_blocks, dim=2)
-    # This late normalization is one of the main algorithmic cleanups in FA2:
-    # fewer rescale operations are performed inside the tiled main loop.
-    out = finalize_unnormalized(out_acc, normalizers)
     # Real FA2 stores log-sum-exp style state and performs sequence-parallel work
     # in different CUDA threadblocks. This simplified version keeps those ideas
     # visible without reproducing kernel-level launches.
@@ -138,11 +132,15 @@ def forward(
         "query_owners": query_owners,
         "deferred_normalization": True,
     }
-    return ForwardResult(
-        out=out,
-        lse=lse_from_state(normalizers, row_max),
-        normalizers=normalizers,
-        row_max=row_max,
+    # This late normalization is one of the main algorithmic cleanups in FA2:
+    # fewer rescale operations are performed inside the tiled main loop. It is
+    # applied inside `assemble_forward_result` (normalized=False).
+    return assemble_forward_result(
+        out_acc_blocks,
+        normalizer_blocks,
+        row_max_blocks,
+        normalized=False,
+        out_dtype=q.dtype,
         saved_state=debug_state if config.keep_debug_state else {},
     )
 
@@ -182,9 +180,7 @@ def backward(
         key_padding_mask=key_padding_mask,
     )
 
-    dQ = torch.zeros_like(q)
-    dK = torch.zeros_like(k)
-    dV = torch.zeros_like(v)
+    dQ, dK, dV = init_gradients(q, k, v)
     q_slices = iter_block_slices(q.shape[2], config.block_size_q)
     k_slices = iter_block_slices(k.shape[2], config.block_size_kv)
     owner_trace: list[dict[str, int]] = []
@@ -193,7 +189,7 @@ def backward(
         q_block = q[:, :, q_slice, :]
         # Keep gradients local to the owning query tile first, then write the
         # finished dQ tile back once all K/V tiles have been processed.
-        dQ_block = torch.zeros_like(q_block)
+        dQ_block = torch.zeros_like(q_block, dtype=torch.float32)
 
         for k_slice in k_slices:
             k_block = k[:, :, k_slice, :]
@@ -226,9 +222,9 @@ def backward(
         owner_trace.append({"owner_id": owner_id, "num_kv_tiles": len(k_slices)})
 
     return BackwardResult(
-        dQ=dQ,
-        dK=dK,
-        dV=dV,
+        dQ=dQ.to(q.dtype),
+        dK=dK.to(k.dtype),
+        dV=dV.to(v.dtype),
         debug_state={"query_owner_trace": owner_trace}
         if config.keep_debug_state
         else {},

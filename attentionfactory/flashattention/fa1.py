@@ -24,12 +24,13 @@ from .common import (
     BackwardResult,
     FlashAttentionConfig,
     ForwardResult,
+    assemble_forward_result,
     backward_step,
     block_scores_and_mask,
     compute_local_statistics,
     init_block_state,
+    init_gradients,
     iter_block_slices,
-    lse_from_state,
     merge_state_normalized,
     prepare_inputs,
 )
@@ -113,15 +114,14 @@ def forward(
                 )
             )
 
-    out = torch.cat(out_blocks, dim=2)
-    normalizers = torch.cat(normalizer_blocks, dim=2)
-    row_max = torch.cat(row_max_blocks, dim=2)
-
-    return ForwardResult(
-        out=out,
-        lse=lse_from_state(normalizers, row_max),
-        normalizers=normalizers,
-        row_max=row_max,
+    # FA1 keeps the output tile normalized at every merge step, so the
+    # concatenated tiles already form the final output (normalized=True).
+    return assemble_forward_result(
+        out_blocks,
+        normalizer_blocks,
+        row_max_blocks,
+        normalized=True,
+        out_dtype=q.dtype,
         saved_state=debug_state,
     )
 
@@ -159,9 +159,7 @@ def backward(
         v,
         key_padding_mask=key_padding_mask,
     )
-    dQ = torch.zeros_like(q)
-    dK = torch.zeros_like(k)
-    dV = torch.zeros_like(v)
+    dQ, dK, dV = init_gradients(q, k, v)
 
     q_slices = iter_block_slices(q.shape[2], config.block_size_q)
     k_slices = iter_block_slices(k.shape[2], config.block_size_kv)
@@ -172,8 +170,8 @@ def backward(
         # FA1 accumulates dK and dV per K/V tile while revisiting every query tile.
         # The real backward kernel similarly recomputes local probabilities instead
         # of reading a stored attention matrix back from global memory.
-        dK_block = torch.zeros_like(k_block)
-        dV_block = torch.zeros_like(v_block)
+        dK_block = torch.zeros_like(k_block, dtype=torch.float32)
+        dV_block = torch.zeros_like(v_block, dtype=torch.float32)
 
         for q_slice in q_slices:
             q_block = q[:, :, q_slice, :]
@@ -204,7 +202,7 @@ def backward(
         dK[:, :, k_slice, :] = dK_block
         dV[:, :, k_slice, :] = dV_block
 
-    return BackwardResult(dQ=dQ, dK=dK, dV=dV)
+    return BackwardResult(dQ=dQ.to(q.dtype), dK=dK.to(k.dtype), dV=dV.to(v.dtype))
 
 
 def attention(

@@ -32,13 +32,13 @@ from .common import (
     BackwardResult,
     FlashAttentionConfig,
     ForwardResult,
+    assemble_forward_result,
     backward_step,
     block_scores_and_mask,
     compute_local_statistics,
-    finalize_unnormalized,
     init_block_state,
+    init_gradients,
     iter_block_slices,
-    lse_from_state,
     merge_state_unnormalized,
     prepare_inputs,
 )
@@ -268,15 +268,13 @@ def forward(
                 }
             )
 
-    out_acc = torch.cat(out_acc_blocks, dim=2)
-    normalizers = torch.cat(normalizer_blocks, dim=2)
-    row_max = torch.cat(row_max_blocks, dim=2)
-    out = finalize_unnormalized(out_acc, normalizers)
-    return ForwardResult(
-        out=out,
-        lse=lse_from_state(normalizers, row_max),
-        normalizers=normalizers,
-        row_max=row_max,
+    # The deferred softmax division is applied inside `assemble_forward_result`.
+    return assemble_forward_result(
+        out_acc_blocks,
+        normalizer_blocks,
+        row_max_blocks,
+        normalized=False,
+        out_dtype=q.dtype,
         saved_state={"scheduler_trace": scheduler_trace}
         if config.keep_debug_state
         else {},
@@ -319,9 +317,7 @@ def backward(
         key_padding_mask=key_padding_mask,
     )
 
-    dQ = torch.zeros_like(q)
-    dK = torch.zeros_like(k)
-    dV = torch.zeros_like(v)
+    dQ, dK, dV = init_gradients(q, k, v)
     q_slices = iter_block_slices(q.shape[2], config.block_size_q)
     k_slices = iter_block_slices(k.shape[2], config.block_size_kv)
     schedule = _build_schedule(q_slices, k_slices)
@@ -371,9 +367,9 @@ def backward(
             )
 
     return BackwardResult(
-        dQ=dQ,
-        dK=dK,
-        dV=dV,
+        dQ=dQ.to(q.dtype),
+        dK=dK.to(k.dtype),
+        dV=dV.to(v.dtype),
         debug_state={"scheduler_trace": scheduler_trace}
         if config.keep_debug_state
         else {},
