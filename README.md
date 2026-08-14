@@ -138,23 +138,26 @@ attention = MultiHeadLatentAttention(
 
 ### 5. FlashAttention（教学实现）
 
-`attentionfactory.flashattention` 子包以纯 PyTorch 实现了 FlashAttention v1–v4 的核心算法结构（在线 softmax、分块循环、LSE 重算梯度），用于教学目的：
+`attentionfactory.flashattention` 子包以纯 PyTorch 实现了 FlashAttention v1–v4 的核心算法结构（在线 softmax、分块循环、LSE 重算梯度），用于教学目的。提供与 PyTorch 一致的调用方式——函数式接口 `flash_attention`（类似 `F.scaled_dot_product_attention`）和 `nn.Module` 包装，均支持 autograd：
 
 ```python
 import torch
-from attentionfactory.flashattention import fa2
-from attentionfactory.flashattention.common import FlashAttentionConfig
+from attentionfactory import FlashAttention, flash_attention
 
-q = torch.randn(2, 8, 128, 64)
-k = torch.randn(2, 8, 128, 64)
-v = torch.randn(2, 8, 128, 64)
+q = torch.randn(2, 8, 128, 64, requires_grad=True)
+k = torch.randn(2, 8, 128, 64, requires_grad=True)
+v = torch.randn(2, 8, 128, 64, requires_grad=True)
 
-config = FlashAttentionConfig(block_size_q=64, block_size_kv=64)
-out = fa2.attention(q, k, v, causal=True, config=config)
-print(out.shape)  # torch.Size([2, 8, 128, 64])
+# 函数式调用，version 选择 FA 版本（fa1/fa2/fa3/fa4）
+out = flash_attention(q, k, v, version="fa2", causal=True)
+out.sum().backward()  # 梯度走 fa2 的分块 backward
+
+# 或者像普通 nn.Module 一样使用
+attn = FlashAttention(version="fa3", causal=True)
+out = attn(q, k, v)
 ```
 
-四个版本（`fa1`/`fa2`/`fa3`/`fa4`）共享同一套 `forward` / `backward` / `attention` 接口，差异体现在循环结构、工作划分与调度方式上，分别对应各代论文的算法改进点。
+四个版本（`fa1`/`fa2`/`fa3`/`fa4`）也各自暴露底层的 `forward` / `backward` 以及可微分的 `flash_attention_v1`–`flash_attention_v4` 函数，差异体现在循环结构、工作划分与调度方式上，分别对应各代论文的算法改进点。
 
 ## 使用 Attention Mask
 

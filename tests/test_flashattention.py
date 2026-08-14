@@ -10,7 +10,7 @@ import math
 import pytest
 import torch
 
-from attentionfactory.flashattention import fa1, fa2, fa3, fa4
+from attentionfactory.flashattention import fa1, fa2, fa3, fa4, flash_attention
 from attentionfactory.flashattention.common import (
     FlashAttentionConfig,
     reference_attention,
@@ -127,14 +127,14 @@ def test_lse_matches_logsumexp(version):
     assert (fwd.lse - ref_lse).abs().max().item() <= 1e-4
 
 
-@pytest.mark.parametrize("version", VERSIONS, ids=VERSION_IDS)
-def test_single_tile_matches_reference(version):
+@pytest.mark.parametrize("version_name", VERSION_IDS)
+def test_single_tile_matches_reference(version_name):
     """Block sizes larger than the sequence must degrade to plain attention."""
     q, k, v = make_inputs(1, 1, 5, 5, 8, 8, torch.float32)
     big_config = FlashAttentionConfig(block_size_q=1024, block_size_kv=1024)
 
     ref = reference_attention(q, k, v, causal=True)
-    out = version.attention(q, k, v, causal=True, config=big_config)
+    out = flash_attention(q, k, v, version=version_name, causal=True, config=big_config)
     assert (out - ref).abs().max().item() <= 2e-5
 
 

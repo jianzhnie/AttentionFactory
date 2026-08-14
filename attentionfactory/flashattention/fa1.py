@@ -24,6 +24,7 @@ from .common import (
     BackwardResult,
     FlashAttentionConfig,
     ForwardResult,
+    TiledAttentionFunction,
     assemble_forward_result,
     backward_step,
     block_scores_and_mask,
@@ -35,7 +36,7 @@ from .common import (
     prepare_inputs,
 )
 
-__all__ = ["attention", "backward", "forward"]
+__all__ = ["backward", "flash_attention_v1", "forward"]
 
 
 def forward(
@@ -205,7 +206,7 @@ def backward(
     return BackwardResult(dQ=dQ.to(q.dtype), dK=dK.to(k.dtype), dV=dV.to(v.dtype))
 
 
-def attention(
+def flash_attention_v1(
     q: torch.Tensor,
     k: torch.Tensor,
     v: torch.Tensor,
@@ -214,12 +215,12 @@ def attention(
     key_padding_mask: torch.Tensor | None = None,
     config: FlashAttentionConfig | None = None,
 ) -> torch.Tensor:
-    """Convenience wrapper around `forward` returning only the output tensor."""
-    return forward(
-        q,
-        k,
-        v,
-        causal=causal,
-        key_padding_mask=key_padding_mask,
-        config=config,
-    ).out
+    """Differentiable FA1 attention, callable like any PyTorch operation.
+
+    Unlike calling `forward` directly, the returned tensor records the
+    autograd graph: ``loss.backward()`` routes through this module's tiled
+    `backward` implementation. Arguments match `forward`.
+    """
+    return TiledAttentionFunction.apply(
+        q, k, v, causal, key_padding_mask, config, forward, backward
+    )

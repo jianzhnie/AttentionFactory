@@ -6,6 +6,7 @@ input validation, the online-softmax math primitives, and a dense reference
 implementation used for correctness checks.
 """
 
+from .autograd import TiledAttentionFunction
 from .config import FlashAttentionConfig
 from .masking import (
     build_block_mask,
@@ -37,6 +38,7 @@ __all__ = [
     "BackwardResult",
     "FlashAttentionConfig",
     "ForwardResult",
+    "TiledAttentionFunction",
     "assemble_forward_result",
     "backward_step",
     "block_scores_and_mask",

@@ -33,6 +33,7 @@ from .common import (
     BackwardResult,
     FlashAttentionConfig,
     ForwardResult,
+    TiledAttentionFunction,
     assemble_forward_result,
     backward_step,
     build_block_mask,
@@ -45,7 +46,7 @@ from .common import (
     scaled_scores,
 )
 
-__all__ = ["attention", "backward", "forward"]
+__all__ = ["backward", "flash_attention_v3", "forward"]
 
 #: Largest magnitude representable in the FP8 E4M3 format.
 FP8_E4M3_MAX = 448.0
@@ -430,7 +431,7 @@ def backward(
     )
 
 
-def attention(
+def flash_attention_v3(
     q: torch.Tensor,
     k: torch.Tensor,
     v: torch.Tensor,
@@ -439,12 +440,12 @@ def attention(
     key_padding_mask: torch.Tensor | None = None,
     config: FlashAttentionConfig | None = None,
 ) -> torch.Tensor:
-    """Convenience wrapper around `forward` returning only the output tensor."""
-    return forward(
-        q,
-        k,
-        v,
-        causal=causal,
-        key_padding_mask=key_padding_mask,
-        config=config,
-    ).out
+    """Differentiable FA3 attention, callable like any PyTorch operation.
+
+    Unlike calling `forward` directly, the returned tensor records the
+    autograd graph: ``loss.backward()`` routes through this module's tiled
+    `backward` implementation. Arguments match `forward`.
+    """
+    return TiledAttentionFunction.apply(
+        q, k, v, causal, key_padding_mask, config, forward, backward
+    )
