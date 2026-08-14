@@ -61,25 +61,30 @@ class BaseAttention(nn.Module, ABC):
 
         Args:
             hidden_state: Input tensor of shape (batch_size, seq_len, hidden_size)
-            attention_mask: Optional attention mask
+            attention_mask: Optional attention mask, broadcastable against the
+                (batch_size, num_heads, seq_len, seq_len) score tensor.
+                1/True marks positions to attend to, 0/False masks them out.
             return_attention_weights: Whether to return attention weights
 
         Returns:
             Output tensor and optionally attention weights
         """
-        pass
 
-    def split_head(self, x: torch.Tensor) -> torch.Tensor:
-        """Split input tensor into multiple attention heads.
+    def split_head(self, x: torch.Tensor, num_heads: int | None = None) -> torch.Tensor:
+        """Split input tensor into attention heads.
 
         Args:
-            x: Input tensor of shape (batch_size, seq_len, hidden_size)
+            x: Input tensor of shape (batch_size, seq_len, num_heads * head_dim)
+            num_heads: Number of heads to split into. Defaults to the module's
+                ``num_heads``; pass a smaller number (e.g. 1) for the shared
+                key/value projections of MQA-style variants.
 
         Returns:
             Tensor of shape (batch_size, num_heads, seq_len, head_dim)
         """
-        batch_size, seq_len, _ = x.size()
-        return x.view(batch_size, seq_len, self.num_heads, self.head_dim).transpose(
+        num_heads = num_heads or self.num_heads
+        batch_size, seq_len, features = x.size()
+        return x.view(batch_size, seq_len, num_heads, features // num_heads).transpose(
             1, 2
         )
 
@@ -127,11 +132,23 @@ class BaseAttention(nn.Module, ABC):
             attention_mask: Optional attention mask
 
         Returns:
-            Normalized attention weights
+            Normalized attention weights. Rows whose keys are all masked are
+            defined to be all-zero (softmax over all ``-inf`` would be NaN).
         """
         attention_scores = self.apply_attention_mask(attention_scores, attention_mask)
         attention_weights = torch.softmax(attention_scores, dim=-1)
+        # Fully masked rows produce NaN in the softmax; define their weights
+        # (and therefore their output) as zero instead.
+        attention_weights = torch.nan_to_num(attention_weights, nan=0.0)
         return self.dropout(attention_weights)
+
+    @staticmethod
+    def _init_projections(*modules: nn.Linear) -> None:
+        """Initialize projections with Xavier uniform weights and zero biases."""
+        for module in modules:
+            nn.init.xavier_uniform_(module.weight)
+            if module.bias is not None:
+                nn.init.zeros_(module.bias)
 
     def extra_repr(self) -> str:
         """Return string representation of module parameters."""

@@ -3,7 +3,7 @@ from __future__ import annotations
 import torch
 from torch import nn
 
-from .base import BaseAttention
+from .base import BaseAttention, validate_attention_inputs
 
 
 class MultiHeadAttention(BaseAttention):
@@ -28,7 +28,7 @@ class MultiHeadAttention(BaseAttention):
     Attributes:
         num_heads (int): Number of attention heads.
         head_dim (int): Dimensionality of each attention head.
-        scale_factor (torch.Tensor): Scaling factor for dot-product attention.
+        scale_factor (float): Scaling factor for dot-product attention.
         q_proj (nn.Linear): Linear projection for query vectors.
         k_proj (nn.Linear): Linear projection for key vectors.
         v_proj (nn.Linear): Linear projection for value vectors.
@@ -49,32 +49,25 @@ class MultiHeadAttention(BaseAttention):
         # Output projection
         self.o_proj = nn.Linear(hidden_size, hidden_size, bias=bias)
 
-        # Initialize weights
-        self._reset_parameters()
-
-    def _reset_parameters(self) -> None:
-        """Initialize parameters using Xavier uniform initialization."""
-        for module in [self.q_proj, self.k_proj, self.v_proj, self.o_proj]:
-            nn.init.xavier_uniform_(module.weight)
-            if module.bias is not None:
-                nn.init.zeros_(module.bias)
+        self._init_projections(self.q_proj, self.k_proj, self.v_proj, self.o_proj)
 
     def forward(
         self,
         hidden_state: torch.Tensor,
         attention_mask: torch.Tensor | None = None,
         return_attention_weights: bool = False,
-    ) -> torch.Tensor:
+    ) -> torch.Tensor | tuple[torch.Tensor, torch.Tensor]:
         """
         Forward pass of the Multi-Head Attention module.
 
         Args:
             hidden_state (torch.Tensor): Input tensor of shape (batch_size,
                 seq_len, hidden_size).
-            attention_mask (Optional[torch.Tensor]): Attention mask of shape
-                (batch_size, 1, 1, seq_len) or (batch_size, 1, seq_len, seq_len).
-                1 indicates positions to attend to, 0 indicates positions to
-                mask out.
+            attention_mask (Optional[torch.Tensor]): Attention mask broadcastable
+                against the (batch_size, num_heads, seq_len, seq_len) scores,
+                e.g. a (batch_size, 1, 1, seq_len) padding mask or a full
+                per-head mask. 1 indicates positions to attend to, 0 indicates
+                positions to mask out.
             return_attention_weights (bool): Whether to return attention
                 weights along with the output. Defaults to False.
 
@@ -84,66 +77,30 @@ class MultiHeadAttention(BaseAttention):
                 If return_attention_weights is True, returns a tuple
                 (output, attention_weights).
         """
-        batch_size, seq_len, _ = hidden_state.size()
+        validate_attention_inputs(hidden_state, attention_mask, self.num_heads)
 
-        # Linear projections
-        # query, key, value each has shape: (batch_size, seq_len, hidden_size)
-        query = self.q_proj(hidden_state)
-        key = self.k_proj(hidden_state)
-        value = self.v_proj(hidden_state)
+        # Linear projections, split into heads:
+        # (batch_size, seq_len, hidden_size)
+        # -> (batch_size, num_heads, seq_len, head_dim)
+        query = self.split_head(self.q_proj(hidden_state))
+        key = self.split_head(self.k_proj(hidden_state))
+        value = self.split_head(self.v_proj(hidden_state))
 
-        # Split into multiple heads
-        query = self.split_head(query)
-        key = self.split_head(key)
-        value = self.split_head(value)
-
-        # Compute scaled dot-product attention
-        # Matrix multiplication: (batch_size, num_heads, seq_len, head_dim)
+        # Scaled dot-product attention:
+        # (batch_size, num_heads, seq_len, head_dim)
         # * (batch_size, num_heads, head_dim, seq_len)
-        # Resulting shape: (batch_size, num_heads, seq_len, seq_len)
+        # -> (batch_size, num_heads, seq_len, seq_len)
         attention_scores = (
             torch.matmul(query, key.transpose(-1, -2)) * self.scale_factor
         )
-
-        # Apply attention mask if provided. The mask is broadcast against the
-        # scores, so both (batch_size, 1, 1, seq_len) padding masks and full
-        # (batch_size, num_heads, seq_len, seq_len) masks are supported.
-        if attention_mask is not None:
-            attention_scores = torch.masked_fill(
-                attention_scores, attention_mask == 0, float("-inf")
-            )
-
-        # Softmax to get attention weights
-        attention_weights = torch.softmax(attention_scores, dim=-1)
-
-        # Dropout on attention weights
-        attention_weights = self.dropout(attention_weights)
-
-        # Weighted sum of values
-        # Multiply attention weights with V:
-        # (batch_size, num_heads, seq_len, seq_len)
-        # * (batch_size, num_heads, seq_len, head_dim)
-        # -> (batch_size, num_heads, seq_len, head_dim)
-        output = torch.matmul(attention_weights, value)
-
-        # Reshape and apply output projection
-        # Transpose back: (batch_size, num_heads, seq_len, head_dim)
-        # -> (batch_size, seq_len, num_heads, head_dim)
-        # -> (batch_size, seq_len, hidden_size)
-        output = (
-            output.transpose(1, 2)
-            .contiguous()
-            .view(batch_size, seq_len, self.hidden_size)
+        attention_weights = self.compute_attention_weights(
+            attention_scores, attention_mask
         )
-        output = self.o_proj(output)
+
+        # Weighted sum of values, merge heads, output projection
+        output = torch.matmul(attention_weights, value)
+        output = self.o_proj(self.combine_head(output))
 
         if return_attention_weights:
             return output, attention_weights
         return output
-
-    def extra_repr(self) -> str:
-        """Return a string representation of the module's extra information."""
-        return (
-            f"hidden_size={self.hidden_size}, num_heads={self.num_heads}, "
-            f"head_dim={self.head_dim}, bias={self.bias}"
-        )

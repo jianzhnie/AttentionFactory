@@ -182,3 +182,45 @@ def test_attention_mask_actually_changes_output(module):
     plain = module(x)
     masked = module(x, attention_mask=make_causal_mask())
     assert not torch.allclose(plain, masked)
+
+
+def test_fully_masked_rows_produce_zero_output(module):
+    """A row with every key masked must yield zeros, not NaN."""
+    x = make_input()
+    mask = torch.zeros(BATCH, 1, 1, SEQ, dtype=torch.bool)
+
+    out = module(x, attention_mask=mask)
+
+    assert torch.isfinite(out).all()
+    # Freshly initialized modules have zero output-projection biases, so the
+    # output of an all-masked row is exactly zero.
+    assert (out == 0).all()
+
+
+def test_rejects_non_3d_input(module):
+    with pytest.raises(ValueError, match="3D"):
+        module(torch.randn(SEQ, HIDDEN))
+
+
+def test_rejects_mask_with_wrong_batch_size(module):
+    bad_mask = torch.ones(BATCH + 1, 1, 1, SEQ, dtype=torch.bool)
+    with pytest.raises(ValueError, match="batch size"):
+        module(make_input(), attention_mask=bad_mask)
+
+
+def test_mla_reports_latent_configuration():
+    mla = MultiHeadLatentAttention(
+        HIDDEN, HEADS, q_latent_size=16, kv_latent_size=24, dropout=0.0
+    )
+    assert "q_latent_size=16" in mla.extra_repr()
+    assert "kv_latent_size=24" in mla.extra_repr()
+
+
+def test_mla_uses_shared_projection_init():
+    """MLA must apply the same Xavier + zero-bias init as the other modules."""
+    mla = MultiHeadLatentAttention(
+        HIDDEN, HEADS, q_latent_size=16, kv_latent_size=24, bias=True
+    )
+    for name, param in mla.named_parameters():
+        if name.endswith("bias"):
+            assert (param == 0).all(), f"{name} was not zero-initialized"

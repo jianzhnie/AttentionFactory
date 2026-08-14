@@ -1,12 +1,12 @@
 from __future__ import annotations
 
-import math
-
 import torch
 from torch import nn
 
+from .base import BaseAttention, validate_attention_inputs
 
-class GroupQueryAttention(nn.Module):
+
+class GroupQueryAttention(BaseAttention):
     """
     Group Query Attention module as described in "GQA: Training Generalized
     Multi-Query Transformer Models from Multi-Head Checkpoints" (Chen et al., 2023).
@@ -37,7 +37,7 @@ class GroupQueryAttention(nn.Module):
         head_dim (int): Dimensionality of each attention head.
         num_kv_groups (int): Number of groups.
         heads_per_group (int): Number of heads per group.
-        scale_factor (torch.Tensor): Scaling factor for dot-product attention.
+        scale_factor (float): Scaling factor for dot-product attention.
         q_proj (nn.Linear): Linear projection for query vectors.
         k_proj (nn.Linear): Linear projection for key vectors (one per group).
         v_proj (nn.Linear): Linear projection for value vectors (one per group).
@@ -53,29 +53,17 @@ class GroupQueryAttention(nn.Module):
         dropout: float = 0.1,
         bias: bool = True,
     ) -> None:
-        super().__init__()
-        if hidden_size % num_heads != 0:
-            raise ValueError(
-                f"hidden_size ({hidden_size}) must be divisible "
-                f"by num_heads ({num_heads})"
-            )
+        super().__init__(hidden_size, num_heads, dropout, bias)
         if num_heads % num_kv_groups != 0:
             raise ValueError(
                 f"num_heads ({num_heads}) must be divisible "
                 f"by num_kv_groups ({num_kv_groups})"
             )
 
-        self.num_heads = num_heads
-        self.head_dim = hidden_size // num_heads
         self.num_kv_groups = num_kv_groups
-        self.hidden_size = hidden_size
-        self.bias = bias
 
         # Number of heads per group
         self.heads_per_group = num_heads // num_kv_groups
-
-        # Scaling factor for attention scores (pre-compute for efficiency)
-        self.scale_factor = 1.0 / math.sqrt(self.head_dim)
 
         # Linear projections for queries, keys, and values
         self.q_proj = nn.Linear(hidden_size, hidden_size, bias=bias)
@@ -89,111 +77,61 @@ class GroupQueryAttention(nn.Module):
         # Output projection
         self.o_proj = nn.Linear(hidden_size, hidden_size, bias=bias)
 
-        # Dropout layer
-        self.dropout = nn.Dropout(dropout)
-
-        # Initialize weights
-        self._reset_parameters()
-
-    def _reset_parameters(self) -> None:
-        """Initialize parameters using Xavier uniform initialization."""
-        for module in [self.q_proj, self.k_proj, self.v_proj, self.o_proj]:
-            nn.init.xavier_uniform_(module.weight)
-            if module.bias is not None:
-                nn.init.zeros_(module.bias)
+        self._init_projections(self.q_proj, self.k_proj, self.v_proj, self.o_proj)
 
     def forward(
         self,
         hidden_state: torch.Tensor,
         attention_mask: torch.Tensor | None = None,
         return_attention_weights: bool = False,
-    ) -> torch.Tensor:
+    ) -> torch.Tensor | tuple[torch.Tensor, torch.Tensor]:
         """
         Forward pass of the Group Query Attention module.
 
         Args:
             hidden_state (torch.Tensor): Input tensor of shape (batch_size,
                 seq_len, hidden_size).
-            attention_mask (Optional[torch.Tensor]): Attention mask of shape
-                (batch_size, 1, 1, seq_len) or (batch_size, 1, seq_len, seq_len).
-                1 indicates positions to attend to, 0 indicates positions to
-                mask out.
+            attention_mask (Optional[torch.Tensor]): Attention mask broadcastable
+                against the (batch_size, num_heads, seq_len, seq_len) scores,
+                e.g. a (batch_size, 1, 1, seq_len) padding mask or a full
+                per-head mask. 1 indicates positions to attend to, 0 indicates
+                positions to mask out.
             return_attention_weights (bool, optional): Whether to return
                 attention weights. Defaults to False.
 
         Returns:
-            torch.Tensor: Output tensor of shape (batch_size, seq_len, hidden_size).
+            Union[torch.Tensor, Tuple[torch.Tensor, torch.Tensor]]:
+                Output tensor of shape (batch_size, seq_len, hidden_size).
                 If return_attention_weights is True, returns a tuple
                 (output, attention_weights).
         """
-        batch_size, seq_len, _ = hidden_state.size()
+        validate_attention_inputs(hidden_state, attention_mask, self.num_heads)
 
         # Linear projections
         # query has shape (batch_size, seq_len, hidden_size)
-        query = self.q_proj(hidden_state)
         # key and value have shape (batch_size, seq_len, num_kv_groups * head_dim)
-        key = self.k_proj(hidden_state)
-        value = self.v_proj(hidden_state)
+        query = self.split_head(self.q_proj(hidden_state))
+        key = self.split_head_grouped(self.k_proj(hidden_state))
+        value = self.split_head_grouped(self.v_proj(hidden_state))
 
-        # Split into heads and expand key/value for grouped attention
-        query = self.split_head(query)
-        key = self.split_head_grouped(key)
-        value = self.split_head_grouped(value)
-
-        # Compute scaled dot-product attention
+        # Scaled dot-product attention:
         # (batch_size, num_heads, seq_len, head_dim)
         # * (batch_size, num_heads, head_dim, seq_len)
         # -> (batch_size, num_heads, seq_len, seq_len)
         attention_scores = (
             torch.matmul(query, key.transpose(-1, -2)) * self.scale_factor
         )
-
-        # Apply attention mask if provided. The mask is broadcast against the
-        # scores, so both (batch_size, 1, 1, seq_len) padding masks and full
-        # (batch_size, num_heads, seq_len, seq_len) masks are supported.
-        if attention_mask is not None:
-            attention_scores = torch.masked_fill(
-                attention_scores, attention_mask == 0, float("-inf")
-            )
-
-        # Softmax to get attention weights
-        attention_weights = torch.softmax(attention_scores, dim=-1)
-
-        # Apply dropout to attention weights
-        attention_weights = self.dropout(attention_weights)
-
-        # Weighted sum of values
-        # (batch_size, num_heads, seq_len, seq_len)
-        # * (batch_size, num_heads, seq_len, head_dim)
-        # -> (batch_size, num_heads, seq_len, head_dim)
-        output = torch.matmul(attention_weights, value)
-
-        # Reshape and apply output projection
-        output = (
-            output.transpose(1, 2)
-            .contiguous()
-            .view(batch_size, seq_len, self.hidden_size)
+        attention_weights = self.compute_attention_weights(
+            attention_scores, attention_mask
         )
-        output = self.o_proj(output)
+
+        # Weighted sum of values, merge heads, output projection
+        output = torch.matmul(attention_weights, value)
+        output = self.o_proj(self.combine_head(output))
 
         if return_attention_weights:
             return output, attention_weights
         return output
-
-    def split_head(self, x: torch.Tensor) -> torch.Tensor:
-        """
-        Split the input tensor into multiple attention heads for queries.
-
-        Args:
-            x (torch.Tensor): Input tensor of shape (batch_size, seq_len, hidden_size).
-
-        Returns:
-            torch.Tensor: Tensor of shape (batch_size, num_heads, seq_len, head_dim).
-        """
-        batch_size, seq_len, _ = x.size()
-        return x.view(batch_size, seq_len, self.num_heads, self.head_dim).transpose(
-            1, 2
-        )
 
     def split_head_grouped(self, x: torch.Tensor) -> torch.Tensor:
         """
@@ -225,14 +163,11 @@ class GroupQueryAttention(nn.Module):
         )
 
         # Reshape to match query heads: (batch_size, num_heads, seq_len, head_dim)
-        x = x.reshape(batch_size, self.num_heads, seq_len, self.head_dim)
-
-        return x
+        return x.reshape(batch_size, self.num_heads, seq_len, self.head_dim)
 
     def extra_repr(self) -> str:
         """Return a string representation of the module's extra information."""
         return (
-            f"hidden_size={self.hidden_size}, num_heads={self.num_heads}, "
-            f"num_kv_groups={self.num_kv_groups}, head_dim={self.head_dim}, "
-            f"heads_per_group={self.heads_per_group}, bias={self.bias}"
+            f"{super().extra_repr()}, num_kv_groups={self.num_kv_groups}, "
+            f"heads_per_group={self.heads_per_group}"
         )
