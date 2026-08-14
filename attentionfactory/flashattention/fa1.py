@@ -26,13 +26,13 @@ from .common import (
     ForwardResult,
     TiledAttentionFunction,
     assemble_forward_result,
-    backward_step,
     block_scores_and_mask,
-    compute_local_statistics,
+    block_slices,
+    compute_block_gradients,
+    compute_block_softmax,
     init_block_state,
     init_gradients,
-    iter_block_slices,
-    merge_state_normalized,
+    merge_normalized_block,
     prepare_inputs,
 )
 
@@ -74,8 +74,8 @@ def forward(
         key_padding_mask=key_padding_mask,
     )
 
-    q_slices = iter_block_slices(q.shape[2], config.block_size_q)
-    k_slices = iter_block_slices(k.shape[2], config.block_size_kv)
+    q_slices = block_slices(q.shape[2], config.block_size_q)
+    k_slices = block_slices(k.shape[2], config.block_size_kv)
     # Each query tile owns a running output tile plus the online-softmax state
     # for that tile. This is the key FA1 idea: keep row-local statistics instead
     # of materializing the full attention matrix.
@@ -97,15 +97,15 @@ def forward(
                 causal=causal,
                 key_padding_mask=key_padding_mask,
             )
-            # `compute_local_statistics` performs the local online-softmax work:
+            # `compute_block_softmax` performs the local online-softmax work:
             # local row max, local row sum, and the unnormalized P @ V term.
-            block_max, block_sum, weighted_values = compute_local_statistics(
+            block_max, block_sum, weighted_values = compute_block_softmax(
                 scores, valid_mask, v_block
             )
-            # `merge_state_normalized` is the exact FA1 merge step that combines
+            # `merge_normalized_block` is the exact FA1 merge step that combines
             # the old online-softmax state with the new tile contribution.
             out_blocks[q_index], normalizer_blocks[q_index], row_max_blocks[q_index] = (
-                merge_state_normalized(
+                merge_normalized_block(
                     out_blocks[q_index],
                     normalizer_blocks[q_index],
                     row_max_blocks[q_index],
@@ -151,7 +151,7 @@ def backward(
         causal, key_padding_mask, config: Must match the forward call.
 
     Returns:
-        A `BackwardResult` with the gradients dQ, dK and dV.
+        A `BackwardResult` with the gradients grad_q, grad_k and grad_v.
     """
     config = config or FlashAttentionConfig()
     q, k, key_padding_mask = prepare_inputs(
@@ -160,19 +160,19 @@ def backward(
         v,
         key_padding_mask=key_padding_mask,
     )
-    dQ, dK, dV = init_gradients(q, k, v)
+    grad_q, grad_k, grad_v = init_gradients(q, k, v)
 
-    q_slices = iter_block_slices(q.shape[2], config.block_size_q)
-    k_slices = iter_block_slices(k.shape[2], config.block_size_kv)
+    q_slices = block_slices(q.shape[2], config.block_size_q)
+    k_slices = block_slices(k.shape[2], config.block_size_kv)
 
     for k_slice in k_slices:
         k_block = k[:, :, k_slice, :]
         v_block = v[:, :, k_slice, :]
-        # FA1 accumulates dK and dV per K/V tile while revisiting every query tile.
+        # FA1 accumulates grad_k and grad_v per K/V tile while revisiting every query tile.
         # The real backward kernel similarly recomputes local probabilities instead
         # of reading a stored attention matrix back from global memory.
-        dK_block = torch.zeros_like(k_block, dtype=torch.float32)
-        dV_block = torch.zeros_like(v_block, dtype=torch.float32)
+        grad_k_block = torch.zeros_like(k_block, dtype=torch.float32)
+        grad_v_block = torch.zeros_like(v_block, dtype=torch.float32)
 
         for q_slice in q_slices:
             q_block = q[:, :, q_slice, :]
@@ -186,7 +186,7 @@ def backward(
             )
             # The saved LSE lets us reconstruct probabilities on demand. That is
             # the backward-side analogue of FA1's forward IO reduction.
-            local_dQ, local_dK, local_dV = backward_step(
+            local_grad_q, local_grad_k, local_grad_v = compute_block_gradients(
                 q_block=q_block,
                 k_block=k_block,
                 v_block=v_block,
@@ -196,14 +196,14 @@ def backward(
                 valid_mask=valid_mask,
                 lse_block=forward_result.lse[:, :, q_slice, :],
             )
-            dQ[:, :, q_slice, :] += local_dQ
-            dK_block += local_dK
-            dV_block += local_dV
+            grad_q[:, :, q_slice, :] += local_grad_q
+            grad_k_block += local_grad_k
+            grad_v_block += local_grad_v
 
-        dK[:, :, k_slice, :] = dK_block
-        dV[:, :, k_slice, :] = dV_block
+        grad_k[:, :, k_slice, :] = grad_k_block
+        grad_v[:, :, k_slice, :] = grad_v_block
 
-    return BackwardResult(dQ=dQ.to(q.dtype), dK=dK.to(k.dtype), dV=dV.to(v.dtype))
+    return BackwardResult(grad_q=grad_q.to(q.dtype), grad_k=grad_k.to(k.dtype), grad_v=grad_v.to(v.dtype))
 
 
 def flash_attention_v1(

@@ -34,7 +34,7 @@ class ForwardResult:
 class BackwardResult:
     """Gradients of a tiled backward pass with respect to q, k and v."""
 
-    dQ: torch.Tensor
-    dK: torch.Tensor
-    dV: torch.Tensor
+    grad_q: torch.Tensor
+    grad_k: torch.Tensor
+    grad_v: torch.Tensor
     debug_state: dict[str, Any] = field(default_factory=dict)

@@ -41,7 +41,7 @@ def prepare_inputs(
     return q, k, normalized_mask
 
 
-def iter_block_slices(length: int, block_size: int) -> list[slice]:
+def block_slices(length: int, block_size: int) -> list[slice]:
     """Split ``range(length)`` into consecutive block-sized slices.
 
     The block size is clamped to ``[1, length]``; the final slice may be

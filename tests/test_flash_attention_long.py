@@ -93,14 +93,14 @@ class FlashAttentionLongTests(unittest.TestCase):
                 auto_grads = torch.autograd.grad(
                     auto_out.sum(), (q_auto, k_auto, v_auto)
                 )
-                for grad, grad_name in zip(auto_grads, ("dQ", "dK", "dV"), strict=True):
+                for grad, grad_name in zip(auto_grads, ("grad_q", "grad_k", "grad_v"), strict=True):
                     self.assertEqual(
                         grad.shape,
                         (
                             q_auto.shape
-                            if grad_name == "dQ"
+                            if grad_name == "grad_q"
                             else k_auto.shape
-                            if grad_name == "dK"
+                            if grad_name == "grad_k"
                             else v_auto.shape
                         ),
                     )
@@ -122,20 +122,20 @@ class FlashAttentionLongTests(unittest.TestCase):
                     key_padding_mask=key_padding_mask,
                     config=self.config,
                 )
-                self.assertEqual(manual.dQ.shape, q.shape)
-                self.assertEqual(manual.dK.shape, k.shape)
-                self.assertEqual(manual.dV.shape, v.shape)
+                self.assertEqual(manual.grad_q.shape, q.shape)
+                self.assertEqual(manual.grad_k.shape, k.shape)
+                self.assertEqual(manual.grad_v.shape, v.shape)
                 self.assertTrue(
-                    torch.isfinite(manual.dQ).all(),
-                    msg=f"{version_name} manual dQ produced non-finite values",
+                    torch.isfinite(manual.grad_q).all(),
+                    msg=f"{version_name} manual grad_q produced non-finite values",
                 )
                 self.assertTrue(
-                    torch.isfinite(manual.dK).all(),
-                    msg=f"{version_name} manual dK produced non-finite values",
+                    torch.isfinite(manual.grad_k).all(),
+                    msg=f"{version_name} manual grad_k produced non-finite values",
                 )
                 self.assertTrue(
-                    torch.isfinite(manual.dV).all(),
-                    msg=f"{version_name} manual dV produced non-finite values",
+                    torch.isfinite(manual.grad_v).all(),
+                    msg=f"{version_name} manual grad_v produced non-finite values",
                 )
 
     def test_fa3_fp8_long_forward(self) -> None:

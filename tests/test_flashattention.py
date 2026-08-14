@@ -112,9 +112,9 @@ def test_forward_backward_match_reference(
         key_padding_mask=mask,
         config=TILED_CONFIG,
     )
-    assert (bwd.dQ.float() - ref_dq.float()).abs().max().item() <= tol
-    assert (bwd.dK.float() - ref_dk.float()).abs().max().item() <= tol
-    assert (bwd.dV.float() - ref_dv.float()).abs().max().item() <= tol
+    assert (bwd.grad_q.float() - ref_dq.float()).abs().max().item() <= tol
+    assert (bwd.grad_k.float() - ref_dk.float()).abs().max().item() <= tol
+    assert (bwd.grad_v.float() - ref_dv.float()).abs().max().item() <= tol
 
 
 @pytest.mark.parametrize("version", VERSIONS, ids=VERSION_IDS)

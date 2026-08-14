@@ -34,13 +34,13 @@ from .common import (
     ForwardResult,
     TiledAttentionFunction,
     assemble_forward_result,
-    backward_step,
     block_scores_and_mask,
-    compute_local_statistics,
+    block_slices,
+    compute_block_gradients,
+    compute_block_softmax,
     init_block_state,
     init_gradients,
-    iter_block_slices,
-    merge_state_unnormalized,
+    merge_unnormalized_block,
     prepare_inputs,
 )
 
@@ -133,7 +133,7 @@ def _correction_merge(
         )
         requires_rescale = requires_rescale & ~selective_skip
 
-    merged_out_acc, merged_normalizer, merged_row_max = merge_state_unnormalized(
+    merged_out_acc, merged_normalizer, merged_row_max = merge_unnormalized_block(
         out_acc_block,
         normalizer_block,
         row_max_block,
@@ -195,8 +195,8 @@ def forward(
         key_padding_mask=key_padding_mask,
     )
 
-    q_slices = iter_block_slices(q.shape[2], config.block_size_q)
-    k_slices = iter_block_slices(k.shape[2], config.block_size_kv)
+    q_slices = block_slices(q.shape[2], config.block_size_q)
+    k_slices = block_slices(k.shape[2], config.block_size_kv)
     scale_log2 = 1.0 / math.log(2.0)
     rescale_threshold = _fa4_rescale_threshold(q.dtype)
     # Each scheduled wave owns one query tile and iterates across the K/V tiles
@@ -234,7 +234,7 @@ def forward(
         for task, scores, valid_mask in main_outputs:
             # Softmax role: update the per-row statistics and build the local
             # weighted-value contribution from the score tile.
-            block_max, block_sum, weighted_values = compute_local_statistics(
+            block_max, block_sum, weighted_values = compute_block_softmax(
                 scores,
                 valid_mask,
                 v[:, :, task.k_slice, :],
@@ -308,7 +308,7 @@ def backward(
         causal, key_padding_mask, config: Must match the forward call.
 
     Returns:
-        A `BackwardResult` with the gradients dQ, dK and dV.
+        A `BackwardResult` with the gradients grad_q, grad_k and grad_v.
     """
     config = config or FlashAttentionConfig()
     q, k, key_padding_mask = prepare_inputs(
@@ -318,9 +318,9 @@ def backward(
         key_padding_mask=key_padding_mask,
     )
 
-    dQ, dK, dV = init_gradients(q, k, v)
-    q_slices = iter_block_slices(q.shape[2], config.block_size_q)
-    k_slices = iter_block_slices(k.shape[2], config.block_size_kv)
+    grad_q, grad_k, grad_v = init_gradients(q, k, v)
+    q_slices = block_slices(q.shape[2], config.block_size_q)
+    k_slices = block_slices(k.shape[2], config.block_size_kv)
     schedule = _build_schedule(q_slices, k_slices)
     scheduler_trace: list[dict[str, Any]] = []
 
@@ -343,7 +343,7 @@ def backward(
         for task, scores, valid_mask in main_outputs:
             # The derivative formulas remain exact attention derivatives. The FA4
             # distinction here is the role/schedule decomposition, not new math.
-            local_dQ, local_dK, local_dV = backward_step(
+            local_grad_q, local_grad_k, local_grad_v = compute_block_gradients(
                 q_block=q[:, :, task.q_slice, :],
                 k_block=k[:, :, task.k_slice, :],
                 v_block=v[:, :, task.k_slice, :],
@@ -353,12 +353,12 @@ def backward(
                 valid_mask=valid_mask,
                 lse_block=forward_result.lse[:, :, task.q_slice, :],
             )
-            softmax_outputs.append((task, local_dQ, local_dK, local_dV))
+            softmax_outputs.append((task, local_grad_q, local_grad_k, local_grad_v))
 
-        for task, local_dQ, local_dK, local_dV in softmax_outputs:
-            dQ[:, :, task.q_slice, :] += local_dQ
-            dK[:, :, task.k_slice, :] += local_dK
-            dV[:, :, task.k_slice, :] += local_dV
+        for task, local_grad_q, local_grad_k, local_grad_v in softmax_outputs:
+            grad_q[:, :, task.q_slice, :] += local_grad_q
+            grad_k[:, :, task.k_slice, :] += local_grad_k
+            grad_v[:, :, task.k_slice, :] += local_grad_v
             scheduler_trace.append(
                 {
                     "wave_id": task.wave_id,
@@ -368,9 +368,9 @@ def backward(
             )
 
     return BackwardResult(
-        dQ=dQ.to(q.dtype),
-        dK=dK.to(k.dtype),
-        dV=dV.to(v.dtype),
+        grad_q=grad_q.to(q.dtype),
+        grad_k=grad_k.to(k.dtype),
+        grad_v=grad_v.to(v.dtype),
         debug_state={"scheduler_trace": scheduler_trace}
         if config.keep_debug_state
         else {},

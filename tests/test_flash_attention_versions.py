@@ -142,12 +142,12 @@ class FlashAttentionVersionTests(unittest.TestCase):
                 )
 
                 for computed, expected, grad_name in (
-                    (flash_grads[0], ref_grads[0], "dQ"),
-                    (flash_grads[1], ref_grads[1], "dK"),
-                    (flash_grads[2], ref_grads[2], "dV"),
-                    (manual.dQ, ref_grads[0], "manual dQ"),
-                    (manual.dK, ref_grads[1], "manual dK"),
-                    (manual.dV, ref_grads[2], "manual dV"),
+                    (flash_grads[0], ref_grads[0], "grad_q"),
+                    (flash_grads[1], ref_grads[1], "grad_k"),
+                    (flash_grads[2], ref_grads[2], "grad_v"),
+                    (manual.grad_q, ref_grads[0], "manual grad_q"),
+                    (manual.grad_k, ref_grads[1], "manual grad_k"),
+                    (manual.grad_v, ref_grads[2], "manual grad_v"),
                 ):
                     self.assertTrue(
                         torch.allclose(computed, expected, atol=1e-5, rtol=1e-4),

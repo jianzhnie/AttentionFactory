@@ -27,13 +27,13 @@ from .common import (
     ForwardResult,
     TiledAttentionFunction,
     assemble_forward_result,
-    backward_step,
     block_scores_and_mask,
-    compute_local_statistics,
+    block_slices,
+    compute_block_gradients,
+    compute_block_softmax,
     init_block_state,
     init_gradients,
-    iter_block_slices,
-    merge_state_unnormalized,
+    merge_unnormalized_block,
     prepare_inputs,
 )
 
@@ -75,8 +75,8 @@ def forward(
         key_padding_mask=key_padding_mask,
     )
 
-    q_slices = iter_block_slices(q.shape[2], config.block_size_q)
-    k_slices = iter_block_slices(k.shape[2], config.block_size_kv)
+    q_slices = block_slices(q.shape[2], config.block_size_q)
+    k_slices = block_slices(k.shape[2], config.block_size_kv)
     # FA2 changes the ownership model: the outer loop now "owns" one query tile
     # and streams every K/V tile through it. This mirrors split-Q style work
     # partitioning, which improves occupancy when sequence length is large.
@@ -105,7 +105,7 @@ def forward(
                 causal=causal,
                 key_padding_mask=key_padding_mask,
             )
-            block_max, block_sum, weighted_values = compute_local_statistics(
+            block_max, block_sum, weighted_values = compute_block_softmax(
                 scores,
                 valid_mask,
                 v[:, :, k_slice, :],
@@ -117,7 +117,7 @@ def forward(
                 out_acc_blocks[owner_id],
                 normalizer_blocks[owner_id],
                 row_max_blocks[owner_id],
-            ) = merge_state_unnormalized(
+            ) = merge_unnormalized_block(
                 out_acc_blocks[owner_id],
                 normalizer_blocks[owner_id],
                 row_max_blocks[owner_id],
@@ -161,7 +161,7 @@ def backward(
 
     Uses the same exact attention derivatives as FA1; the difference is the
     orchestration: gradients stay local to the owning query tile until the
-    finished dQ tile is written back.
+    finished grad_q tile is written back.
 
     Args:
         q, k, v: The same tensors the forward pass was called with.
@@ -171,7 +171,7 @@ def backward(
         causal, key_padding_mask, config: Must match the forward call.
 
     Returns:
-        A `BackwardResult` with the gradients dQ, dK and dV.
+        A `BackwardResult` with the gradients grad_q, grad_k and grad_v.
     """
     config = config or FlashAttentionConfig()
     q, k, key_padding_mask = prepare_inputs(
@@ -181,16 +181,16 @@ def backward(
         key_padding_mask=key_padding_mask,
     )
 
-    dQ, dK, dV = init_gradients(q, k, v)
-    q_slices = iter_block_slices(q.shape[2], config.block_size_q)
-    k_slices = iter_block_slices(k.shape[2], config.block_size_kv)
+    grad_q, grad_k, grad_v = init_gradients(q, k, v)
+    q_slices = block_slices(q.shape[2], config.block_size_q)
+    k_slices = block_slices(k.shape[2], config.block_size_kv)
     owner_trace: list[dict[str, int]] = []
 
     for owner_id, q_slice in enumerate(q_slices):
         q_block = q[:, :, q_slice, :]
         # Keep gradients local to the owning query tile first, then write the
-        # finished dQ tile back once all K/V tiles have been processed.
-        dQ_block = torch.zeros_like(q_block, dtype=torch.float32)
+        # finished grad_q tile back once all K/V tiles have been processed.
+        grad_q_block = torch.zeros_like(q_block, dtype=torch.float32)
 
         for k_slice in k_slices:
             k_block = k[:, :, k_slice, :]
@@ -205,7 +205,7 @@ def backward(
             )
             # The derivative formulas are the same exact attention derivatives as
             # FA1. The educational difference is purely in the orchestration.
-            local_dQ, local_dK, local_dV = backward_step(
+            local_grad_q, local_grad_k, local_grad_v = compute_block_gradients(
                 q_block=q_block,
                 k_block=k_block,
                 v_block=v_block,
@@ -215,17 +215,17 @@ def backward(
                 valid_mask=valid_mask,
                 lse_block=forward_result.lse[:, :, q_slice, :],
             )
-            dQ_block += local_dQ
-            dK[:, :, k_slice, :] += local_dK
-            dV[:, :, k_slice, :] += local_dV
+            grad_q_block += local_grad_q
+            grad_k[:, :, k_slice, :] += local_grad_k
+            grad_v[:, :, k_slice, :] += local_grad_v
 
-        dQ[:, :, q_slice, :] = dQ_block
+        grad_q[:, :, q_slice, :] = grad_q_block
         owner_trace.append({"owner_id": owner_id, "num_kv_tiles": len(k_slices)})
 
     return BackwardResult(
-        dQ=dQ.to(q.dtype),
-        dK=dK.to(k.dtype),
-        dV=dV.to(v.dtype),
+        grad_q=grad_q.to(q.dtype),
+        grad_k=grad_k.to(k.dtype),
+        grad_v=grad_v.to(v.dtype),
         debug_state={"query_owner_trace": owner_trace}
         if config.keep_debug_state
         else {},

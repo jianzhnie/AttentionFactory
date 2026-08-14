@@ -48,9 +48,9 @@ def test_attention_is_differentiable(version):
         q.detach(), k.detach(), v.detach(), grad_out, fwd, causal=True, config=CONFIG
     )
     torch.testing.assert_close(out.detach(), fwd.out)
-    torch.testing.assert_close(q.grad, manual.dQ)
-    torch.testing.assert_close(k.grad, manual.dK)
-    torch.testing.assert_close(v.grad, manual.dV)
+    torch.testing.assert_close(q.grad, manual.grad_q)
+    torch.testing.assert_close(k.grad, manual.grad_k)
+    torch.testing.assert_close(v.grad, manual.grad_v)
 
 
 @pytest.mark.parametrize("version", VERSIONS)

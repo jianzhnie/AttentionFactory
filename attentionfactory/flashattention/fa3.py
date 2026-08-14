@@ -35,13 +35,13 @@ from .common import (
     ForwardResult,
     TiledAttentionFunction,
     assemble_forward_result,
-    backward_step,
+    block_slices,
     build_block_mask,
-    compute_local_statistics,
+    compute_block_gradients,
+    compute_block_softmax,
     init_block_state,
     init_gradients,
-    iter_block_slices,
-    merge_state_unnormalized,
+    merge_unnormalized_block,
     prepare_inputs,
     scaled_scores,
 )
@@ -191,8 +191,8 @@ def forward(
         key_padding_mask=key_padding_mask,
     )
 
-    q_slices = iter_block_slices(q.shape[2], config.block_size_q)
-    k_slices = iter_block_slices(k.shape[2], config.block_size_kv)
+    q_slices = block_slices(q.shape[2], config.block_size_q)
+    k_slices = block_slices(k.shape[2], config.block_size_kv)
     # The buffers stand in for ping-pong shared-memory stages. FA3's practical
     # gain comes from overlapping movement and compute; we preserve that mental
     # model without introducing actual asynchronous execution here.
@@ -248,7 +248,7 @@ def forward(
             )
             # Stage 2: update local softmax statistics and form the unnormalized
             # tile contribution for P @ V.
-            block_max, block_sum, weighted_values = compute_local_statistics(
+            block_max, block_sum, weighted_values = compute_block_softmax(
                 scores,
                 valid_mask,
                 active_buffer.v_block,
@@ -258,7 +258,7 @@ def forward(
                 out_acc_blocks[q_tile_id],
                 normalizer_blocks[q_tile_id],
                 row_max_blocks[q_tile_id],
-            ) = merge_state_unnormalized(
+            ) = merge_unnormalized_block(
                 out_acc_blocks[q_tile_id],
                 normalizer_blocks[q_tile_id],
                 row_max_blocks[q_tile_id],
@@ -321,7 +321,7 @@ def backward(
 
     Mirrors the forward's producer/consumer structure: consume one active
     tile, prepare the next one, then fold the local derivatives into the
-    running dQ / dK / dV accumulators.
+    running grad_q / grad_k / grad_v accumulators.
 
     Args:
         q, k, v: The same tensors the forward pass was called with.
@@ -331,7 +331,7 @@ def backward(
         causal, key_padding_mask, config: Must match the forward call.
 
     Returns:
-        A `BackwardResult` with the gradients dQ, dK and dV.
+        A `BackwardResult` with the gradients grad_q, grad_k and grad_v.
 
     Raises:
         ValueError: If ``config.fp8`` is True. Like the official FA3 release,
@@ -347,9 +347,9 @@ def backward(
         key_padding_mask=key_padding_mask,
     )
 
-    dQ, dK, dV = init_gradients(q, k, v)
-    q_slices = iter_block_slices(q.shape[2], config.block_size_q)
-    k_slices = iter_block_slices(k.shape[2], config.block_size_kv)
+    grad_q, grad_k, grad_v = init_gradients(q, k, v)
+    q_slices = block_slices(q.shape[2], config.block_size_q)
+    k_slices = block_slices(k.shape[2], config.block_size_kv)
     pipeline_trace: list[dict[str, Any]] = []
 
     for q_tile_id, q_slice in enumerate(q_slices):
@@ -359,8 +359,8 @@ def backward(
         q_block = q[:, :, q_slice, :]
         # Backward keeps the same staged interpretation: consume one active tile,
         # optionally prepare the next tile, then fold the local derivatives into
-        # the running dQ / dK / dV accumulators.
-        dQ_block = torch.zeros_like(q_block, dtype=torch.float32)
+        # the running grad_q / grad_k / grad_v accumulators.
+        grad_q_block = torch.zeros_like(q_block, dtype=torch.float32)
         active_buffer = _load_tile(
             buffer_id=0,
             tile_id=0,
@@ -395,7 +395,7 @@ def backward(
                 causal=causal,
                 key_padding_mask=key_padding_mask,
             )
-            local_dQ, local_dK, local_dV = backward_step(
+            local_grad_q, local_grad_k, local_grad_v = compute_block_gradients(
                 q_block=q_block,
                 k_block=active_buffer.k_block,
                 v_block=active_buffer.v_block,
@@ -405,9 +405,9 @@ def backward(
                 valid_mask=valid_mask,
                 lse_block=forward_result.lse[:, :, q_slice, :],
             )
-            dQ_block += local_dQ
-            dK[:, :, active_buffer.tile_slice, :] += local_dK
-            dV[:, :, active_buffer.tile_slice, :] += local_dV
+            grad_q_block += local_grad_q
+            grad_k[:, :, active_buffer.tile_slice, :] += local_grad_k
+            grad_v[:, :, active_buffer.tile_slice, :] += local_grad_v
             pipeline_trace.append(
                 {
                     "q_tile": q_tile_id,
@@ -419,12 +419,12 @@ def backward(
             if active_buffer is None:
                 break
 
-        dQ[:, :, q_slice, :] = dQ_block
+        grad_q[:, :, q_slice, :] = grad_q_block
 
     return BackwardResult(
-        dQ=dQ.to(q.dtype),
-        dK=dK.to(k.dtype),
-        dV=dV.to(v.dtype),
+        grad_q=grad_q.to(q.dtype),
+        grad_k=grad_k.to(k.dtype),
+        grad_v=grad_v.to(v.dtype),
         debug_state={"pipeline_trace": pipeline_trace}
         if config.keep_debug_state
         else {},

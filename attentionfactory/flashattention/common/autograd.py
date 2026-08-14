@@ -79,4 +79,4 @@ class TiledAttentionFunction(torch.autograd.Function):
         )
         # Gradient slots for causal/key_padding_mask/config and the two
         # implementation callables are unused.
-        return grads.dQ, grads.dK, grads.dV, None, None, None, None, None
+        return grads.grad_q, grads.grad_k, grads.grad_v, None, None, None, None, None

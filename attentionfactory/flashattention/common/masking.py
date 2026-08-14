@@ -42,7 +42,7 @@ def build_block_mask(
 
     ``q_slice`` / ``k_slice`` locate the tile within the full sequences and
     must have concrete ``start``/``stop`` values (as produced by
-    `iter_block_slices`).
+    `block_slices`).
 
     Returns ``None`` when no masking applies at all, so callers can skip the
     masking path entirely. When ``kv_len > q_len`` the causal diagonal is
