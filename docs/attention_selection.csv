@@ -1,0 +1,42 @@
+series,version,release_date,open_source,base_architecture,attention_type,context_window,kv_optimization,key_optimization,source
+Qwen,Qwen2.5,2024-09,yes,Dense 0.5B-72B,GQA,32K-128K,GQA,YaRN,RoPE base 1M,official
+Qwen,Qwen3-Next-80B-A3B,2025-09,yes,MoE 80B/3B,Gated DeltaNet + Gated Attention,256K-1M,Linear state + GQA,3:1 hybrid,official
+Qwen,Qwen3.8-27B,2026-08,yes,Dense 27B,Gated DeltaNet + Gated Attention,262K-1M,Linear state + GQA,Multimodal,official
+Qwen,Qwen3.8-2.4T-A95B,2026-08,yes,MoE 2.4T/95B,Gated DeltaNet + Gated Attention,262K-1M,Linear state + GQA,512 experts top10,official
+DeepSeek,DeepSeek-V2,2024-05,yes,MoE 236B/21B,MLA,128K,93.3% KV reduction,DeepSeekMoE,official
+DeepSeek,DeepSeek-V3,2024-12,yes,MoE 671B/37B,MLA,128K,Low-rank KV,MTP,official
+DeepSeek,DeepSeek-V4-Pro-0813,2026-08,yes,MoE 1.6T/49B,MLA + CSA + HCA,1M,10% KV vs V3.2,FP4 indexer,DSpark,official
+DeepSeek,DeepSeek-V4-Flash-0731,2026-07,yes,MoE 284B/13B,MLA + CSA + HCA,1M,7% KV vs V3.2,10% FLOPs vs V3.2,official
+GLM,ChatGLM2-6B,2023-06,yes,Dense 6B,MQA,8K-32K,MQA,Small model KV compression,official
+GLM,GLM-4-9B,2024-06,yes,Dense 9B,GQA,128K,GQA,Long context,official
+GLM,GLM-4.7,2025-12,yes,MoE,GQA,202K,GQA 96Q/8KV,Large MoE,official
+GLM,GLM-5,2026-02,yes,MoE 744B/40B,MLA + DSA,202K,kv_lora_rank=512,DSA,official
+GLM,GLM-5.2,2026-06,yes,MoE,MLA + DSA + IndexShare,1M,kv_lora_rank=512,IndexShare 2.9x FLOPs,official
+Kimi,Kimi K2,2025-07,yes,MoE 1T/32B,MLA,256K,MLA,1T MoE,official
+Kimi,Kimi Linear,2025-10,yes,MoE 48B/3B,KDA + Gated MLA,1M,75% KV reduction,6x decode throughput,official
+Kimi,Kimi K3,2026-06,yes,MoE 2.8T/104B,69 KDA + 24 Gated MLA,1M,Linear state + MLA,AttnRes,Stable LatentMoE,official
+MiniMax,MiniMax-Text-01,2025-01,yes,MoE 456B/45.9B,Lightning + Softmax Attention,1M,Linear state,Hybrid attention,official
+MiniMax,MiniMax-M2,2025-10,yes,MoE,GQA,192K,GQA,Full attention regression,official
+MiniMax,MiniMax-M2.7,2026-04,yes,MoE,GQA,200K,GQA 48Q/8KV,256 experts top8,official
+MiniMax,MiniMax-M3,2026-06,yes,MoE 428B/23B,GQA + MSA,1M,Sparse blocks,28.4x attention compute reduction,official
+Llama,Llama 2 70B,2023-07,yes,Dense 70B,GQA,4K,GQA 8 KV,First Llama GQA,official
+Llama,Llama 3.1,2024-07,yes,Dense 8B-405B,GQA,128K,GQA,RoPE base 500K,official
+Llama,Llama 4 Scout,2025-04,yes,MoE 109B/17B,GQA + chunked local + NoPE,10M,GQA,16 experts,official
+Llama,Llama 4 Maverick,2025-04,yes,MoE 400B/17B,GQA + chunked local + NoPE,1M,GQA,128 experts,official
+GPT,GPT-3,2020,yes,Dense 175B,MHA,2048,MHA,Standard decoder,official
+GPT,GPT-4o,2024-05,no,Not disclosed,Not disclosed,128K,Not disclosed,Multimodal,official
+GPT,GPT-5.6 Sol,2026,no,Not disclosed,Not disclosed,Not disclosed,Not disclosed,Reasoning/agent,official-cited
+Gemini,Gemini 1.5 Pro,2024-02,no,Not disclosed,Not disclosed,1M-2M,Not disclosed,Long context,official
+Gemini,Gemini 3.1 Pro Preview,2026,no,Not disclosed,Not disclosed,Not disclosed,Not disclosed,Official benchmark references,official-cited
+Claude,Claude 3.5 Sonnet,2024-06,no,Not disclosed,Not disclosed,200K,Not disclosed,System context processing,official
+Claude,Claude Fable 5,2026-06,no,Not disclosed,Not disclosed,Not disclosed,Not disclosed,Safety controls,official
+Mistral,Mistral 7B,2023-09,yes,Dense 7B,GQA + SWA,8K,GQA,rolling cache,official
+Mistral,Mixtral 8x7B,2023-12,yes,MoE 46.7B/12.9B,GQA,32K,GQA,8 experts top2,official
+Mistral,Mistral-Large-3,2025-12,yes,MoE 673B/39B,MHA,256K,MHA,128 experts top4,official
+Mistral,Mistral-Small-4,2026-01,yes,MoE,MLA-like,1M,kv_lora_rank=256,MoE top4,official
+Gemma,Gemma 2,2024-06,yes,Dense 2B/9B/27B,GQA + local/global,8K,GQA,4096 window,official
+Gemma,Gemma 4 12B,2026-05,yes,Dense 12B,GQA + local/global,256K,Unified K/V,p-RoPE,official
+Yi,Yi-34B-200K,2023-12,yes,Dense 34B,GQA,200K,GQA,Dynamic NTK,official
+Falcon,Falcon 40B,2023-05,yes,Dense 40B,MQA + ALiBi,2K,MQA,ALiBi,official
+Grok,Grok-1,2024-03,yes,MoE 314B,25% layers attention,8K,8 KV heads,8 experts top2,official
+MiniCPM,MiniCPM3-4B,2024-09,yes,Dense 4B,MLA,32K,MLA,Small model MLA,official
