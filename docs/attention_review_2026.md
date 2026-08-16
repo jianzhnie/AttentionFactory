@@ -587,6 +587,24 @@ Baichuan 早期使用独立 MHA 架构，2025 年后的 M 系列直接基于 Qwe
   - `AttentionResidual`，Kimi K3 Attention Residual 的简化教学版本。
 - `attentionfactory/multi_token_prediction.py`
   - `MultiTokenPredictionHead`，DeepSeek/Nemotron 风格多 Token 预测头。
+- `attentionfactory/ring_attention.py`
+  - `ring_attention` 与 `RingAttention`，分块在线 Softmax 精确注意力。
+- `attentionfactory/compressed_sparse_attention.py`
+  - `CompressedSparseAttention`，CSA 风格 KV 压缩 + block sparse 选择。
+- `attentionfactory/alibi_attention.py`
+  - `AlibiAttention`，GQA 与 ALiBi additive bias 集成。
+- `attentionfactory/flash_mla.py`
+  - `FlashMLA`，MLA 推理接口模拟。
+- `attentionfactory/speculative.py`
+  - `SpeculativeDecoder`，draft-target 投机解码教学接口。
+- `attentionfactory/ssm.py`
+  - `Mamba2Layer`，简化固定状态 SSM 层。
+- `attentionfactory/kv_offload.py`
+  - `OnDiskKVStore`，on-disk KV cache 接口模拟。
+- `attentionfactory/positional.py` 扩展
+  - `LongRoPEScaledRotaryEmbedding`、`TwoDimensionalPositionEmbedding`。
+- `attentionfactory/moe.py` 扩展
+  - `load_balance_loss`，Top-k MoE 辅助负载均衡损失。
 - `attentionfactory/norm.py`
   - `RMSNorm`，Llama/Qwen/Mistral 等模型使用的归一化层。
 - `attentionfactory/ffn.py`
@@ -607,6 +625,8 @@ Baichuan 早期使用独立 MHA 架构，2025 年后的 M 系列直接基于 Qwe
   - 覆盖 Gated DeltaNet、注册表、CausalLMModel 的 Dense/MoE/Hybrid 组合与梯度。
 - `tests/test_extra_modules.py`
   - 覆盖 Lightning Attention、LatentMoE、Attention Residual、Block Sparse Indexer 与 MTP。
+- `tests/test_gap_modules.py`
+  - 覆盖 Ring Attention、CSA、ALiBi Attention、FlashMLA、投机解码、Mamba2Layer、LongRoPE/2D、On-Disk KV 与 load-balance loss。
 - 修改 `attentionfactory/__init__.py` 导出新模块。
 
 ### 7.2 设计说明

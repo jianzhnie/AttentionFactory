@@ -62,13 +62,16 @@ def ring_attention(
         normalizer = torch.zeros(
             batch, heads, q_chunk.size(2), 1, device=q.device, dtype=q.dtype
         )
+        k_start = 0
         for k_chunk, v_chunk in zip(k_chunks, v_chunks, strict=True):
             scores = torch.einsum("bhid,bhjd->bhij", q_chunk, k_chunk) * scale
             if causal:
                 q_pos = torch.arange(
                     q_start, q_start + q_chunk.size(2), device=q.device
                 ).view(-1, 1)
-                k_pos = torch.arange(k_chunk.size(2), device=q.device).view(1, -1)
+                k_pos = torch.arange(
+                    k_start, k_start + k_chunk.size(2), device=q.device
+                ).view(1, -1)
                 scores = scores.masked_fill(
                     (q_pos + (kv_len - q_len)) < k_pos, float("-inf")
                 )
@@ -90,6 +93,7 @@ def ring_attention(
             )
             out = old_scale * out + probabilities @ v_chunk
             row_max = new_max
+            k_start += k_chunk.size(2)
 
         safe_normalizer = normalizer.clamp_min(torch.finfo(normalizer.dtype).eps)
         outputs.append(out / safe_normalizer)
