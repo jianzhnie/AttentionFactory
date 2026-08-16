@@ -54,6 +54,15 @@
 - 2025 年：Qwen3-Next 和 Kimi Linear 验证 Gated DeltaNet/KDA 线性注意力；Llama 4 和 Gemma 3 验证 MoE + 局部注意力。
 - 2026 年：DeepSeek-V4、GLM-5.2、MiniMax M3 把稀疏/压缩注意力推到 1M 上下文生产场景；Kimi K3 达到 2.8T 参数。
 
+## 信息核验记录
+
+- GLM-5.1 上下文已根据官方配置从 1M 修正为 202,752。
+- Zamba-7B 的 Attention 核心修正为 Mamba + Shared Attention，避免与 Zamba2 的 Mamba2 混淆。
+- Hunyuan-A13B、Hy3、Hy-MT2、Step-3.7、MiMo-V2.5-Pro、Zamba2、Arctic 均以官方 HF 配置或官方模型卡核验。
+- Step-3.7-Flash 的 KV head 数量未在顶层配置完整公开，本文按“GQA 类”表述，不写成确定值。
+- GPT、Gemini、Claude 等闭源模型的 Attention 细节继续标注“官方未完全披露”，不将推测写成事实。
+- 文中量化数字均来自对应技术报告、官方模型卡或论文；不同测试口径不直接横向比较。
+
 ---
 
 ## 二、模型系列逐一分析
@@ -375,7 +384,7 @@ Zamba 是 Mamba2 与共享 Attention 混合的代表性开源系列。
 
 | 版本 | 时间 | 开源 | 基础架构 | Attention 核心 | 上下文 | 关键优化 |
 |------|------|------|----------|----------------|--------|----------|
-| Zamba-7B | 2024 | 是 | Mamba + Attention Hybrid | Mamba2 + Shared Attention | 4K | 共享 Attention 权重 |
+| Zamba-7B | 2024 | 是 | Mamba + Attention Hybrid | Mamba + Shared Attention | 4K | 共享 Attention 权重 |
 | Zamba2-7B-Instruct-v2 | 2025 | 是 | Mamba2 + Attention Hybrid | Mamba2 + Shared Attention | 4K，可扩展 16K | LoRA 投影差异化共享块 |
 
 **核验说明**：Zamba2-7B 官方配置为 `zamba2`，81 层，32 heads；模型卡明确是 Mamba2 + transformer blocks 混合，并支持通过 `use_long_context=True` 扩展到 16K。
