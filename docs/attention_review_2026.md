@@ -575,18 +575,26 @@ Baichuan 早期使用独立 MHA 架构，2025 年后的 M 系列直接基于 Qwe
   - `ExpertFFN`、`TopKRouter`、`MixtureOfExperts`、`DeepSeekMoE`，覆盖 Top-k 路由、共享专家与 DeepSeek 风格 MoE。
 - `attentionfactory/hybrid_attention.py`
   - `HybridAttention`，按层索引在线性注意力和 GQA 全注意力之间路由，复现 Qwen3-Next/Kimi 的 3:1 混合模式。
+- `attentionfactory/gated_delta_net.py`
+  - `GatedDeltaNet`，门控 Delta 规则线性注意力的教学实现。
 - `attentionfactory/norm.py`
   - `RMSNorm`，Llama/Qwen/Mistral 等模型使用的归一化层。
 - `attentionfactory/ffn.py`
   - `SwiGLUFFN` 与 `FeedForward`，覆盖主流 Dense 和 MoE 专家网络。
 - `attentionfactory/transformer.py`
   - `TransformerBlock`，组合可插拔 Attention、RMSNorm 和 FFN/MoE。
+- `attentionfactory/model.py`
+  - `CausalLMModel`，组合 Embedding、位置编码、Transformer Block、RMSNorm 与 LM Head。
+- `attentionfactory/registry.py`
+  - `build_attention`、`build_positional_encoding`、`list_attentions`，统一模块选择入口。
 - `tests/test_extended_attention.py`
   - 覆盖 shape、梯度、确定性、窗口/块稀疏掩码、PagedAttention 与稠密注意力一致性。
 - `tests/test_positional_and_moe.py`
   - 覆盖 RoPE 范数保持、YaRN/NTK 有限性、ALiBi 掩码、路由权重归一化、MoE 与 DeepSeekMoE 梯度。
 - `tests/test_blocks_and_hybrid.py`
   - 覆盖 Hybrid Attention 路由、Partial RoPE、Position Interpolation、RMSNorm、SwiGLU、Transformer Block 与 MoE FFN。
+- `tests/test_model_registry_gated.py`
+  - 覆盖 Gated DeltaNet、注册表、CausalLMModel 的 Dense/MoE/Hybrid 组合与梯度。
 - 修改 `attentionfactory/__init__.py` 导出新模块。
 
 ### 7.2 设计说明

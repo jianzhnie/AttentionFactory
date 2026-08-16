@@ -121,7 +121,7 @@ class GatedDeltaNet(BaseAttention):
                 safe_denominator = denominator.clamp_min(
                     torch.finfo(denominator.dtype).eps
                 )
-                output_t = output_t / safe_denominator.unsqueeze(-1)
+                output_t = output_t / safe_denominator
             outputs.append(output_t)
 
         output = torch.stack(outputs, dim=2)

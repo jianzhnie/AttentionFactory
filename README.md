@@ -14,9 +14,11 @@
   - **Block Sparse Attention** - 块稀疏注意力
   - **Linear Attention** - 线性注意力
   - **Hybrid Attention** - 线性/全量注意力按层交错
+  - **Gated DeltaNet** - 门控 Delta 规则的线性注意力
 - **位置编码与长上下文扩展**：RoPE、YaRN、Dynamic NTK、ALiBi
 - **MoE 模块**：Top-k Router、Expert FFN、Mixture-of-Experts、DeepSeek-style Shared Expert MoE
 - **Transformer 基础模块**：RMSNorm、SwiGLU FFN、可插拔 Transformer Block
+- **模型级组合**：CausalLMModel 与 Attention/Positional 注册表
 - **FlashAttention 教学实现**：`flashattention` 子包包含 FA1–FA4 四个版本的纯 PyTorch 在线 softmax 分块实现（含 forward/backward），用于理解各版本算法结构的演进
 - **PagedAttention 接口模拟**：提供固定块 KV cache、block table 与稠密 gather 的教学实现，便于理解 vLLM 的系统层优化
 - **支持 Attention Mask**：支持广播的注意力掩码（padding mask 或完整 mask）
@@ -280,6 +282,29 @@ x = torch.randn(2, 32, 256)
 y = block(x, layer_index=3)
 ```
 
+### 13. Gated DeltaNet 与 CausalLMModel
+
+```python
+import torch
+from attentionfactory import GatedDeltaNet, CausalLMModel
+
+gdn = GatedDeltaNet(hidden_size=256, num_heads=8, feature_dim=64)
+x = torch.randn(2, 32, 256)
+y = gdn(x)
+
+model = CausalLMModel(
+    vocab_size=1000,
+    hidden_size=256,
+    num_layers=4,
+    num_heads=8,
+    intermediate_size=512,
+    attention_name="hybrid",
+    use_moe=True,
+)
+input_ids = torch.randint(0, 1000, (2, 32))
+logits = model(input_ids)
+```
+
 ## 使用 Attention Mask
 
 掩码遵循 `1（True）= 保留，0（False）= 屏蔽` 约定，并对注意力分数广播，因此 padding mask 和完整 mask 都支持：
@@ -323,9 +348,12 @@ AttentionFactory/
 │   ├── positional.py                # RoPE / YaRN / NTK / ALiBi
 │   ├── moe.py                       # Top-k Router 与 MoE
 │   ├── hybrid_attention.py          # 线性/全量混合 Attention
+│   ├── gated_delta_net.py           # Gated DeltaNet
 │   ├── norm.py                      # RMSNorm
 │   ├── ffn.py                       # SwiGLU / FFN
 │   ├── transformer.py               # Transformer Block
+│   ├── model.py                     # CausalLMModel
+│   ├── registry.py                  # Attention / Positional 注册表
 │   └── flashattention/      # FlashAttention v1-v4 教学实现
 │       ├── fa1.py ... fa4.py
 │       └── common/          # 共享的在线 softmax / 掩码 / 分块原语
