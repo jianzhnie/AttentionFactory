@@ -7,6 +7,7 @@ import torch
 
 from attentionfactory import (
     AlibiAttention,
+    CausalLMModel,
     CompressedSparseAttention,
     FlashMLA,
     LongRoPEScaledRotaryEmbedding,
@@ -175,3 +176,43 @@ def test_gap_modules_in_registry():
         ),
         CompressedSparseAttention,
     )
+
+
+def test_causal_lm_with_longrope():
+    factors = [1.0] * 16
+    model = CausalLMModel(
+        vocab_size=32,
+        hidden_size=32,
+        num_layers=1,
+        num_heads=4,
+        intermediate_size=64,
+        max_seq_len=32,
+        attention_name="mha",
+        positional="longrope",
+        positional_kwargs={
+            "original_max_position_embeddings": 16,
+            "long_factor": factors,
+            "short_factor": factors,
+        },
+    )
+    logits = model(torch.randint(0, 32, (2, 24)))
+    assert logits.shape == (2, 24, 32)
+
+
+def test_causal_lm_with_2d_position():
+    model = CausalLMModel(
+        vocab_size=32,
+        hidden_size=32,
+        num_layers=1,
+        num_heads=4,
+        intermediate_size=64,
+        max_seq_len=16,
+        attention_name="mha",
+        positional="2d",
+        positional_kwargs={
+            "max_blocks": 4,
+            "max_positions_per_block": 4,
+        },
+    )
+    logits = model(torch.randint(0, 32, (2, 8)))
+    assert logits.shape == (2, 8, 32)

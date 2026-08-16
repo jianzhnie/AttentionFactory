@@ -1,7 +1,7 @@
 你是一名同时具备大模型架构研究能力与 PyTorch 工程实现能力的高级 AI 系统研究员。请围绕主流大语言模型的 Attention 架构演进，完成一份“研究综述 + 结构化对比 + 代码实现方案 + 遗漏分析”的高质量交付。输出必须兼顾技术准确性、可验证性、工程可落地性与文档可读性。
 
 请重点分析以下模型系列：
-- 必选：Qwen、DeepSeek、GLM、Kimi、MiniMax、Step、xiaomi/Mimo、Llama
+- 必选：Qwen、DeepSeek、GLM、Kimi、MiniMax、Step、xiaomi/Mimo、Hunyuan, Llama
 - 额外补充至少 12 个主流模型系列：GPT、Gemini、Claude、Mistral、Mixtral、Yi、Phi、Grok、DBRX、Gemma、Nemotron、InternLM、Baichuan、Falcon、PaLM、MiniCPM、Mamba/Zamba、Snowflake Arctic 等
 
 请严格按以下要求执行：
@@ -90,23 +90,25 @@
 - MHA、MQA、GQA、MLA
 - SWA、Block Sparse Attention、Linear Attention
 - Hybrid Attention、Gated DeltaNet、Lightning Attention
-- PagedAttention 教学接口、FlashAttention v1-v4
-- RoPE、YaRN、Dynamic NTK、ALiBi、Partial RoPE、Position Interpolation
-- ExpertFFN、TopKRouter、MixtureOfExperts、DeepSeekMoE、LatentMoE
+- Ring Attention、Compressed Sparse Attention、ALiBi Attention
+- PagedAttention 教学接口、FlashMLA 接口、FlashAttention v1-v4
+- RoPE、YaRN、Dynamic NTK、ALiBi、Partial RoPE、Position Interpolation、LongRoPE、2D Position
+- ExpertFFN、TopKRouter、MixtureOfExperts、DeepSeekMoE、LatentMoE、load-balance loss
 - RMSNorm、SwiGLU FFN、FeedForward、TransformerBlock、CausalLMModel
 - BlockSparseIndexer、AttentionResidual、MultiTokenPredictionHead
+- SpeculativeDecoder、OnDiskKVStore、Mamba2Layer
 - `build_attention`、`build_positional_encoding`、`list_attentions`
 
 仍需重点补充或完善：
-1. Ring Attention 教学版或分布式接口模拟
-2. CSA/HCA/DSA 风格的压缩稀疏注意力
-3. FlashMLA 类 MLA 推理 kernel 接口
-4. DSpark/EAGLE/MTP 投机解码的教学接口
-5. LongRoPE、2D Position、p-RoPE 与 TransformerBlock 的完整集成
-6. ALiBi 在 TransformerBlock/CausalLMModel 中的 additive bias 集成
-7. Mamba-2 / SSM 与 Attention 的混合层
-8. KV cache offload / on-disk KV cache 的接口模拟
-9. MoE load-balancing loss 与 expert parallelism 说明
+1. 真实生产级 FlashMLA / CSA / DSA CUDA kernel，当前为 PyTorch 教学接口
+2. 分布式 Ring Attention 的多设备通信实现，当前为单机分块在线 Softmax
+3. ALiBi 在 TransformerBlock / CausalLMModel 中的自动 additive bias 集成，当前为独立 AlibiAttention
+4. LongRoPE 官方精确系数与 2D Position 在模型级组合中的完整接入
+5. Mamba-2 精确选择性扫描 / 并行扫描，当前为简化固定状态 SSM
+6. DSpark / EAGLE 真实投机解码调度，当前为简化 draft-target 验证
+7. KV cache offload 与 PagedAttention 的生产级内存调度、copy-on-write
+8. MoE expert parallelism / group GEMM，当前为按专家循环的教学实现
+9. 文档与模型库补充：Step、xiaomi/Mimo、Mamba/Zamba、Snowflake Arctic
 
 对每个新增实现需提供：
 - 核心代码

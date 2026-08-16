@@ -50,3 +50,7 @@ InternLM,InternLM2.5-7B,2024,yes,Dense 7B,GQA,262K,GQA,Dynamic RoPE factor 2,off
 InternLM,InternLM3-8B-Instruct,2025,yes,Dense 8B,GQA,32K,GQA,Dynamic RoPE factor 6,official
 Baichuan,Baichuan-M2-32B,2025,yes,Qwen2.5-based,GQA,131K,GQA,Based on Qwen2.5-32B,official
 Baichuan,Baichuan-M3-235B,2026-01,yes,Qwen3-based,GQA,40K,GQA,Based on Qwen3-235B-A22B,official
+Step,Step-3.7-Flash,2026-05,yes,MoE 198B/11B,GQA + SWA,256K,GQA + SWA,Multimodal MoE,official
+Xiaomi MiMo,MiMo-V2.5-Pro,2026-04,yes,MoE 1.02T/42B,SWA + Global Attention,1M,GQA + SWA,KV reduction ~7x,official
+Zamba,Zamba2-7B-Instruct-v2,2025,yes,Mamba2 + Attention Hybrid,Shared Attention,4K-16K,SSM state,Mamba2 hybrid,official
+Snowflake Arctic,Arctic-Instruct,2024-04,yes,Dense-MoE Hybrid 480B,GQA,4K,GQA,128 experts top2,official

@@ -494,6 +494,14 @@ def get_positional_encoding(
             max_seq_len=max_seq_len,
             **kwargs,
         )
+    if name == "2d":
+        if not {"max_blocks", "max_positions_per_block"} <= set(kwargs):
+            raise ValueError("2d requires max_blocks and max_positions_per_block")
+        return TwoDimensionalPositionEmbedding(
+            dim,
+            max_blocks=kwargs["max_blocks"],
+            max_positions_per_block=kwargs["max_positions_per_block"],
+        )
     if name == "alibi":
         if num_heads is None:
             raise ValueError("alibi requires num_heads")

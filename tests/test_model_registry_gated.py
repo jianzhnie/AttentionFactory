@@ -157,14 +157,16 @@ def test_causal_lm_ties_embeddings():
     assert model.lm_head.weight is model.embed_tokens.weight
 
 
-def test_causal_lm_rejects_alibi():
-    with pytest.raises(ValueError, match="ALiBi"):
-        CausalLMModel(
-            vocab_size=32,
-            hidden_size=16,
-            num_layers=1,
-            num_heads=2,
-            intermediate_size=32,
-            attention_name="mha",
-            positional="alibi",
-        )
+def test_causal_lm_with_alibi():
+    model = CausalLMModel(
+        vocab_size=32,
+        hidden_size=16,
+        num_layers=1,
+        num_heads=2,
+        intermediate_size=32,
+        attention_name="mha",
+        positional="alibi",
+    )
+    input_ids = torch.randint(0, 32, (2, 6))
+    logits = model(input_ids)
+    assert logits.shape == (2, 6, 32)

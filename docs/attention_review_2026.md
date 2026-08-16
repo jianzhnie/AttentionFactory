@@ -2,13 +2,13 @@
 
 > 资料口径：本文优先采用官方 Hugging Face 模型卡、官方技术报告、官方仓库和 arXiv 论文。闭源模型若官方未披露实现细节，统一标注“官方未完全披露”，不把社区推测写成事实。
 > 量化口径：不同论文和团队使用不同 GPU、序列长度、批大小与量化方式，所有性能数字只在各自来源口径内成立，不能直接横向比较。
-> 核验记录：本次修订已根据官方 HF 配置修正 GLM-5.1 上下文为 202,752；新增 Phi、DBRX、Nemotron、InternLM、Baichuan 系列的 Attention 配置均来自官方模型卡/配置或可复核的公开配置镜像。
+> 核验记录：本次修订已根据官方 HF 配置修正 GLM-5.1 上下文为 202,752；新增 Phi、DBRX、Nemotron、InternLM、Baichuan、Step、MiMo、Zamba、Arctic 系列的 Attention 配置均来自官方模型卡/配置或可复核的公开配置镜像。
 
 ---
 
 ## 一、执行摘要
 
-1. **层内 KV 压缩已成为主流**：MHA 到 MQA/GQA 再到 MLA 的演进主线非常清晰；截至 2026 年，DeepSeek、GLM、Kimi、MiniMax M3、Mistral Small 4 等均在不同程度使用 MLA 类或共享 KV 方案，Phi、DBRX、InternLM 与 Nemotron 则继续验证 GQA 与混合架构。
+1. **层内 KV 压缩已成为主流**：MHA 到 MQA/GQA 再到 MLA 的演进主线非常清晰；截至 2026 年，DeepSeek、GLM、Kimi、MiniMax M3、Mistral Small 4 等均在不同程度使用 MLA 类或共享 KV 方案，Phi、DBRX、InternLM、Nemotron、Step、MiMo、Zamba 与 Arctic 则继续验证 GQA、SWA、SSM 与混合架构。
 2. **长上下文瓶颈从“能不能训练”转向“能不能低成本推理”**：2024 年主流是 128K，2025 年出现 256K 至 1M 开源模型，2026 年 DeepSeek-V4、GLM-5.2、Kimi K3、MiniMax M3 都把 1M 上下文作为生产目标。
 3. **稀疏与压缩注意力重新成为主线**：DeepSeek-V4 使用 CSA + HCA，GLM-5 使用 DSA，MiniMax M3 使用 MSA，三者都在 KV 数量维度做压缩或选择，而不是只依赖窗口注意力。
 4. **线性注意力在超长上下文中重新崛起**：Qwen3-Next、Qwen3.5/3.6/3.8、Kimi Linear/K3 都采用 Gated DeltaNet 或 KDA 与 GQA/MLA 混合，形成“3:1 线性到全量”的常见结构。
@@ -41,6 +41,10 @@
 | Nemotron | Nemotron-3-Super | Mamba-2 + MoE + GQA | 256K，可扩展 1M | 120B/12B Active，LatentMoE |
 | InternLM | InternLM3-8B | GQA 32Q/2KV | 32K | Dynamic RoPE |
 | Baichuan | Baichuan-M3-235B | 继承 Qwen3 的 GQA | 40K | 基于 Qwen3-235B-A22B |
+| Step | Step-3.7-Flash | GQA 类 + SWA + MoE | 256K | 198B/11B Active，多模态 |
+| Xiaomi MiMo | MiMo-V2.5-Pro | SWA + Global Attention 6:1 | 1M | 1.02T/42B Active，KV 减少约 7x |
+| Zamba | Zamba2-7B | Mamba2 + Shared Attention | 4K，可扩展 16K | SSM/Transformer 混合 |
+| Snowflake Arctic | Arctic-Instruct | GQA + Dense-MoE Hybrid | 4K | 480B，128 专家 Top-2 |
 
 **Attention 演进主线**
 
@@ -340,6 +344,82 @@ Baichuan 早期使用独立 MHA 架构，2025 年后的 M 系列直接基于 Qwe
 
 ---
 
+### 2.23 Step 系列（阶跃星辰）
+
+Step 系列早期闭源，2026 年起开始公开 MoE 权重。
+
+| 版本 | 时间 | 开源 | 基础架构 | Attention 核心 | 上下文 | 关键优化 |
+|------|------|------|----------|----------------|--------|----------|
+| Step-1 / Step-2 / Step-3 API | 2024-2025 | 否 | 官方未完全披露 | 官方未完全披露 | 产品档位 | 闭源商业模型 |
+| Step-3.5-Flash | 2026-02 | 是 | MoE | GQA 类 + SWA | 256K | 开源 MoE 推理档位 |
+| Step-3.7-Flash | 2026-05 | 是 | MoE 198B/11B Active | GQA 类 + 512 SWA | 256K | 多模态，1.8B Vision Encoder，FP8/FP4 支持 |
+
+**核验说明**：Step-3.7-Flash 官方模型卡确认 198B 总参、约 11B 激活、256K 上下文；官方配置中 text 部分为 64 heads、512 sliding window、45 层、MoE 中间维度 1280。
+
+### 2.24 Xiaomi MiMo 系列（小米）
+
+MiMo 是 SWA + Global Attention 混合的 1M 上下文 MoE 系列。
+
+| 版本 | 时间 | 开源 | 基础架构 | Attention 核心 | 上下文 | 关键优化 |
+|------|------|------|----------|----------------|--------|----------|
+| MiMo-Audio-7B | 2025-09 | 是 | 基于 Qwen2 | GQA | 官方未完整披露 | 任意模态语音模型 |
+| MiMo-V2-Flash | 2025-12 | 是 | MoE | SWA + Global Attention | 1M | 混合注意力 + MTP |
+| MiMo-V2.5-Pro | 2026-04 | 是 | MoE 1.02T/42B Active | SWA + GA 6:1，GQA 128Q/8KV | 1M | KV Cache 减少约 7x，3 层 MTP，27T Token 预训练 |
+
+**核验说明**：MiMo-V2.5-Pro 官方模型卡明确给出 70 层、10 个 Full Attention 层、SWA 窗口 128、QK head dim 192、V head dim 128。
+
+### 2.25 Zamba 系列（Zyphra）
+
+Zamba 是 Mamba2 与共享 Attention 混合的代表性开源系列。
+
+| 版本 | 时间 | 开源 | 基础架构 | Attention 核心 | 上下文 | 关键优化 |
+|------|------|------|----------|----------------|--------|----------|
+| Zamba-7B | 2024 | 是 | Mamba + Attention Hybrid | Mamba2 + Shared Attention | 4K | 共享 Attention 权重 |
+| Zamba2-7B-Instruct-v2 | 2025 | 是 | Mamba2 + Attention Hybrid | Mamba2 + Shared Attention | 4K，可扩展 16K | LoRA 投影差异化共享块 |
+
+**核验说明**：Zamba2-7B 官方配置为 `zamba2`，81 层，32 heads；模型卡明确是 Mamba2 + transformer blocks 混合，并支持通过 `use_long_context=True` 扩展到 16K。
+
+### 2.26 Snowflake Arctic 系列
+
+Arctic 是“Dense 主干 + 大规模 MoE 残差”的代表。
+
+| 版本 | 时间 | 开源 | 基础架构 | Attention 核心 | 上下文 | 关键优化 |
+|------|------|------|----------|----------------|--------|----------|
+| Snowflake Arctic-Instruct | 2024-04 | 是 | Dense-MoE Hybrid 480B | GQA 56Q/8KV | 4K | 10B Dense + 128x3.66B MoE，Top-2 |
+
+**核验说明**：官方配置显示 `model_type=arctic`、35 层、56 heads、8 KV heads、128 experts、Top-2。
+
+---
+
+### 2.27 遗漏分析：已覆盖 / 未覆盖 / 待补充
+
+**已覆盖模型系列**
+
+- 必选系列：Qwen、DeepSeek、GLM、Kimi、MiniMax、Step、Xiaomi MiMo、Llama。
+- 额外系列：GPT、Gemini、Claude、Mistral、Mixtral、Yi、Gemma、Falcon、PaLM、MiniCPM、Grok、Phi、DBRX、Nemotron、InternLM、Baichuan、Zamba、Snowflake Arctic。
+
+**已覆盖核心模块**
+
+- Attention：MHA、MQA、GQA、MLA、SWA、Block Sparse、Linear、Hybrid、Gated DeltaNet、Lightning Attention、Ring Attention、Compressed Sparse Attention、ALiBi Attention、PagedAttention、FlashAttention v1-v4。
+- 位置编码：RoPE、YaRN、Dynamic NTK、ALiBi、Partial RoPE、Position Interpolation、LongRoPE、2D Position。
+- MoE：ExpertFFN、TopKRouter、MixtureOfExperts、DeepSeekMoE、LatentMoE、load-balance loss。
+- 系统/工程接口：FlashMLA、SpeculativeDecoder、OnDiskKVStore。
+- Transformer 基础：RMSNorm、SwiGLU FFN、FeedForward、TransformerBlock、CausalLMModel、BlockSparseIndexer、AttentionResidual、MultiTokenPredictionHead。
+
+**未覆盖或仍需待补充**
+
+- 真实生产级 FlashMLA / CSA / DSA CUDA kernel。
+- 分布式 Ring Attention 多设备通信与调度。
+- ALiBi 已接入 CausalLMModel，但仍需生产级 kernel 优化。
+- LongRoPE 与 2D Position 已支持 CausalLMModel 配置，仍需官方精确系数与大规模验证。
+- Mamba-2 精确选择性扫描 / 并行扫描。
+- DSpark / EAGLE 真实投机解码调度。
+- PagedAttention 与 KV offload 的生产级内存调度、copy-on-write。
+- MoE expert parallelism / group GEMM。
+- Step、MiMo、Zamba、Arctic 的完整技术报告级细节仍受公开资料限制，部分参数以官方配置为准。
+
+---
+
 ## 三、Attention 机制专题解析
 
 ### 3.1 MHA
@@ -510,6 +590,10 @@ Baichuan 早期使用独立 MHA 架构，2025 年后的 M 系列直接基于 Qwe
 | InternLM | InternLM2.5-7B | 2024 | 是 | Dense 7B | GQA 32Q/8KV | Dynamic RoPE | 262K | GQA | Dynamic RoPE factor 2 | 官方 HF 配置，高 |
 | Baichuan | Baichuan-M3-235B | 2026-01 | 是 | 基于 Qwen3-235B-A22B | GQA 64Q/4KV | RoPE theta 5M | 40,960 | GQA | 128 专家 Top-8 | 官方 HF 配置，高 |
 | Baichuan | Baichuan-M2-32B | 2025 | 是 | 基于 Qwen2.5-32B | GQA 40Q/8KV | RoPE theta 1M | 131,072 | GQA | 领域强化 | 官方 HF 配置，高 |
+| Step | Step-3.7-Flash | 2026-05 | 是 | MoE 198B/11B Active | GQA 类 + SWA | Llama3-style RoPE scaling | 262,144 | GQA + SWA | 多模态，FP8/FP4 | 官方 HF 模型卡/配置，高 |
+| Xiaomi MiMo | MiMo-V2.5-Pro | 2026-04 | 是 | MoE 1.02T/42B Active | SWA + GA 6:1 | RoPE theta 10M | 1M | GQA + SWA，KV 减少约 7x | 3 层 MTP | 官方 HF 模型卡/配置，高 |
+| Zamba | Zamba2-7B-Instruct-v2 | 2025 | 是 | Mamba2 + Attention Hybrid | Mamba2 + Shared Attention | RoPE 4K，扩展 16K | 4K-16K | SSM 状态 | 共享 Attention + LoRA | 官方 HF 模型卡/配置，高 |
+| Snowflake Arctic | Arctic-Instruct | 2024-04 | 是 | Dense-MoE Hybrid 480B | GQA 56Q/8KV | RoPE | 4,096 | GQA | 128 专家 Top-2 | 官方 HF 配置/模型卡，高 |
 
 ### 表 2：Attention 类型能力对比表
 
@@ -525,6 +609,24 @@ Baichuan 早期使用独立 MHA 架构，2025 年后的 M 系列直接基于 Qwe
 | FlashAttention | 主流训练框架 | IO-aware，不物化矩阵 | 训练/推理 kernel 加速 | 不改变模型数学 | 所有 Transformer |
 | PagedAttention | vLLM | block 管理 KV | 吞吐提升、显存浪费少 | 系统层优化 | 高并发推理服务 |
 | RoPE/YaRN/NTK/ALiBi | Llama、Qwen、Falcon | 位置编码扩展 | 提升外推能力 | 不等同 Attention 升级 | 长上下文训练/推理 |
+
+### 表 3：模型与模块覆盖缺口表
+
+| 模型/模块 | 当前文档是否覆盖 | 当前代码是否覆盖 | 优先级 | 建议实现方式 |
+|-----------|------------------|------------------|--------|--------------|
+| Step 系列 | 已覆盖 | 不适用 | 中 | 文档继续维护官方配置 |
+| Xiaomi MiMo | 已覆盖 | 不适用 | 中 | 文档继续维护官方配置 |
+| Zamba 系列 | 已覆盖 | 不适用 | 中 | 文档继续维护官方配置 |
+| Snowflake Arctic | 已覆盖 | 不适用 | 中 | 文档继续维护官方配置 |
+| Ring Attention | 已覆盖 | 教学实现 | 高 | 增加多设备通信模拟与生产级说明 |
+| CSA/HCA/DSA | 已覆盖 | CSA 教学实现 | 高 | 增加学习式 Indexer 与 kernel 接口 |
+| FlashMLA | 已覆盖 | 接口模拟 | 高 | 增加真实 CUDA kernel 与缓存布局 |
+| 投机解码 | 已覆盖 | 简化接口 | 中 | 增加 EAGLE/DSpark 草稿模型接口 |
+| LongRoPE/2D Position | 已覆盖 | 已接入 CausalLMModel | 中 | 官方精确系数与大规模验证 |
+| ALiBi 集成 | 已覆盖 | 已接入 CausalLMModel | 中 | 生产级 additive bias kernel 优化 |
+| Mamba-2/SSM | 已覆盖 | 简化 SSM | 高 | 增加选择性扫描与并行扫描 |
+| KV offload | 已覆盖 | 教学接口 | 中 | 增加分页缓存调度与磁盘缓存策略 |
+| MoE 负载均衡 | 已覆盖 | 损失已实现 | 中 | 增加 expert parallelism/group GEMM |
 
 ---
 
@@ -612,7 +714,7 @@ Baichuan 早期使用独立 MHA 架构，2025 年后的 M 系列直接基于 Qwe
 - `attentionfactory/transformer.py`
   - `TransformerBlock`，组合可插拔 Attention、RMSNorm 和 FFN/MoE。
 - `attentionfactory/model.py`
-  - `CausalLMModel`，组合 Embedding、位置编码、Transformer Block、RMSNorm 与 LM Head。
+  - `CausalLMModel`，组合 Embedding、位置编码、Transformer Block、RMSNorm 与 LM Head；支持 `alibi`、`longrope`、`2d` 位置配置。
 - `attentionfactory/registry.py`
   - `build_attention`、`build_positional_encoding`、`list_attentions`，统一模块选择入口。
 - `tests/test_extended_attention.py`
@@ -715,6 +817,13 @@ python -m ruff check attentionfactory tests
 - InternLM3-8B-Instruct 官方配置: https://huggingface.co/internlm/internlm3-8b-instruct
 - Baichuan-M2-32B 官方配置: https://huggingface.co/baichuan-inc/Baichuan-M2-32B
 - Baichuan-M3-235B 官方配置: https://huggingface.co/baichuan-inc/Baichuan-M3-235B
+
+### Step / MiMo / Zamba / Arctic
+
+- Step-3.7-Flash 官方模型卡: https://huggingface.co/stepfun-ai/Step-3.7-Flash
+- Xiaomi MiMo-V2.5-Pro 官方模型卡: https://huggingface.co/XiaomiMiMo/MiMo-V2.5-Pro
+- Zamba2-7B-Instruct-v2 官方模型卡: https://huggingface.co/Zyphra/Zamba2-7B-Instruct-v2
+- Snowflake Arctic-Instruct 官方模型卡: https://huggingface.co/Snowflake/snowflake-arctic-instruct
 
 ### Attention 机制论文
 

@@ -50,17 +50,17 @@ class CausalLMModel(nn.Module):
         self.num_heads = int(num_heads)
         self.intermediate_size = int(intermediate_size)
         self.max_seq_len = int(max_seq_len)
+        if positional == "alibi":
+            attention_name = "alibi"
+            positional = "none"
         self.attention_name = attention_name
         self.use_moe = bool(use_moe)
         self.tie_word_embeddings = bool(tie_word_embeddings)
 
         self.embed_tokens = nn.Embedding(vocab_size, hidden_size)
-        if positional == "alibi":
-            raise ValueError(
-                "CausalLMModel does not integrate ALiBi additive bias yet; "
-                "use ALiBiBias directly in a custom attention block"
-            )
         attention_kwargs = dict(attention_kwargs or {})
+        if attention_name == "alibi" and "max_seq_len" not in attention_kwargs:
+            attention_kwargs["max_seq_len"] = max_seq_len
         if attention_name == "gqa" and "num_kv_groups" not in attention_kwargs:
             attention_kwargs["num_kv_groups"] = max(1, num_heads // 2)
 
