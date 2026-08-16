@@ -225,6 +225,77 @@ class DeepSeekMoE(nn.Module):
         )
 
 
+class ExpertParallelMoE(nn.Module):
+    """Simulated expert-parallel MoE with local expert ownership.
+
+    Each rank owns ``num_experts // world_size`` experts. The router still
+    sees the full expert set, but this rank only computes its local experts.
+    No real all-reduce or communication is implemented.
+    """
+
+    def __init__(
+        self,
+        hidden_size: int,
+        num_experts: int,
+        intermediate_size: int,
+        top_k: int = 2,
+        world_size: int = 1,
+        rank: int = 0,
+        activation: str = "silu",
+        bias: bool = True,
+    ) -> None:
+        super().__init__()
+        if world_size < 1 or rank >= world_size:
+            raise ValueError("world_size must be >= 1 and rank < world_size")
+        self.hidden_size = int(hidden_size)
+        self.num_experts = int(num_experts)
+        self.intermediate_size = int(intermediate_size)
+        self.top_k = int(top_k)
+        self.world_size = int(world_size)
+        self.rank = int(rank)
+        self.local_expert_ids = list(
+            range(self.rank, self.num_experts, self.world_size)
+        )
+        self.experts = nn.ModuleList(
+            ExpertFFN(hidden_size, intermediate_size, activation, bias)
+            for _ in self.local_expert_ids
+        )
+        self.router = TopKRouter(
+            hidden_size,
+            num_experts,
+            top_k=top_k,
+        )
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        """Compute outputs for experts owned by this rank."""
+        flat = x.reshape(-1, self.hidden_size)
+        weights, indices = self.router(flat)
+        output = torch.zeros_like(flat)
+        for local_index, expert_id in enumerate(self.local_expert_ids):
+            token_weights = torch.zeros(
+                flat.size(0), device=flat.device, dtype=flat.dtype
+            )
+            for k in range(self.top_k):
+                token_weights += torch.where(
+                    indices[:, k] == expert_id,
+                    weights[:, k],
+                    torch.zeros_like(weights[:, k]),
+                )
+            mask = token_weights > 0
+            if mask.any():
+                output[mask] += token_weights[mask].unsqueeze(-1) * self.experts[
+                    local_index
+                ](flat[mask])
+        return output.view_as(x)
+
+    def extra_repr(self) -> str:
+        return (
+            f"hidden_size={self.hidden_size}, num_experts={self.num_experts}, "
+            f"world_size={self.world_size}, rank={self.rank}, "
+            f"local_expert_ids={self.local_expert_ids}"
+        )
+
+
 def load_balance_loss(
     router_logits: torch.Tensor,
     expert_indices: torch.Tensor,

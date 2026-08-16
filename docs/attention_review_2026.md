@@ -427,8 +427,8 @@ Hunyuan 的公开路线是：Dense/MoE 商用模型 -> Hunyuan-A13B 开源 MoE -
 
 - Attention：MHA、MQA、GQA、MLA、SWA、Block Sparse、Linear、Hybrid、Gated DeltaNet、Lightning Attention、Ring Attention、Compressed Sparse Attention、ALiBi Attention、PagedAttention、FlashAttention v1-v4。
 - 位置编码：RoPE、YaRN、Dynamic NTK、ALiBi、Partial RoPE、Position Interpolation、LongRoPE、2D Position。
-- MoE：ExpertFFN、TopKRouter、MixtureOfExperts、DeepSeekMoE、LatentMoE、load-balance loss。
-- 系统/工程接口：FlashMLA、SpeculativeDecoder、OnDiskKVStore。
+- MoE：ExpertFFN、TopKRouter、MixtureOfExperts、DeepSeekMoE、LatentMoE、ExpertParallelMoE、load-balance loss。
+- 系统/工程接口：FlashMLA、SpeculativeDecoder、EagleSpeculator、OnDiskKVStore。
 - Transformer 基础：RMSNorm、SwiGLU FFN、FeedForward、TransformerBlock、CausalLMModel、BlockSparseIndexer、AttentionResidual、MultiTokenPredictionHead。
 
 **未覆盖或仍需待补充**
@@ -440,7 +440,7 @@ Hunyuan 的公开路线是：Dense/MoE 商用模型 -> Hunyuan-A13B 开源 MoE -
 - Mamba-2 精确选择性扫描 / 并行扫描。
 - DSpark / EAGLE 真实投机解码调度。
 - PagedAttention 与 KV offload 的生产级内存调度、copy-on-write。
-- MoE expert parallelism / group GEMM。
+- MoE group GEMM / 真实 multi-node all-reduce，当前为 ExpertParallelMoE 教学接口。
 - Step、MiMo、Zamba、Arctic 的完整技术报告级细节仍受公开资料限制，部分参数以官方配置为准。
 
 ---
@@ -697,11 +697,11 @@ Hunyuan 的公开路线是：Dense/MoE 商用模型 -> Hunyuan-A13B 开源 MoE -
 - `attentionfactory/linear_attention.py`
   - `LinearAttention`，继承 `BaseAttention`，支持 `elu/relu/linear` kernel 与因果状态累积。
 - `attentionfactory/paged_attention.py`
-  - `PagedKVBlockAllocator`、`PagedAttentionCache` 和 `paged_attention`，模拟 block table 与稠密 gather。
+  - `PagedKVBlockAllocator`、`PagedAttentionCache` 和 `paged_attention`，模拟 block table、稠密 gather 与序列克隆。
 - `attentionfactory/positional.py`
   - `RotaryPositionEmbedding`、`YaRNScaledRotaryEmbedding`、`DynamicNTKRotaryEmbedding`、`ALiBiBias` 和工厂函数。
 - `attentionfactory/moe.py`
-  - `ExpertFFN`、`TopKRouter`、`MixtureOfExperts`、`DeepSeekMoE`，覆盖 Top-k 路由、共享专家与 DeepSeek 风格 MoE。
+  - `ExpertFFN`、`TopKRouter`、`MixtureOfExperts`、`DeepSeekMoE`、`ExpertParallelMoE`，覆盖 Top-k 路由、共享专家、DeepSeek 风格 MoE 与专家并行模拟。
 - `attentionfactory/hybrid_attention.py`
   - `HybridAttention`，按层索引在线性注意力和 GQA 全注意力之间路由，复现 Qwen3-Next/Kimi 的 3:1 混合模式。
 - `attentionfactory/gated_delta_net.py`
@@ -725,7 +725,7 @@ Hunyuan 的公开路线是：Dense/MoE 商用模型 -> Hunyuan-A13B 开源 MoE -
 - `attentionfactory/flash_mla.py`
   - `FlashMLA`，MLA 推理接口模拟。
 - `attentionfactory/speculative.py`
-  - `SpeculativeDecoder`，draft-target 投机解码教学接口。
+  - `SpeculativeDecoder` 与 `EagleSpeculator`，draft-target 与 hidden-state drafting 投机解码教学接口。
 - `attentionfactory/ssm.py`
   - `Mamba2Layer`，简化固定状态 SSM 层。
 - `attentionfactory/kv_offload.py`
@@ -755,7 +755,7 @@ Hunyuan 的公开路线是：Dense/MoE 商用模型 -> Hunyuan-A13B 开源 MoE -
 - `tests/test_extra_modules.py`
   - 覆盖 Lightning Attention、LatentMoE、Attention Residual、Block Sparse Indexer 与 MTP。
 - `tests/test_gap_modules.py`
-  - 覆盖 Ring Attention、CSA、ALiBi Attention、FlashMLA、投机解码、Mamba2Layer、LongRoPE/2D、On-Disk KV 与 load-balance loss。
+  - 覆盖 Ring Attention、CSA、ALiBi Attention、FlashMLA、SpeculativeDecoder、EagleSpeculator、Mamba2Layer、LongRoPE/2D、On-Disk KV、ExpertParallelMoE、Paged clone 与 load-balance loss。
 - 修改 `attentionfactory/__init__.py` 导出新模块。
 
 ### 7.2 设计说明
@@ -805,7 +805,7 @@ python -m ruff check attentionfactory tests
 
 ```bash
 python -m pytest -p no:capture -q
-# 168 passed
+# 171 passed
 
 python -m ruff check attentionfactory tests
 # All checks passed

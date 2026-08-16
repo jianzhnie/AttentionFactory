@@ -20,8 +20,8 @@
   - **Compressed Sparse Attention** - 压缩 KV + 稀疏选择
   - **ALiBi Attention** - GQA + ALiBi additive bias
 - **位置编码与长上下文扩展**：RoPE、YaRN、Dynamic NTK、ALiBi
-- **长上下文与系统接口**：LongRoPE、2D Position、FlashMLA 接口、On-Disk KV、投机解码
-- **MoE 模块**：Top-k Router、Expert FFN、Mixture-of-Experts、DeepSeek-style Shared Expert MoE
+- **长上下文与系统接口**：LongRoPE、2D Position、FlashMLA 接口、On-Disk KV、SpeculativeDecoder、EagleSpeculator
+- **MoE 模块**：Top-k Router、Expert FFN、Mixture-of-Experts、DeepSeek-style Shared Expert MoE、Expert Parallel MoE
 - **SSM 混合**：简化 Mamba2Layer
 - **稀疏索引与模型级模块**：Block Sparse Indexer、LatentMoE、Attention Residual、Multi-Token Prediction
 - **Transformer 基础模块**：RMSNorm、SwiGLU FFN、可插拔 Transformer Block

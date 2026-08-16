@@ -9,10 +9,13 @@ from attentionfactory import (
     AlibiAttention,
     CausalLMModel,
     CompressedSparseAttention,
+    EagleSpeculator,
+    ExpertParallelMoE,
     FlashMLA,
     LongRoPEScaledRotaryEmbedding,
     Mamba2Layer,
     OnDiskKVStore,
+    PagedAttentionCache,
     RingAttention,
     SpeculativeDecoder,
     TopKRouter,
@@ -216,3 +219,56 @@ def test_causal_lm_with_2d_position():
     )
     logits = model(torch.randint(0, 32, (2, 8)))
     assert logits.shape == (2, 8, 32)
+
+
+def test_expert_parallel_moe_shape_and_gradient():
+    moe = ExpertParallelMoE(
+        hidden_size=HIDDEN,
+        num_experts=8,
+        intermediate_size=64,
+        top_k=2,
+        world_size=2,
+        rank=0,
+    )
+    x = torch.randn(BATCH, SEQ, HIDDEN, requires_grad=True)
+    out = moe(x)
+    assert out.shape == x.shape
+    out.sum().backward()
+    assert x.grad is not None and torch.isfinite(x.grad).all()
+
+
+def test_paged_cache_clone_sequence():
+    cache = PagedAttentionCache(
+        num_blocks=8,
+        block_size=2,
+        num_heads=2,
+        head_dim=4,
+    )
+    key = torch.randn(5, 2, 4)
+    value = torch.randn(5, 2, 4)
+    cache.append(0, key, value)
+    cache.clone_sequence(0, 1)
+    cloned_key, cloned_value = cache.get(1)
+    torch.testing.assert_close(cloned_key, key)
+    torch.testing.assert_close(cloned_value, value)
+
+
+def test_eagle_speculator_deterministic():
+    vocab = 16
+
+    def draft_head(hidden_states):
+        logits = torch.zeros(hidden_states.size(0), hidden_states.size(1), vocab)
+        logits[..., 2] = 1.0
+        return logits
+
+    def target_model(input_ids):
+        logits = torch.zeros(input_ids.size(0), input_ids.size(1), vocab)
+        logits[..., 2] = 1.0
+        return logits
+
+    speculator = EagleSpeculator(draft_head, target_model, num_speculative_tokens=3)
+    input_ids = torch.zeros(2, 4, dtype=torch.long)
+    hidden_states = torch.randn(2, 4, HIDDEN)
+    output = speculator(input_ids, hidden_states)
+    assert output.size(1) == 7
+    assert (output[:, 4:] == 2).all()

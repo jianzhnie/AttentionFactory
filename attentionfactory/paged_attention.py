@@ -127,6 +127,13 @@ class PagedAttentionCache:
         values = torch.cat([row[1] for row in rows], dim=0)
         return keys, values
 
+    def clone_sequence(self, source_seq_id: int, new_seq_id: int) -> None:
+        """Copy one sequence's KV cache into a new sequence id."""
+        if new_seq_id in self.block_tables:
+            raise ValueError(f"Sequence already exists: {new_seq_id}")
+        key, value = self.get(source_seq_id)
+        self.append(new_seq_id, key, value)
+
     def reset(self, seq_id: int) -> None:
         """Free all physical blocks owned by ``seq_id`` and clear its table."""
         for block_id in self.block_tables.get(seq_id, []):

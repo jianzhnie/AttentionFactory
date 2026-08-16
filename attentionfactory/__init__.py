@@ -20,6 +20,7 @@ from .model import CausalLMModel
 from .moe import (
     DeepSeekMoE,
     ExpertFFN,
+    ExpertParallelMoE,
     MixtureOfExperts,
     TopKRouter,
     load_balance_loss,
@@ -45,7 +46,7 @@ from .registry import build_attention, build_positional_encoding, list_attention
 from .ring_attention import RingAttention, ring_attention
 from .sliding_window_attention import SlidingWindowAttention
 from .sparse_indexer import BlockSparseIndexer
-from .speculative import SpeculativeDecoder
+from .speculative import EagleSpeculator, SpeculativeDecoder
 from .ssm import Mamba2Layer
 from .transformer import TransformerBlock
 
@@ -60,7 +61,9 @@ __all__ = [
     "CompressedSparseAttention",
     "DeepSeekMoE",
     "DynamicNTKRotaryEmbedding",
+    "EagleSpeculator",
     "ExpertFFN",
+    "ExpertParallelMoE",
     "FeedForward",
     "FlashMLA",
     "GatedDeltaNet",

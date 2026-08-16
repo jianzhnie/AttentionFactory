@@ -75,3 +75,50 @@ class SpeculativeDecoder(nn.Module):
             f"num_speculative_tokens={self.num_speculative_tokens}, "
             f"temperature={self.temperature}"
         )
+
+
+class EagleSpeculator(nn.Module):
+    """Eagle-style speculative decoder using hidden states for drafting.
+
+    ``draft_head`` maps hidden states to next-token logits; ``target_model``
+    maps token ids to logits for verification. This is an interface-level
+    simulation, not a trained Eagle model.
+    """
+
+    def __init__(
+        self,
+        draft_head,
+        target_model,
+        num_speculative_tokens: int = 4,
+    ) -> None:
+        super().__init__()
+        self.draft_head = draft_head
+        self.target_model = target_model
+        self.num_speculative_tokens = int(num_speculative_tokens)
+
+    def forward(
+        self,
+        input_ids: torch.Tensor,
+        hidden_states: torch.Tensor,
+    ) -> torch.Tensor:
+        """Draft from hidden states and verify with the target model."""
+        draft_logits = self.draft_head(hidden_states)
+        draft_tokens = torch.argmax(
+            draft_logits[:, -self.num_speculative_tokens :], dim=-1
+        )
+        target_input = torch.cat([input_ids, draft_tokens], dim=-1)
+        target_logits = self.target_model(target_input)
+        accepted: list[torch.Tensor] = []
+        start = input_ids.size(1)
+        for step in range(self.num_speculative_tokens):
+            target_next = torch.argmax(
+                target_logits[:, start + step - 1 : start + step], dim=-1
+            )
+            if (draft_tokens[:, step] != target_next[:, 0]).any():
+                accepted.append(target_next)
+                break
+            accepted.append(target_next)
+        return torch.cat([input_ids, *accepted], dim=-1)
+
+    def extra_repr(self) -> str:
+        return f"num_speculative_tokens={self.num_speculative_tokens}"
