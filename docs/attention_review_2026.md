@@ -749,6 +749,41 @@ python -m ruff check attentionfactory tests
 
 说明：当前机器默认 pytest 9.0.1 在 capture 初始化阶段会触发 macOS readline 相关段错误，使用 `-p no:capture` 可正常运行；这不是测试本身失败。
 
+### 7.4 当前覆盖与待补充清单
+
+**已覆盖代码模块**
+
+- Attention：MHA、MQA、GQA、MLA、SWA、Block Sparse、Linear、Hybrid、Gated DeltaNet、Lightning Attention、Ring Attention、Compressed Sparse Attention、ALiBi Attention、PagedAttention、FlashAttention v1-v4。
+- 位置编码：RoPE、YaRN、Dynamic NTK、ALiBi、Partial RoPE、Position Interpolation、LongRoPE、2D Position。
+- MoE：ExpertFFN、TopKRouter、MixtureOfExperts、DeepSeekMoE、LatentMoE、load-balance loss。
+- 系统/工程接口：FlashMLA、SpeculativeDecoder、OnDiskKVStore。
+- Transformer 基础：RMSNorm、SwiGLU FFN、FeedForward、TransformerBlock、CausalLMModel、BlockSparseIndexer、AttentionResidual、MultiTokenPredictionHead。
+- 注册表：`build_attention`、`build_positional_encoding`、`list_attentions`。
+
+**已覆盖模型级组合**
+
+- `CausalLMModel` 支持 Dense、MoE、Hybrid Attention、ALiBi、LongRoPE、2D Position、padding/causal mask、tie embeddings。
+
+**未覆盖或待补充**
+
+- 真实生产级 FlashMLA / CSA / DSA CUDA kernel。
+- 分布式 Ring Attention 多设备通信。
+- Mamba-2 精确选择性扫描 / 并行扫描。
+- DSpark / EAGLE 真实投机解码调度。
+- PagedAttention / KV offload 生产级内存调度与 copy-on-write。
+- MoE expert parallelism / group GEMM。
+- LongRoPE 官方精确系数与大规模验证。
+
+**测试基线**
+
+```bash
+python -m pytest -p no:capture -q
+# 168 passed
+
+python -m ruff check attentionfactory tests
+# All checks passed
+```
+
 ---
 
 ## 八、参考资料
