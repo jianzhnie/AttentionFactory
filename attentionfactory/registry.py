@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+from .alibi_attention import AlibiAttention
 from .block_sparse_attention import BlockSparseAttention
+from .compressed_sparse_attention import CompressedSparseAttention
 from .gated_delta_net import GatedDeltaNet
 from .gqa import GroupQueryAttention
 from .hybrid_attention import HybridAttention
@@ -15,15 +17,19 @@ from .positional import (
     BasePositionalEncoding,
     get_positional_encoding,
 )
+from .ring_attention import RingAttention
 from .sliding_window_attention import SlidingWindowAttention
 
 ATTENTION_REGISTRY = {
+    "alibi": AlibiAttention,
     "mha": MultiHeadAttention,
     "mqa": MultiQueryAttention,
     "gqa": GroupQueryAttention,
     "mla": MultiHeadLatentAttention,
     "swa": SlidingWindowAttention,
     "block_sparse": BlockSparseAttention,
+    "compressed_sparse": CompressedSparseAttention,
+    "ring": RingAttention,
     "linear": LinearAttention,
     "lightning": LightningAttention,
     "gated_delta": GatedDeltaNet,

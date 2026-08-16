@@ -313,6 +313,93 @@ class PositionInterpolation(RotaryPositionEmbedding):
         )
 
 
+class LongRoPEScaledRotaryEmbedding(RotaryPositionEmbedding):
+    """Simplified LongRoPE with separate short/long frequency factors."""
+
+    def __init__(
+        self,
+        dim: int,
+        original_max_position_embeddings: int,
+        max_seq_len: int,
+        long_factor: list[float] | tuple[float, ...],
+        short_factor: list[float] | tuple[float, ...],
+        base: float = 10000.0,
+        dtype: torch.dtype = torch.float32,
+    ) -> None:
+        super().__init__(dim, base=base, max_seq_len=max_seq_len, dtype=dtype)
+        if len(long_factor) != dim // 2 or len(short_factor) != dim // 2:
+            raise ValueError("long_factor and short_factor must have dim//2 entries")
+        self.original_max_position_embeddings = int(original_max_position_embeddings)
+        self.register_buffer(
+            "long_factor",
+            torch.tensor(long_factor, dtype=dtype),
+            persistent=False,
+        )
+        self.register_buffer(
+            "short_factor",
+            torch.tensor(short_factor, dtype=dtype),
+            persistent=False,
+        )
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        """Apply LongRoPE with the appropriate frequency factor."""
+        seq_len = x.size(-2)
+        factors = (
+            self.long_factor
+            if seq_len > self.original_max_position_embeddings
+            else self.short_factor
+        )
+        inv_freq = self.inv_freq * factors.to(self.inv_freq.device)
+        positions = torch.arange(seq_len, device=x.device, dtype=x.dtype)
+        freqs = torch.einsum("s,f->sf", positions, inv_freq.to(x.dtype))
+        cos = torch.cos(freqs)
+        sin = torch.sin(freqs)
+        return apply_rotary_pos_emb(x, cos, sin)
+
+
+class TwoDimensionalPositionEmbedding(BasePositionalEncoding):
+    """Simple 2D position embedding for long-document layouts."""
+
+    def __init__(
+        self,
+        embedding_dim: int,
+        max_blocks: int,
+        max_positions_per_block: int,
+    ) -> None:
+        super().__init__()
+        self.embedding_dim = int(embedding_dim)
+        self.max_blocks = int(max_blocks)
+        self.max_positions_per_block = int(max_positions_per_block)
+        self.block_embeddings = nn.Embedding(max_blocks, embedding_dim)
+        self.position_embeddings = nn.Embedding(max_positions_per_block, embedding_dim)
+
+    def forward(
+        self,
+        x: torch.Tensor,
+        block_ids: torch.Tensor | None = None,
+        positions: torch.Tensor | None = None,
+    ) -> torch.Tensor:
+        """Add block and within-block embeddings to ``x``."""
+        seq_len = x.size(-2)
+        if block_ids is None:
+            block_ids = (
+                torch.arange(seq_len, device=x.device) // self.max_positions_per_block
+            )
+        if positions is None:
+            positions = (
+                torch.arange(seq_len, device=x.device) % self.max_positions_per_block
+            )
+        if block_ids.max() >= self.max_blocks:
+            raise ValueError("block_ids exceeds max_blocks")
+        if positions.max() >= self.max_positions_per_block:
+            raise ValueError("positions exceeds max_positions_per_block")
+        return (
+            x
+            + self.block_embeddings(block_ids).unsqueeze(0)
+            + self.position_embeddings(positions).unsqueeze(0)
+        )
+
+
 class ALiBiBias(BasePositionalEncoding):
     """Attention with Linear Biases (ALiBi).
 
@@ -341,9 +428,12 @@ class ALiBiBias(BasePositionalEncoding):
         ]
         self.register_buffer("slopes", torch.tensor(slopes), persistent=False)
 
-    def forward(self, x: torch.Tensor | None = None) -> torch.Tensor:
+    def forward(self, x: torch.Tensor | int | None = None) -> torch.Tensor:
         """Return ALiBi bias for the sequence length of ``x`` if provided."""
-        seq_len = self.max_seq_len if x is None else x.size(-2)
+        if isinstance(x, int):
+            seq_len = x
+        else:
+            seq_len = self.max_seq_len if x is None else x.size(-2)
         if seq_len > self.max_seq_len:
             raise ValueError(
                 f"seq_len {seq_len} exceeds max_seq_len {self.max_seq_len}"
@@ -390,6 +480,16 @@ def get_positional_encoding(
         if "original_max_position_embeddings" not in kwargs:
             raise ValueError("interpolation requires original_max_position_embeddings")
         return PositionInterpolation(
+            dim,
+            max_seq_len=max_seq_len,
+            **kwargs,
+        )
+    if name == "longrope":
+        if not {"long_factor", "short_factor"} <= set(kwargs):
+            raise ValueError("longrope requires long_factor and short_factor")
+        if "original_max_position_embeddings" not in kwargs:
+            raise ValueError("longrope requires original_max_position_embeddings")
+        return LongRoPEScaledRotaryEmbedding(
             dim,
             max_seq_len=max_seq_len,
             **kwargs,

@@ -103,6 +103,10 @@ class TopKRouter(nn.Module):
         weights = self.dropout(weights)
         return weights, indices
 
+    def routing_logits(self, x: torch.Tensor) -> torch.Tensor:
+        """Return raw router logits without training noise."""
+        return self.router(x)
+
     def extra_repr(self) -> str:
         return (
             f"hidden_size={self.hidden_size}, num_experts={self.num_experts}, "
@@ -219,3 +223,30 @@ class DeepSeekMoE(nn.Module):
             f"num_shared_experts={self.num_shared_experts}, "
             f"intermediate_size={self.intermediate_size}, top_k={self.top_k}"
         )
+
+
+def load_balance_loss(
+    router_logits: torch.Tensor,
+    expert_indices: torch.Tensor,
+    num_experts: int,
+) -> torch.Tensor:
+    """Auxiliary load-balancing loss for top-k routing.
+
+    Args:
+        router_logits: Shape ``(num_tokens, num_experts)``.
+        expert_indices: Shape ``(num_tokens, top_k)``.
+        num_experts: Number of routed experts.
+    """
+    if router_logits.size(-1) != num_experts:
+        raise ValueError("router_logits last dim must equal num_experts")
+    if expert_indices.dim() != 2:
+        raise ValueError("expert_indices must have shape (num_tokens, top_k)")
+    counts = torch.zeros(num_experts, device=expert_indices.device, dtype=torch.float32)
+    for k in range(expert_indices.size(-1)):
+        counts += torch.bincount(
+            expert_indices[:, k].flatten(),
+            minlength=num_experts,
+        ).to(counts.dtype)
+    fraction = counts / max(1, expert_indices.numel())
+    probabilities = torch.softmax(router_logits, dim=-1).mean(dim=0)
+    return num_experts * (fraction * probabilities).sum()
