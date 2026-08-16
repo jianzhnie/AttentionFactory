@@ -1,6 +1,6 @@
 # AttentionFactory
 
-基于 PyTorch 实现的多种注意力机制模块集合，包含 MHA、MQA、GQA 和 MLA 四种经典注意力变体的简洁实现，以及 FlashAttention v1–v4 的教学用分块（tiled）实现。
+基于 PyTorch 实现的多种注意力机制模块集合，包含 MHA、MQA、GQA、MLA、SWA、Block Sparse、Linear Attention 等架构的教学实现，以及 FlashAttention v1–v4 的分块（tiled）实现。
 
 ## 特性
 
@@ -10,7 +10,11 @@
   - **MQA (Multi-Query Attention)** - 多查询注意力 (Shazeer, 2019)
   - **GQA (Group Query Attention)** - 分组查询注意力 (Chen et al., 2023)
   - **MLA (Multi-Head Latent Attention)** - 多头潜空间注意力
+  - **SWA (Sliding Window Attention)** - 滑动窗口注意力
+  - **Block Sparse Attention** - 块稀疏注意力
+  - **Linear Attention** - 线性注意力
 - **FlashAttention 教学实现**：`flashattention` 子包包含 FA1–FA4 四个版本的纯 PyTorch 在线 softmax 分块实现（含 forward/backward），用于理解各版本算法结构的演进
+- **PagedAttention 接口模拟**：提供固定块 KV cache、block table 与稠密 gather 的教学实现，便于理解 vLLM 的系统层优化
 - **支持 Attention Mask**：支持广播的注意力掩码（padding mask 或完整 mask）
 - **权重返回**：可选返回注意力权重矩阵，便于可视化分析
 - **Xavier 初始化**：默认使用 Xavier 均匀初始化
@@ -156,6 +160,58 @@ print(out.shape)  # torch.Size([2, 8, 128, 64])
 
 四个版本（`fa1`/`fa2`/`fa3`/`fa4`）共享同一套 `forward` / `backward` / `attention` 接口，差异体现在循环结构、工作划分与调度方式上，分别对应各代论文的算法改进点。
 
+### 6. Sliding Window Attention (SWA)
+
+```python
+from attentionfactory import SlidingWindowAttention
+
+attention = SlidingWindowAttention(
+    hidden_size=512,
+    num_heads=8,
+    window_size=128,
+    num_kv_groups=2,
+)
+```
+
+### 7. Block Sparse Attention
+
+```python
+from attentionfactory import BlockSparseAttention
+
+attention = BlockSparseAttention(
+    hidden_size=512,
+    num_heads=8,
+    block_size=16,
+    top_k=4,
+)
+```
+
+### 8. Linear Attention
+
+```python
+from attentionfactory import LinearAttention
+
+attention = LinearAttention(
+    hidden_size=512,
+    num_heads=8,
+    feature_dim=64,
+    kernel="elu",
+)
+```
+
+### 9. PagedAttention 教学接口
+
+```python
+from attentionfactory import PagedAttentionCache, paged_attention
+
+cache = PagedAttentionCache(
+    num_blocks=128,
+    block_size=16,
+    num_heads=8,
+    head_dim=64,
+)
+```
+
 ## 使用 Attention Mask
 
 掩码遵循 `1（True）= 保留，0（False）= 屏蔽` 约定，并对注意力分数广播，因此 padding mask 和完整 mask 都支持：
@@ -176,8 +232,10 @@ output = attention(hidden_state, attention_mask=attention_mask)
 ## 运行测试
 
 ```bash
-python -m pytest tests/
+python -m pytest -p no:capture -q
 ```
+
+注意：当前机器的默认 pytest 9.0.1 在 capture 初始化阶段会触发 macOS readline 相关段错误，使用 `-p no:capture` 可正常运行。
 
 ## 项目结构
 
@@ -190,6 +248,10 @@ AttentionFactory/
 │   ├── mqa.py               # 多查询注意力
 │   ├── gqa.py               # 分组查询注意力
 │   ├── mla.py               # 多头潜空间注意力
+│   ├── sliding_window_attention.py  # 滑动窗口注意力
+│   ├── block_sparse_attention.py    # 块稀疏注意力
+│   ├── linear_attention.py          # 线性注意力
+│   ├── paged_attention.py           # PagedAttention 教学接口
 │   └── flashattention/      # FlashAttention v1-v4 教学实现
 │       ├── fa1.py ... fa4.py
 │       └── common/          # 共享的在线 softmax / 掩码 / 分块原语

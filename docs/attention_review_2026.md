@@ -20,6 +20,31 @@
 
 ---
 
+## 快速总览（截至 2026-08）
+
+| 系列 | 最新代表 | Attention 核心 | 上下文 | 说明 |
+|------|----------|----------------|--------|------|
+| Qwen | Qwen3.8-2.4T-A95B | Gated DeltaNet + Gated Attention | 262K，扩展 1M | 512 专家 Top-10 |
+| DeepSeek | V4-Pro-0813 | MLA + CSA + HCA | 1M | 1M 下 KV 约为 V3.2 的 10% |
+| GLM | GLM-5.2 | MLA + DSA + IndexShare | 1M | IndexShare 降 2.9x FLOPs |
+| Kimi | Kimi K3 | 69 KDA + 24 Gated MLA | 1M | 2.8T/104B Active |
+| MiniMax | M3 | GQA + MSA | 1M | 相对 M2 的 prefill 9x、decode 15x |
+| Llama | Llama 4 Scout/Maverick | GQA + chunked local + NoPE 间隔 | 10M/1M | MoE |
+| Mistral | Mistral-Small-4 | MLA 类 | 1M | `kv_lora_rank=256` |
+| Gemma | Gemma 4 | GQA + local/global | 128K-256K | p-RoPE，Unified K/V |
+| GPT | GPT-5.6 Sol | 官方未披露 | 官方未披露 | 闭源 |
+| Gemini | Gemini 3.x | 官方未披露 | 官方未披露 | 闭源 |
+| Claude | Fable 5 / Mythos 5 | 官方未披露 | 官方未披露 | 闭源 |
+
+**Attention 演进主线**
+
+- 2023 年：GQA 成为开源模型默认选择。
+- 2024 年：DeepSeek-V2 提出 MLA，KV Cache 相对 MHA 减少约 93.3%。
+- 2025 年：Qwen3-Next 和 Kimi Linear 验证 Gated DeltaNet/KDA 线性注意力；Llama 4 和 Gemma 3 验证 MoE + 局部注意力。
+- 2026 年：DeepSeek-V4、GLM-5.2、MiniMax M3 把稀疏/压缩注意力推到 1M 上下文生产场景；Kimi K3 达到 2.8T 参数。
+
+---
+
 ## 二、模型系列逐一分析
 
 ### 2.1 Qwen 系列（阿里巴巴）
