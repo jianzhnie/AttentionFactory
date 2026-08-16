@@ -13,6 +13,10 @@
   - **SWA (Sliding Window Attention)** - 滑动窗口注意力
   - **Block Sparse Attention** - 块稀疏注意力
   - **Linear Attention** - 线性注意力
+  - **Hybrid Attention** - 线性/全量注意力按层交错
+- **位置编码与长上下文扩展**：RoPE、YaRN、Dynamic NTK、ALiBi
+- **MoE 模块**：Top-k Router、Expert FFN、Mixture-of-Experts、DeepSeek-style Shared Expert MoE
+- **Transformer 基础模块**：RMSNorm、SwiGLU FFN、可插拔 Transformer Block
 - **FlashAttention 教学实现**：`flashattention` 子包包含 FA1–FA4 四个版本的纯 PyTorch 在线 softmax 分块实现（含 forward/backward），用于理解各版本算法结构的演进
 - **PagedAttention 接口模拟**：提供固定块 KV cache、block table 与稠密 gather 的教学实现，便于理解 vLLM 的系统层优化
 - **支持 Attention Mask**：支持广播的注意力掩码（padding mask 或完整 mask）
@@ -212,6 +216,70 @@ cache = PagedAttentionCache(
 )
 ```
 
+### 10. 位置编码
+
+```python
+import torch
+from attentionfactory import RotaryPositionEmbedding, ALiBiBias
+
+rope = RotaryPositionEmbedding(dim=64, max_seq_len=4096)
+x = torch.randn(2, 8, 128, 64)
+y = rope(x)
+
+alibi = ALiBiBias(num_heads=8, max_seq_len=4096)
+bias = alibi(x)  # shape (1, 8, 128, 128)
+```
+
+YaRN 和 Dynamic NTK 版本通过 `YaRNScaledRotaryEmbedding`、`DynamicNTKRotaryEmbedding` 使用。
+
+### 11. MoE
+
+```python
+import torch
+from attentionfactory import MixtureOfExperts, DeepSeekMoE
+
+moe = MixtureOfExperts(
+    hidden_size=256,
+    num_experts=8,
+    intermediate_size=512,
+    top_k=2,
+)
+x = torch.randn(2, 32, 256)
+y = moe(x)
+
+ds_moe = DeepSeekMoE(
+    hidden_size=256,
+    num_routed_experts=8,
+    num_shared_experts=1,
+    intermediate_size=512,
+    top_k=2,
+)
+y = ds_moe(x)
+```
+
+### 12. Hybrid Attention 与 Transformer Block
+
+```python
+import torch
+from attentionfactory import HybridAttention, TransformerBlock, SwiGLUFFN, RMSNorm
+
+hybrid = HybridAttention(
+    hidden_size=256,
+    num_heads=8,
+    linear_interval=3,
+    full_interval=1,
+)
+block = TransformerBlock(
+    hidden_size=256,
+    num_heads=8,
+    intermediate_size=512,
+    attention=hybrid,
+    ffn=SwiGLUFFN(256, 512),
+)
+x = torch.randn(2, 32, 256)
+y = block(x, layer_index=3)
+```
+
 ## 使用 Attention Mask
 
 掩码遵循 `1（True）= 保留，0（False）= 屏蔽` 约定，并对注意力分数广播，因此 padding mask 和完整 mask 都支持：
@@ -252,6 +320,12 @@ AttentionFactory/
 │   ├── block_sparse_attention.py    # 块稀疏注意力
 │   ├── linear_attention.py          # 线性注意力
 │   ├── paged_attention.py           # PagedAttention 教学接口
+│   ├── positional.py                # RoPE / YaRN / NTK / ALiBi
+│   ├── moe.py                       # Top-k Router 与 MoE
+│   ├── hybrid_attention.py          # 线性/全量混合 Attention
+│   ├── norm.py                      # RMSNorm
+│   ├── ffn.py                       # SwiGLU / FFN
+│   ├── transformer.py               # Transformer Block
 │   └── flashattention/      # FlashAttention v1-v4 教学实现
 │       ├── fa1.py ... fa4.py
 │       └── common/          # 共享的在线 softmax / 掩码 / 分块原语

@@ -2,12 +2,13 @@
 
 > 资料口径：本文优先采用官方 Hugging Face 模型卡、官方技术报告、官方仓库和 arXiv 论文。闭源模型若官方未披露实现细节，统一标注“官方未完全披露”，不把社区推测写成事实。
 > 量化口径：不同论文和团队使用不同 GPU、序列长度、批大小与量化方式，所有性能数字只在各自来源口径内成立，不能直接横向比较。
+> 核验记录：本次修订已根据官方 HF 配置修正 GLM-5.1 上下文为 202,752；新增 Phi、DBRX、Nemotron、InternLM、Baichuan 系列的 Attention 配置均来自官方模型卡/配置或可复核的公开配置镜像。
 
 ---
 
 ## 一、执行摘要
 
-1. **层内 KV 压缩已成为主流**：MHA 到 MQA/GQA 再到 MLA 的演进主线非常清晰；截至 2026 年，DeepSeek、GLM、Kimi、MiniMax M3、Mistral Small 4 等均在不同程度使用 MLA 类或共享 KV 方案。
+1. **层内 KV 压缩已成为主流**：MHA 到 MQA/GQA 再到 MLA 的演进主线非常清晰；截至 2026 年，DeepSeek、GLM、Kimi、MiniMax M3、Mistral Small 4 等均在不同程度使用 MLA 类或共享 KV 方案，Phi、DBRX、InternLM 与 Nemotron 则继续验证 GQA 与混合架构。
 2. **长上下文瓶颈从“能不能训练”转向“能不能低成本推理”**：2024 年主流是 128K，2025 年出现 256K 至 1M 开源模型，2026 年 DeepSeek-V4、GLM-5.2、Kimi K3、MiniMax M3 都把 1M 上下文作为生产目标。
 3. **稀疏与压缩注意力重新成为主线**：DeepSeek-V4 使用 CSA + HCA，GLM-5 使用 DSA，MiniMax M3 使用 MSA，三者都在 KV 数量维度做压缩或选择，而不是只依赖窗口注意力。
 4. **线性注意力在超长上下文中重新崛起**：Qwen3-Next、Qwen3.5/3.6/3.8、Kimi Linear/K3 都采用 Gated DeltaNet 或 KDA 与 GQA/MLA 混合，形成“3:1 线性到全量”的常见结构。
@@ -35,6 +36,11 @@
 | GPT | GPT-5.6 Sol | 官方未披露 | 官方未披露 | 闭源 |
 | Gemini | Gemini 3.x | 官方未披露 | 官方未披露 | 闭源 |
 | Claude | Fable 5 / Mythos 5 | 官方未披露 | 官方未披露 | 闭源 |
+| Phi | Phi-4-mini | GQA | 128K | 3.8B Dense，LongRope |
+| DBRX | DBRX-Instruct | GQA 48Q/8KV | 32K | 132B/36B Active，16 专家 Top-4 |
+| Nemotron | Nemotron-3-Super | Mamba-2 + MoE + GQA | 256K，可扩展 1M | 120B/12B Active，LatentMoE |
+| InternLM | InternLM3-8B | GQA 32Q/2KV | 32K | Dynamic RoPE |
+| Baichuan | Baichuan-M3-235B | 继承 Qwen3 的 GQA | 40K | 基于 Qwen3-235B-A22B |
 
 **Attention 演进主线**
 
@@ -100,7 +106,7 @@ GLM 的公开演进路线是：MHA -> MQA -> GQA -> MLA + DSA。
 | GLM-4.7 | 2025-12 | 是 | MoE | GQA 96Q/8KV | 202,752 | 大 MoE 使用 GQA |
 | GLM-4.7-Flash | 2026-01 | 是 | MoE Lite | MLA 类 | 202,752 | `kv_lora_rank=512` |
 | GLM-5 | 2026-02 | 是 | MoE 744B/40B Active | MLA + DSA | 202,752 | 引入 DeepSeek Sparse Attention |
-| GLM-5.1 | 2026-04 | 是 | MoE | MLA + DSA | 1M | 长时任务能力升级 |
+| GLM-5.1 | 2026-04 | 是 | MoE | MLA + DSA | 202,752 | 长时任务能力升级 |
 | GLM-5.2 | 2026-06 | 是 | MoE | MLA + DSA + IndexShare | 1,048,576 | IndexShare 在 1M 上下文降低 2.9x 每 Token FLOPs |
 
 **关键事实**
@@ -278,6 +284,62 @@ Gemma 是 Google 提供公开 Attention 细节的开放系列。
 
 ---
 
+### 2.18 Phi 系列（Microsoft）
+
+Phi 系列的公开配置显示：早期小模型使用 MHA，Phi-4 起明确转向 GQA。
+
+| 版本 | 时间 | 开源 | 基础架构 | Attention 核心 | 上下文 | 关键优化 |
+|------|------|------|----------|----------------|--------|----------|
+| Phi-3-mini-128k | 2024 | 是 | Dense 3.8B | MHA 32Q/32KV | 128K | LongRope 长上下文 |
+| Phi-4 | 2024-12 | 是 | Dense 14B | GQA 40Q/10KV | 16K 配置 | RoPE theta 250K |
+| Phi-4-mini | 2025-02 | 是 | Dense 3.8B | GQA 24Q/8KV | 128K | LongRope，共享输入/输出 embedding |
+
+**核验说明**：Phi-4-mini 官方 README 明确写有 grouped-query attention 和 128K context；配置中的 `sliding_window` 字段不应被单独理解为 Mistral 式 SWA，必须以官方 README 为准。
+
+### 2.19 DBRX（Databricks）
+
+DBRX 是 2024 年少数公开 GQA + MoE 配置的开源大模型之一。
+
+| 版本 | 时间 | 开源 | 基础架构 | Attention 核心 | 上下文 | 关键优化 |
+|------|------|------|----------|----------------|--------|----------|
+| DBRX-Base / Instruct | 2024-03 | 是 | MoE 132B/36B Active | GQA 48Q/8KV | 32K | 40 层，16 专家 Top-4，RoPE theta 500K |
+
+**核验说明**：当前 Databricks 官方 HF 页面无法直接读取配置，本文使用社区镜像中的公开 config 字段进行核验：`n_heads=48`、`attn_config.kv_n_heads=8`、`max_seq_len=32768`。
+
+### 2.20 Nemotron 系列（NVIDIA）
+
+Nemotron 3 是“Mamba-2 + MoE + 少量 GQA”的代表性混合架构。
+
+| 版本 | 时间 | 开源 | 基础架构 | Attention 核心 | 上下文 | 关键优化 |
+|------|------|------|----------|----------------|--------|----------|
+| Nemotron-3-Nano | 2025-12 | 是 | MoE 30B/3.5B Active | 23 Mamba-2 + 23 MoE + 6 GQA | 256K 默认，可扩展 1M | 128+1 专家，6 专家激活 |
+| Nemotron-3-Super | 2026-03 | 是 | LatentMoE 120B/12B Active | Mamba-2 + MoE + select Attention | 256K 默认，可扩展 1M | MTP，NVFP4 预训练 |
+
+**核验说明**：Nano 官方 README 明确 52 层中 6 层使用 GQA，Super 官方 README 明确为 LatentMoE + Mamba-2 + Attention hybrid 且上下文最高 1M。
+
+### 2.21 InternLM 系列（上海 AI Lab）
+
+InternLM 的公开路线是 GQA + Dynamic RoPE 长上下文。
+
+| 版本 | 时间 | 开源 | 基础架构 | Attention 核心 | 上下文 | 关键优化 |
+|------|------|------|----------|----------------|--------|----------|
+| InternLM2.5-7B | 2024 | 是 | Dense 7B | GQA 32Q/8KV | 262,144 | Dynamic RoPE factor 2 |
+| InternLM3-8B-Instruct | 2025 | 是 | Dense 8B | GQA 32Q/2KV | 32K | Dynamic RoPE factor 6，RoPE theta 50M |
+
+### 2.22 Baichuan 系列（百川智能）
+
+Baichuan 早期使用独立 MHA 架构，2025 年后的 M 系列直接基于 Qwen 基座。
+
+| 版本 | 时间 | 开源 | 基础架构 | Attention 核心 | 上下文 | 关键优化 |
+|------|------|------|----------|----------------|--------|----------|
+| Baichuan2-7B-Base | 2023 | 是 | Dense 7B | MHA 32Q | 4K | 原生中文预训练 |
+| Baichuan-M2-32B | 2025 | 是 | 基于 Qwen2.5-32B | GQA 40Q/8KV | 131,072 | 领域强化 |
+| Baichuan-M3-235B | 2026-01 | 是 | 基于 Qwen3-235B-A22B | GQA 64Q/4KV | 40,960 | 128 专家 Top-8 |
+
+**核验说明**：Baichuan M2/M3 的 HF 配置分别为 `qwen2` 与 `qwen3_moe`，Attention 直接继承 Qwen 架构，不属于全新 Attention 设计。
+
+---
+
 ## 三、Attention 机制专题解析
 
 ### 3.1 MHA
@@ -439,6 +501,15 @@ Gemma 是 Google 提供公开 Attention 细节的开放系列。
 | Yi | Yi-34B-200K | 2023-12 | 是 | Dense 34B | GQA | Dynamic NTK | 200K | GQA | RoPE 外推 | 官方模型卡，中-高 |
 | Falcon | Falcon 40B | 2023-05 | 是 | Dense 40B | MQA + ALiBi | ALiBi | 2K 级 | MQA | 单 KV Head | 官方模型卡，高 |
 | Grok | Grok-1 | 2024-03 | 是 | MoE 314B | 25% 层 Attention | 官方未完整披露 | 8K | 8 KV Head | 8 专家 Top-2 | 官方仓库，中-高 |
+| Phi | Phi-4-mini | 2025-02 | 是 | Dense 3.8B | GQA 24Q/8KV | LongRope | 128K | GQA | 128K 上下文 | 官方 HF 模型卡/配置，高 |
+| Phi | Phi-4 | 2024-12 | 是 | Dense 14B | GQA 40Q/10KV | RoPE theta 250K | 16K | GQA | 高质量推理数据 | 官方 HF 配置，高 |
+| DBRX | DBRX-Instruct | 2024-03 | 是 | MoE 132B/36B Active | GQA 48Q/8KV | RoPE theta 500K | 32K | GQA | 16 专家 Top-4 | 官方开源+社区镜像配置，中-高 |
+| Nemotron | Nemotron-3-Super | 2026-03 | 是 | LatentMoE 120B/12B Active | Mamba-2 + MoE + GQA | 默认 256K，可扩展 1M | 256K-1M | Mamba-2 状态 + GQA | MTP、NVFP4 | 官方 HF 模型卡/配置，高 |
+| Nemotron | Nemotron-3-Nano | 2025-12 | 是 | MoE 30B/3.5B Active | 23 Mamba-2 + 23 MoE + 6 GQA | 默认 256K，可扩展 1M | 256K-1M | Mamba-2 状态 + GQA | 128+1 专家 | 官方 HF 模型卡/配置，高 |
+| InternLM | InternLM3-8B-Instruct | 2025 | 是 | Dense 8B | GQA 32Q/2KV | Dynamic RoPE | 32K | GQA | Dynamic RoPE factor 6 | 官方 HF 配置，高 |
+| InternLM | InternLM2.5-7B | 2024 | 是 | Dense 7B | GQA 32Q/8KV | Dynamic RoPE | 262K | GQA | Dynamic RoPE factor 2 | 官方 HF 配置，高 |
+| Baichuan | Baichuan-M3-235B | 2026-01 | 是 | 基于 Qwen3-235B-A22B | GQA 64Q/4KV | RoPE theta 5M | 40,960 | GQA | 128 专家 Top-8 | 官方 HF 配置，高 |
+| Baichuan | Baichuan-M2-32B | 2025 | 是 | 基于 Qwen2.5-32B | GQA 40Q/8KV | RoPE theta 1M | 131,072 | GQA | 领域强化 | 官方 HF 配置，高 |
 
 ### 表 2：Attention 类型能力对比表
 
@@ -498,16 +569,34 @@ Gemma 是 Google 提供公开 Attention 细节的开放系列。
   - `LinearAttention`，继承 `BaseAttention`，支持 `elu/relu/linear` kernel 与因果状态累积。
 - `attentionfactory/paged_attention.py`
   - `PagedKVBlockAllocator`、`PagedAttentionCache` 和 `paged_attention`，模拟 block table 与稠密 gather。
+- `attentionfactory/positional.py`
+  - `RotaryPositionEmbedding`、`YaRNScaledRotaryEmbedding`、`DynamicNTKRotaryEmbedding`、`ALiBiBias` 和工厂函数。
+- `attentionfactory/moe.py`
+  - `ExpertFFN`、`TopKRouter`、`MixtureOfExperts`、`DeepSeekMoE`，覆盖 Top-k 路由、共享专家与 DeepSeek 风格 MoE。
+- `attentionfactory/hybrid_attention.py`
+  - `HybridAttention`，按层索引在线性注意力和 GQA 全注意力之间路由，复现 Qwen3-Next/Kimi 的 3:1 混合模式。
+- `attentionfactory/norm.py`
+  - `RMSNorm`，Llama/Qwen/Mistral 等模型使用的归一化层。
+- `attentionfactory/ffn.py`
+  - `SwiGLUFFN` 与 `FeedForward`，覆盖主流 Dense 和 MoE 专家网络。
+- `attentionfactory/transformer.py`
+  - `TransformerBlock`，组合可插拔 Attention、RMSNorm 和 FFN/MoE。
 - `tests/test_extended_attention.py`
   - 覆盖 shape、梯度、确定性、窗口/块稀疏掩码、PagedAttention 与稠密注意力一致性。
+- `tests/test_positional_and_moe.py`
+  - 覆盖 RoPE 范数保持、YaRN/NTK 有限性、ALiBi 掩码、路由权重归一化、MoE 与 DeepSeekMoE 梯度。
+- `tests/test_blocks_and_hybrid.py`
+  - 覆盖 Hybrid Attention 路由、Partial RoPE、Position Interpolation、RMSNorm、SwiGLU、Transformer Block 与 MoE FFN。
 - 修改 `attentionfactory/__init__.py` 导出新模块。
 
 ### 7.2 设计说明
 
-- 所有 nn.Module 类型均继承现有 `BaseAttention`，保持 `forward(hidden_state, attention_mask, return_attention_weights)` 接口。
+- Attention 模块继承现有 `BaseAttention`，保持 `forward(hidden_state, attention_mask, return_attention_weights)` 接口；位置编码和 MoE 模块不继承 `BaseAttention`，因为它们不是 Attention 算子本身。
 - `BlockSparseAttention` 和 `SlidingWindowAttention` 仍物化 score 矩阵，因此定位是“教学/算法接口版”；真实生产版应由 CUDA kernel 直接跳过未选中 block。
 - `PagedAttentionCache` 不实现真实 GPU 内存分页、copy-on-write 或调度策略，只模拟逻辑 block table；生产系统应使用 vLLM 的 PagedAttention。
 - `LinearAttention` 使用 `cumsum` 计算因果状态，复杂度为 O(n) 状态更新，但仍是 PyTorch 教学实现，不包含 Gated DeltaNet 的门控与 chunkwise kernel。
+- `MixtureOfExperts` 按专家循环执行，便于阅读和测试；生产版本应使用 group GEMM、expert parallelism 和负载均衡调度。
+- `PartialRotaryPositionEmbedding`、`PositionInterpolation`、`RMSNorm` 和 `SwiGLUFFN` 是可直接组合的基础模块；YaRN 和 Dynamic NTK 的精确数值仍需与 Transformers 官方实现对比。
 
 ### 7.3 运行与测试
 
@@ -573,6 +662,19 @@ python -m ruff check attentionfactory tests
 - Falcon 模型卡: https://huggingface.co/tiiuae/falcon-40b
 - Grok-1 仓库: https://github.com/xai-org/grok-1
 - Claude Fable 5 / Mythos 5 官方页面: https://www.anthropic.com/news/claude-fable-5-mythos-5
+
+### Phi / DBRX / Nemotron / InternLM / Baichuan
+
+- Phi-4 官方配置: https://huggingface.co/microsoft/Phi-4
+- Phi-4-mini 官方模型卡: https://huggingface.co/microsoft/Phi-4-mini-instruct
+- DBRX 官方开源说明: https://www.databricks.com/blog/dbrx-open-source-llm
+- DBRX 公开配置镜像: https://huggingface.co/alpindale/dbrx-instruct
+- Nemotron-3-Nano 官方模型卡: https://huggingface.co/nvidia/NVIDIA-Nemotron-3-Nano-30B-A3B-BF16
+- Nemotron-3-Super 官方模型卡: https://huggingface.co/nvidia/NVIDIA-Nemotron-3-Super-120B-A12B-BF16
+- InternLM2.5-7B 官方配置: https://huggingface.co/internlm/internlm2_5-7b
+- InternLM3-8B-Instruct 官方配置: https://huggingface.co/internlm/internlm3-8b-instruct
+- Baichuan-M2-32B 官方配置: https://huggingface.co/baichuan-inc/Baichuan-M2-32B
+- Baichuan-M3-235B 官方配置: https://huggingface.co/baichuan-inc/Baichuan-M3-235B
 
 ### Attention 机制论文
 

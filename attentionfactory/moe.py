@@ -1,0 +1,221 @@
+"""Educational mixture-of-experts (MoE) modules.
+
+These modules implement the routing and expert computation patterns used by
+mainstream MoE models such as Qwen3, DeepSeekMoE, Mixtral, DBRX, Baichuan-M3
+and Nemotron-3. They are teaching implementations: expert execution loops
+over expert ids instead of using optimized group GEMM kernels.
+"""
+
+from __future__ import annotations
+
+import torch
+import torch.nn.functional as F
+from torch import nn
+
+
+class ExpertFFN(nn.Module):
+    """One expert's feed-forward network."""
+
+    def __init__(
+        self,
+        hidden_size: int,
+        intermediate_size: int,
+        activation: str = "silu",
+        bias: bool = True,
+    ) -> None:
+        super().__init__()
+        if activation not in {"silu", "relu", "gelu"}:
+            raise ValueError(f"Unknown activation: {activation}")
+        self.activation_name = activation
+        self.w1 = nn.Linear(hidden_size, intermediate_size, bias=bias)
+        self.w2 = nn.Linear(intermediate_size, hidden_size, bias=bias)
+        self._init_weights()
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        return self.w2(self._activation(self.w1(x)))
+
+    def _activation(self, x: torch.Tensor) -> torch.Tensor:
+        if self.activation_name == "silu":
+            return F.silu(x)
+        if self.activation_name == "relu":
+            return F.relu(x)
+        return F.gelu(x)
+
+    def _init_weights(self) -> None:
+        nn.init.xavier_uniform_(self.w1.weight)
+        nn.init.xavier_uniform_(self.w2.weight)
+        if self.w1.bias is not None:
+            nn.init.zeros_(self.w1.bias)
+        if self.w2.bias is not None:
+            nn.init.zeros_(self.w2.bias)
+
+
+class TopKRouter(nn.Module):
+    """Top-k expert router with optional training-time noise.
+
+    Args:
+        hidden_size: Input feature dimension.
+        num_experts: Number of routed experts.
+        top_k: Number of experts selected per token.
+        add_noise: Enable the Switch/GShard-style noise used during training.
+        noise_epsilon: Small constant added to the noise logit.
+        dropout: Dropout applied to routing weights.
+    """
+
+    def __init__(
+        self,
+        hidden_size: int,
+        num_experts: int,
+        top_k: int = 2,
+        add_noise: bool = False,
+        noise_epsilon: float = 1e-2,
+        dropout: float = 0.0,
+    ) -> None:
+        super().__init__()
+        if top_k < 1 or top_k > num_experts:
+            raise ValueError("top_k must satisfy 1 <= top_k <= num_experts")
+        self.hidden_size = int(hidden_size)
+        self.num_experts = int(num_experts)
+        self.top_k = int(top_k)
+        self.add_noise = bool(add_noise)
+        self.noise_epsilon = float(noise_epsilon)
+        self.router = nn.Linear(hidden_size, num_experts, bias=False)
+        self.noise_proj = (
+            nn.Linear(hidden_size, num_experts, bias=False) if add_noise else None
+        )
+        self.dropout = nn.Dropout(dropout)
+        nn.init.xavier_uniform_(self.router.weight)
+
+    def forward(self, x: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
+        """Return ``(routing_weights, expert_indices)``.
+
+        ``routing_weights`` has shape ``(batch, top_k)`` and sums to 1 along
+        the last dimension. ``expert_indices`` has shape ``(batch, top_k)``.
+        """
+        logits = self.router(x)
+        if self.training and self.add_noise and self.noise_proj is not None:
+            noise = torch.randn_like(logits)
+            noise = noise * F.softplus(self.noise_proj(x))
+            logits = logits + noise + self.noise_epsilon
+
+        weights, indices = torch.topk(logits, self.top_k, dim=-1)
+        weights = torch.softmax(weights, dim=-1)
+        weights = self.dropout(weights)
+        return weights, indices
+
+    def extra_repr(self) -> str:
+        return (
+            f"hidden_size={self.hidden_size}, num_experts={self.num_experts}, "
+            f"top_k={self.top_k}, add_noise={self.add_noise}"
+        )
+
+
+class MixtureOfExperts(nn.Module):
+    """Standard top-k routed mixture of experts.
+
+    The module does not add a residual connection; callers should apply the
+    transformer residual outside this layer.
+    """
+
+    def __init__(
+        self,
+        hidden_size: int,
+        num_experts: int,
+        intermediate_size: int,
+        top_k: int = 2,
+        activation: str = "silu",
+        add_router_noise: bool = False,
+        bias: bool = True,
+    ) -> None:
+        super().__init__()
+        self.hidden_size = int(hidden_size)
+        self.num_experts = int(num_experts)
+        self.intermediate_size = int(intermediate_size)
+        self.top_k = int(top_k)
+        self.experts = nn.ModuleList(
+            ExpertFFN(hidden_size, intermediate_size, activation, bias)
+            for _ in range(num_experts)
+        )
+        self.router = TopKRouter(
+            hidden_size,
+            num_experts,
+            top_k=top_k,
+            add_noise=add_router_noise,
+        )
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        """Route tokens to experts and return the combined output."""
+        flat = x.reshape(-1, self.hidden_size)
+        routing_weights, expert_indices = self.router(flat)
+        output = torch.zeros_like(flat)
+
+        for k in range(self.top_k):
+            token_weights = routing_weights[:, k]
+            token_experts = expert_indices[:, k]
+            for expert_id in range(self.num_experts):
+                mask = token_experts == expert_id
+                if not mask.any():
+                    continue
+                selected = flat[mask]
+                output[mask] += token_weights[mask].unsqueeze(-1) * self.experts[
+                    expert_id
+                ](selected)
+        return output.view_as(x)
+
+    def extra_repr(self) -> str:
+        return (
+            f"hidden_size={self.hidden_size}, num_experts={self.num_experts}, "
+            f"intermediate_size={self.intermediate_size}, top_k={self.top_k}"
+        )
+
+
+class DeepSeekMoE(nn.Module):
+    """DeepSeek-style MoE with a small set of shared experts.
+
+    The output is ``routed_experts(x) + sum(shared_experts(x))``. A residual
+    connection is intentionally left to the transformer block.
+    """
+
+    def __init__(
+        self,
+        hidden_size: int,
+        num_routed_experts: int,
+        num_shared_experts: int,
+        intermediate_size: int,
+        top_k: int = 6,
+        activation: str = "silu",
+        bias: bool = True,
+    ) -> None:
+        super().__init__()
+        if num_shared_experts < 1:
+            raise ValueError("num_shared_experts must be >= 1")
+        self.hidden_size = int(hidden_size)
+        self.num_routed_experts = int(num_routed_experts)
+        self.num_shared_experts = int(num_shared_experts)
+        self.intermediate_size = int(intermediate_size)
+        self.top_k = int(top_k)
+        self.routed = MixtureOfExperts(
+            hidden_size,
+            num_routed_experts,
+            intermediate_size,
+            top_k=top_k,
+            activation=activation,
+            bias=bias,
+        )
+        self.shared_experts = nn.ModuleList(
+            ExpertFFN(hidden_size, intermediate_size, activation, bias)
+            for _ in range(num_shared_experts)
+        )
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        """Return routed output plus shared-expert output."""
+        shared = torch.stack([expert(x) for expert in self.shared_experts]).sum(dim=0)
+        return self.routed(x) + shared
+
+    def extra_repr(self) -> str:
+        return (
+            f"hidden_size={self.hidden_size}, "
+            f"num_routed_experts={self.num_routed_experts}, "
+            f"num_shared_experts={self.num_shared_experts}, "
+            f"intermediate_size={self.intermediate_size}, top_k={self.top_k}"
+        )
