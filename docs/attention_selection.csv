@@ -54,3 +54,5 @@ Step,Step-3.7-Flash,2026-05,yes,MoE 198B/11B,GQA + SWA,256K,GQA + SWA,Multimodal
 Xiaomi MiMo,MiMo-V2.5-Pro,2026-04,yes,MoE 1.02T/42B,SWA + Global Attention,1M,GQA + SWA,KV reduction ~7x,official
 Zamba,Zamba2-7B-Instruct-v2,2025,yes,Mamba2 + Attention Hybrid,Shared Attention,4K-16K,SSM state,Mamba2 hybrid,official
 Snowflake Arctic,Arctic-Instruct,2024-04,yes,Dense-MoE Hybrid 480B,GQA,4K,GQA,128 experts top2,official
+Hunyuan,Hunyuan-A13B-Instruct,2025-06,yes,MoE 80B/13B,GQA,256K,GQA,64 experts,official
+Hunyuan,Hy3,2026-07,yes,MoE 295B/21B,GQA,256K,GQA,192 experts top8,official

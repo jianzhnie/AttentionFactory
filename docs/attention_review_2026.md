@@ -8,7 +8,7 @@
 
 ## 一、执行摘要
 
-1. **层内 KV 压缩已成为主流**：MHA 到 MQA/GQA 再到 MLA 的演进主线非常清晰；截至 2026 年，DeepSeek、GLM、Kimi、MiniMax M3、Mistral Small 4 等均在不同程度使用 MLA 类或共享 KV 方案，Phi、DBRX、InternLM、Nemotron、Step、MiMo、Zamba 与 Arctic 则继续验证 GQA、SWA、SSM 与混合架构。
+1. **层内 KV 压缩已成为主流**：MHA 到 MQA/GQA 再到 MLA 的演进主线非常清晰；截至 2026 年，DeepSeek、GLM、Kimi、MiniMax M3、Mistral Small 4 等均在不同程度使用 MLA 类或共享 KV 方案，Phi、DBRX、InternLM、Nemotron、Step、MiMo、Zamba、Arctic 与 Hunyuan 则继续验证 GQA、SWA、SSM 与混合架构。
 2. **长上下文瓶颈从“能不能训练”转向“能不能低成本推理”**：2024 年主流是 128K，2025 年出现 256K 至 1M 开源模型，2026 年 DeepSeek-V4、GLM-5.2、Kimi K3、MiniMax M3 都把 1M 上下文作为生产目标。
 3. **稀疏与压缩注意力重新成为主线**：DeepSeek-V4 使用 CSA + HCA，GLM-5 使用 DSA，MiniMax M3 使用 MSA，三者都在 KV 数量维度做压缩或选择，而不是只依赖窗口注意力。
 4. **线性注意力在超长上下文中重新崛起**：Qwen3-Next、Qwen3.5/3.6/3.8、Kimi Linear/K3 都采用 Gated DeltaNet 或 KDA 与 GQA/MLA 混合，形成“3:1 线性到全量”的常见结构。
@@ -45,6 +45,7 @@
 | Xiaomi MiMo | MiMo-V2.5-Pro | SWA + Global Attention 6:1 | 1M | 1.02T/42B Active，KV 减少约 7x |
 | Zamba | Zamba2-7B | Mamba2 + Shared Attention | 4K，可扩展 16K | SSM/Transformer 混合 |
 | Snowflake Arctic | Arctic-Instruct | GQA + Dense-MoE Hybrid | 4K | 480B，128 专家 Top-2 |
+| Hunyuan | Hy3 | GQA 64Q/8KV | 256K | 295B/21B Active，192 专家 Top-8 |
 
 **Attention 演进主线**
 
@@ -391,12 +392,27 @@ Arctic 是“Dense 主干 + 大规模 MoE 残差”的代表。
 
 ---
 
-### 2.27 遗漏分析：已覆盖 / 未覆盖 / 待补充
+### 2.27 Hunyuan 系列（腾讯）
+
+Hunyuan 的公开路线是：Dense/MoE 商用模型 -> Hunyuan-A13B 开源 MoE -> Hy3 大规模 MoE。
+
+| 版本 | 时间 | 开源 | 基础架构 | Attention 核心 | 上下文 | 关键优化 |
+|------|------|------|----------|----------------|--------|----------|
+| Hunyuan 商用 API | 2023-2025 | 否 | 官方未完全披露 | 官方未完全披露 | 产品档位 | 闭源 |
+| Hunyuan-A13B-Instruct | 2025-06 | 是 | MoE 80B/13B Active | GQA 32Q/8KV | 256K，默认配置 32K | 64 专家，动态 RoPE，量化部署 |
+| Hy3 | 2026-07 | 是 | MoE 295B/21B Active | GQA 64Q/8KV | 256K | 192 专家 Top-8，MTP 3.8B 参数 |
+| Hy-MT2-30B-A3B | 2026-05 | 是 | MoE 30B/3B Active | GQA 32Q/4KV | 256K | 128 专家 Top-8，33 语言翻译 |
+
+**核验说明**：Hunyuan-A13B 官方模型卡确认 80B 总参/13B 激活、GQA、256K 上下文；Hy3 官方模型卡确认 295B 总参/21B 激活、GQA 64Q/8KV、256K 上下文、192 专家。
+
+---
+
+### 2.28 遗漏分析：已覆盖 / 未覆盖 / 待补充
 
 **已覆盖模型系列**
 
 - 必选系列：Qwen、DeepSeek、GLM、Kimi、MiniMax、Step、Xiaomi MiMo、Llama。
-- 额外系列：GPT、Gemini、Claude、Mistral、Mixtral、Yi、Gemma、Falcon、PaLM、MiniCPM、Grok、Phi、DBRX、Nemotron、InternLM、Baichuan、Zamba、Snowflake Arctic。
+- 额外系列：GPT、Gemini、Claude、Mistral、Mixtral、Yi、Gemma、Falcon、PaLM、MiniCPM、Grok、Phi、DBRX、Nemotron、InternLM、Baichuan、Zamba、Snowflake Arctic、Hunyuan。
 
 **已覆盖核心模块**
 
@@ -594,6 +610,8 @@ Arctic 是“Dense 主干 + 大规模 MoE 残差”的代表。
 | Xiaomi MiMo | MiMo-V2.5-Pro | 2026-04 | 是 | MoE 1.02T/42B Active | SWA + GA 6:1 | RoPE theta 10M | 1M | GQA + SWA，KV 减少约 7x | 3 层 MTP | 官方 HF 模型卡/配置，高 |
 | Zamba | Zamba2-7B-Instruct-v2 | 2025 | 是 | Mamba2 + Attention Hybrid | Mamba2 + Shared Attention | RoPE 4K，扩展 16K | 4K-16K | SSM 状态 | 共享 Attention + LoRA | 官方 HF 模型卡/配置，高 |
 | Snowflake Arctic | Arctic-Instruct | 2024-04 | 是 | Dense-MoE Hybrid 480B | GQA 56Q/8KV | RoPE | 4,096 | GQA | 128 专家 Top-2 | 官方 HF 配置/模型卡，高 |
+| Hunyuan | Hy3 | 2026-07 | 是 | MoE 295B/21B Active | GQA 64Q/8KV | RoPE | 262,144 | GQA | 192 专家 Top-8，MTP | 官方 HF 模型卡/配置，高 |
+| Hunyuan | Hunyuan-A13B-Instruct | 2025-06 | 是 | MoE 80B/13B Active | GQA 32Q/8KV | Dynamic RoPE | 256K，默认 32K | GQA | 64 专家 | 官方 HF 模型卡/配置，高 |
 
 ### 表 2：Attention 类型能力对比表
 
@@ -859,6 +877,12 @@ python -m ruff check attentionfactory tests
 - Xiaomi MiMo-V2.5-Pro 官方模型卡: https://huggingface.co/XiaomiMiMo/MiMo-V2.5-Pro
 - Zamba2-7B-Instruct-v2 官方模型卡: https://huggingface.co/Zyphra/Zamba2-7B-Instruct-v2
 - Snowflake Arctic-Instruct 官方模型卡: https://huggingface.co/Snowflake/snowflake-arctic-instruct
+
+### Hunyuan
+
+- Hunyuan-A13B-Instruct 官方模型卡: https://huggingface.co/tencent/Hunyuan-A13B-Instruct
+- Hy3 官方模型卡: https://huggingface.co/tencent/Hy3
+- Hy-MT2-30B-A3B 官方模型卡: https://huggingface.co/tencent/Hy-MT2-30B-A3B
 
 ### Attention 机制论文
 
