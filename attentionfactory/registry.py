@@ -6,6 +6,7 @@ from .block_sparse_attention import BlockSparseAttention
 from .gated_delta_net import GatedDeltaNet
 from .gqa import GroupQueryAttention
 from .hybrid_attention import HybridAttention
+from .lightning_attention import LightningAttention
 from .linear_attention import LinearAttention
 from .mha import MultiHeadAttention
 from .mla import MultiHeadLatentAttention
@@ -24,6 +25,7 @@ ATTENTION_REGISTRY = {
     "swa": SlidingWindowAttention,
     "block_sparse": BlockSparseAttention,
     "linear": LinearAttention,
+    "lightning": LightningAttention,
     "gated_delta": GatedDeltaNet,
     "hybrid": HybridAttention,
 }

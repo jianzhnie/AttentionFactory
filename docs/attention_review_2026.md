@@ -577,6 +577,16 @@ Baichuan 早期使用独立 MHA 架构，2025 年后的 M 系列直接基于 Qwe
   - `HybridAttention`，按层索引在线性注意力和 GQA 全注意力之间路由，复现 Qwen3-Next/Kimi 的 3:1 混合模式。
 - `attentionfactory/gated_delta_net.py`
   - `GatedDeltaNet`，门控 Delta 规则线性注意力的教学实现。
+- `attentionfactory/lightning_attention.py`
+  - `LightningAttention`，分块线性注意力与 intra-block softmax 的 MiniMax 风格实现。
+- `attentionfactory/sparse_indexer.py`
+  - `BlockSparseIndexer`，学习式 KV block Top-k 选择器，可与 `BlockSparseAttention` 组合。
+- `attentionfactory/latent_moe.py`
+  - `LatentMoE`，Nemotron-3 风格的潜空间路由 MoE。
+- `attentionfactory/attention_residual.py`
+  - `AttentionResidual`，Kimi K3 Attention Residual 的简化教学版本。
+- `attentionfactory/multi_token_prediction.py`
+  - `MultiTokenPredictionHead`，DeepSeek/Nemotron 风格多 Token 预测头。
 - `attentionfactory/norm.py`
   - `RMSNorm`，Llama/Qwen/Mistral 等模型使用的归一化层。
 - `attentionfactory/ffn.py`
@@ -595,6 +605,8 @@ Baichuan 早期使用独立 MHA 架构，2025 年后的 M 系列直接基于 Qwe
   - 覆盖 Hybrid Attention 路由、Partial RoPE、Position Interpolation、RMSNorm、SwiGLU、Transformer Block 与 MoE FFN。
 - `tests/test_model_registry_gated.py`
   - 覆盖 Gated DeltaNet、注册表、CausalLMModel 的 Dense/MoE/Hybrid 组合与梯度。
+- `tests/test_extra_modules.py`
+  - 覆盖 Lightning Attention、LatentMoE、Attention Residual、Block Sparse Indexer 与 MTP。
 - 修改 `attentionfactory/__init__.py` 导出新模块。
 
 ### 7.2 设计说明

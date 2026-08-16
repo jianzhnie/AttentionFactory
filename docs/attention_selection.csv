@@ -40,3 +40,13 @@ Yi,Yi-34B-200K,2023-12,yes,Dense 34B,GQA,200K,GQA,Dynamic NTK,official
 Falcon,Falcon 40B,2023-05,yes,Dense 40B,MQA + ALiBi,2K,MQA,ALiBi,official
 Grok,Grok-1,2024-03,yes,MoE 314B,25% layers attention,8K,8 KV heads,8 experts top2,official
 MiniCPM,MiniCPM3-4B,2024-09,yes,Dense 4B,MLA,32K,MLA,Small model MLA,official
+Phi,Phi-3-mini-128k,2024,yes,Dense 3.8B,MHA,128K,MHA,LongRope,official
+Phi,Phi-4,2024-12,yes,Dense 14B,GQA,16K,GQA,RoPE theta 250K,official
+Phi,Phi-4-mini,2025-02,yes,Dense 3.8B,GQA,128K,GQA,LongRope,shared embeddings,official
+DBRX,DBRX-Instruct,2024-03,yes,MoE 132B/36B,GQA,32K,GQA,16 experts top4,official-community
+Nemotron,Nemotron-3-Nano,2025-12,yes,MoE 30B/3.5B,23 Mamba-2 + 23 MoE + 6 GQA,256K-1M,Mamba state + GQA,Hybrid MoE,official
+Nemotron,Nemotron-3-Super,2026-03,yes,LatentMoE 120B/12B,Mamba-2 + MoE + Attention,256K-1M,Mamba state + GQA,MTP,official
+InternLM,InternLM2.5-7B,2024,yes,Dense 7B,GQA,262K,GQA,Dynamic RoPE factor 2,official
+InternLM,InternLM3-8B-Instruct,2025,yes,Dense 8B,GQA,32K,GQA,Dynamic RoPE factor 6,official
+Baichuan,Baichuan-M2-32B,2025,yes,Qwen2.5-based,GQA,131K,GQA,Based on Qwen2.5-32B,official
+Baichuan,Baichuan-M3-235B,2026-01,yes,Qwen3-based,GQA,40K,GQA,Based on Qwen3-235B-A22B,official

@@ -15,8 +15,10 @@
   - **Linear Attention** - 线性注意力
   - **Hybrid Attention** - 线性/全量注意力按层交错
   - **Gated DeltaNet** - 门控 Delta 规则的线性注意力
+  - **Lightning Attention** - 分块线性注意力 + Intra-block Softmax
 - **位置编码与长上下文扩展**：RoPE、YaRN、Dynamic NTK、ALiBi
 - **MoE 模块**：Top-k Router、Expert FFN、Mixture-of-Experts、DeepSeek-style Shared Expert MoE
+- **稀疏索引与模型级模块**：Block Sparse Indexer、LatentMoE、Attention Residual、Multi-Token Prediction
 - **Transformer 基础模块**：RMSNorm、SwiGLU FFN、可插拔 Transformer Block
 - **模型级组合**：CausalLMModel 与 Attention/Positional 注册表
 - **FlashAttention 教学实现**：`flashattention` 子包包含 FA1–FA4 四个版本的纯 PyTorch 在线 softmax 分块实现（含 forward/backward），用于理解各版本算法结构的演进
@@ -349,6 +351,11 @@ AttentionFactory/
 │   ├── moe.py                       # Top-k Router 与 MoE
 │   ├── hybrid_attention.py          # 线性/全量混合 Attention
 │   ├── gated_delta_net.py           # Gated DeltaNet
+│   ├── lightning_attention.py       # Lightning Attention
+│   ├── sparse_indexer.py            # Block Sparse Indexer
+│   ├── latent_moe.py                # LatentMoE
+│   ├── attention_residual.py        # Attention Residual
+│   ├── multi_token_prediction.py    # Multi-Token Prediction Head
 │   ├── norm.py                      # RMSNorm
 │   ├── ffn.py                       # SwiGLU / FFN
 │   ├── transformer.py               # Transformer Block
