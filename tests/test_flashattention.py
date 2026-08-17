@@ -2,24 +2,29 @@
 
 Every version is checked against the dense `reference_attention` for forward
 outputs and against autograd through that reference for gradients, across
-dtypes, causal masking, padding masks and cross-attention shapes.
+dtypes, causal masking, padding masks and cross-attention shapes. Also covers
+the FA4 conditional-rescale rule and FA3's simulated FP8 path.
 """
 
 import math
 
 import pytest
 import torch
+from helpers import make_key_padding_mask, make_qkv, reference_with_grads
 
 from attentionfactory.flashattention import fa1, fa2, fa3, fa4, flash_attention
 from attentionfactory.flashattention.common import (
     FlashAttentionConfig,
     reference_attention,
 )
+from attentionfactory.flashattention.fa4 import (
+    _correction_merge,
+    _fa4_rescale_threshold,
+)
 
-VERSIONS = [fa1, fa2, fa3, fa4]
-VERSION_IDS = ["fa1", "fa2", "fa3", "fa4"]
+MODULES = {"fa1": fa1, "fa2": fa2, "fa3": fa3, "fa4": fa4}
 
-# Small blocks so every test exercises multi-tile online-softmax merges.
+# Small blocks so every test exercises multi-block online-softmax merges.
 TILED_CONFIG = FlashAttentionConfig(block_size_q=16, block_size_kv=8)
 
 TOLERANCES = {
@@ -28,36 +33,8 @@ TOLERANCES = {
     torch.bfloat16: 5e-2,
 }
 
-
-def make_inputs(batch, heads, q_len, kv_len, head_dim, value_dim, dtype, seed=0):
-    generator = torch.Generator().manual_seed(seed)
-    shape_q = (batch, heads, q_len, head_dim)
-    shape_k = (batch, heads, kv_len, head_dim)
-    shape_v = (batch, heads, kv_len, value_dim)
-    q = torch.randn(shape_q, generator=generator, dtype=dtype)
-    k = torch.randn(shape_k, generator=generator, dtype=dtype)
-    v = torch.randn(shape_v, generator=generator, dtype=dtype)
-    return q, k, v
-
-
-def make_padding_mask(batch, kv_len, seed=1):
-    """Random padding mask; batch row 0 is fully masked to test the edge case."""
-    generator = torch.Generator().manual_seed(seed)
-    mask = torch.rand(batch, kv_len, generator=generator) > 0.3
-    mask[1:, 0] = True  # other rows keep at least one valid key
-    mask[0] = False
-    return mask
-
-
-def autograd_reference(q, k, v, causal, mask, grad_out):
-    q_ref, k_ref, v_ref = (t.clone().requires_grad_(True) for t in (q, k, v))
-    out = reference_attention(q_ref, k_ref, v_ref, causal=causal, key_padding_mask=mask)
-    out.backward(grad_out)
-    return out.detach(), q_ref.grad, k_ref.grad, v_ref.grad
-
-
+# (batch, heads, q_len, kv_len, head_dim, value_dim, causal, use_mask, dtype)
 CASES = [
-    # (batch, heads, q_len, kv_len, head_dim, value_dim, causal, use_mask, dtype)
     (2, 3, 37, 37, 16, 24, False, False, torch.float32),  # self-attn, d_v != d_qk
     (2, 3, 40, 40, 16, 16, True, False, torch.float32),  # causal
     (2, 3, 37, 51, 16, 8, False, True, torch.float32),  # cross-attn + padding
@@ -67,7 +44,7 @@ CASES = [
 ]
 
 
-@pytest.mark.parametrize("version", VERSIONS, ids=VERSION_IDS)
+@pytest.mark.parametrize("version", MODULES.values(), ids=MODULES.keys())
 @pytest.mark.parametrize(
     (
         "batch",
@@ -85,16 +62,16 @@ CASES = [
 def test_forward_backward_match_reference(
     version, batch, heads, q_len, kv_len, head_dim, value_dim, causal, use_mask, dtype
 ):
-    q, k, v = make_inputs(batch, heads, q_len, kv_len, head_dim, value_dim, dtype)
-    mask = make_padding_mask(batch, kv_len) if use_mask else None
+    q, k, v = make_qkv(batch, heads, q_len, kv_len, head_dim, value_dim, dtype=dtype)
+    mask = make_key_padding_mask(batch, kv_len) if use_mask else None
     generator = torch.Generator().manual_seed(2)
     grad_out = torch.randn(
         batch, heads, q_len, value_dim, dtype=dtype, generator=generator
     )
     tol = TOLERANCES[dtype]
 
-    ref_out, ref_dq, ref_dk, ref_dv = autograd_reference(
-        q, k, v, causal, mask, grad_out
+    ref_out, ref_grad_q, ref_grad_k, ref_grad_v = reference_with_grads(
+        q, k, v, causal=causal, key_padding_mask=mask, grad_out=grad_out
     )
 
     fwd = version.forward(
@@ -112,14 +89,14 @@ def test_forward_backward_match_reference(
         key_padding_mask=mask,
         config=TILED_CONFIG,
     )
-    assert (bwd.grad_q.float() - ref_dq.float()).abs().max().item() <= tol
-    assert (bwd.grad_k.float() - ref_dk.float()).abs().max().item() <= tol
-    assert (bwd.grad_v.float() - ref_dv.float()).abs().max().item() <= tol
+    assert (bwd.grad_q.float() - ref_grad_q.float()).abs().max().item() <= tol
+    assert (bwd.grad_k.float() - ref_grad_k.float()).abs().max().item() <= tol
+    assert (bwd.grad_v.float() - ref_grad_v.float()).abs().max().item() <= tol
 
 
-@pytest.mark.parametrize("version", VERSIONS, ids=VERSION_IDS)
+@pytest.mark.parametrize("version", MODULES.values(), ids=MODULES.keys())
 def test_lse_matches_logsumexp(version):
-    q, k, v = make_inputs(1, 1, 10, 12, 8, 8, torch.float32)
+    q, k, v = make_qkv(1, 1, 10, 12, 8, 8)
     scores = torch.einsum("bhid,bhjd->bhij", q / math.sqrt(8), k)
     ref_lse = torch.logsumexp(scores, dim=-1, keepdim=True)
 
@@ -127,10 +104,10 @@ def test_lse_matches_logsumexp(version):
     assert (fwd.lse - ref_lse).abs().max().item() <= 1e-4
 
 
-@pytest.mark.parametrize("version_name", VERSION_IDS)
+@pytest.mark.parametrize("version_name", MODULES.keys())
 def test_single_tile_matches_reference(version_name):
     """Block sizes larger than the sequence must degrade to plain attention."""
-    q, k, v = make_inputs(1, 1, 5, 5, 8, 8, torch.float32)
+    q, k, v = make_qkv(1, 1, 5, 5, 8, 8)
     big_config = FlashAttentionConfig(block_size_q=1024, block_size_kv=1024)
 
     ref = reference_attention(q, k, v, causal=True)
@@ -138,28 +115,9 @@ def test_single_tile_matches_reference(version_name):
     assert (out - ref).abs().max().item() <= 2e-5
 
 
-def test_fa3_fp8_forward_approximates_reference():
-    q, k, v = make_inputs(1, 2, 32, 32, 16, 16, torch.float32)
-    fp8_config = FlashAttentionConfig(block_size_q=16, block_size_kv=8, fp8=True)
-
-    ref = reference_attention(q, k, v)
-    fwd = fa3.forward(q, k, v, config=fp8_config)
-    # Simulated E4M3 quantization is lossy but should stay in the ballpark.
-    assert (fwd.out - ref).abs().max().item() <= 0.2
-
-
-def test_fa3_fp8_backward_raises():
-    q, k, v = make_inputs(1, 1, 16, 16, 8, 8, torch.float32)
-    fp8_config = FlashAttentionConfig(fp8=True)
-    fwd = fa3.forward(q, k, v, config=fp8_config)
-
-    with pytest.raises(ValueError, match="FP8 backward"):
-        fa3.backward(q, k, v, torch.ones_like(fwd.out), fwd, config=fp8_config)
-
-
-@pytest.mark.parametrize("version", VERSIONS, ids=VERSION_IDS)
+@pytest.mark.parametrize("version", MODULES.values(), ids=MODULES.keys())
 def test_invalid_shapes_raise(version):
-    q, k, v = make_inputs(1, 2, 8, 8, 16, 16, torch.float32)
+    q, k, v = make_qkv(1, 2, 8, 8, 16, 16)
     bad_k = torch.randn(1, 4, 8, 16)  # head mismatch
 
     with pytest.raises(ValueError, match="head"):
@@ -170,11 +128,99 @@ def test_invalid_shapes_raise(version):
         version.forward(q, k, v, key_padding_mask=bad_mask)
 
 
-@pytest.mark.parametrize("version", VERSIONS, ids=VERSION_IDS)
+@pytest.mark.parametrize("version", MODULES.values(), ids=MODULES.keys())
 def test_fully_masked_rows_produce_zero_output(version):
-    q, k, v = make_inputs(1, 1, 6, 6, 8, 8, torch.float32)
+    q, k, v = make_qkv(1, 1, 6, 6, 8, 8)
     mask = torch.zeros(1, 6, dtype=torch.bool)
 
     fwd = version.forward(q, k, v, key_padding_mask=mask, config=TILED_CONFIG)
     assert torch.isfinite(fwd.out).all()
     assert (fwd.out == 0).all()
+
+
+# --- FA3: simulated FP8 path -------------------------------------------------
+
+
+def test_fa3_fp8_forward_matches_reference_and_tracks_metadata():
+    q, k, v = make_qkv(1, 2, 32, 32, 16, 16)
+    fp8_config = FlashAttentionConfig(block_size_q=16, block_size_kv=8, fp8=True)
+
+    fwd = fa3.forward(q, k, v, config=fp8_config)
+    ref = reference_attention(q, k, v)
+
+    # Simulated E4M3 quantization is lossy but should stay in the ballpark.
+    assert (fwd.out - ref).abs().max().item() <= 0.2
+
+    # Every pipeline stage records its per-tile quantization scales.
+    assert fwd.saved_state["fp8_enabled"]
+    first_stage = fwd.saved_state["pipeline_trace"][0]
+    assert first_stage["fp8"]
+    assert first_stage["q_scale"] is not None
+    assert first_stage["k_scale"] is not None
+    assert first_stage["v_scale"] is not None
+
+
+def test_fa3_fp8_backward_raises():
+    q, k, v = make_qkv(1, 1, 16, 16, 8, 8)
+    fp8_config = FlashAttentionConfig(fp8=True)
+    fwd = fa3.forward(q, k, v, config=fp8_config)
+
+    with pytest.raises(ValueError, match="FP8 backward"):
+        fa3.backward(q, k, v, torch.ones_like(fwd.out), fwd, config=fp8_config)
+
+
+# --- FA4: thresholded selective rescaling ------------------------------------
+
+SCALE_LOG2 = 1.0 / math.log(2.0)
+
+
+def _correction_merge_for(block_max: float, **overrides):
+    """Run `_correction_merge` on a minimal 1x1x1x2 state, FA4 threshold 8.0."""
+    state = {
+        "out_acc_block": torch.tensor([[[[2.0, 4.0]]]]),
+        "normalizer_block": torch.tensor([[[[3.0]]]]),
+        "row_max_block": torch.tensor([[[[10.0]]]]),
+        "block_sum": torch.tensor([[[[5.0]]]]),
+        "weighted_values": torch.tensor([[[[7.0, 11.0]]]]),
+    }
+    state.update(overrides)
+    return _correction_merge(
+        **state,
+        block_max=torch.tensor([[[[block_max]]]]),
+        scale_log2=SCALE_LOG2,
+        rescale_threshold=8.0,
+    )
+
+
+def test_fa4_rescale_threshold_matches_official_policy():
+    assert _fa4_rescale_threshold(torch.float16) == 8.0
+    assert _fa4_rescale_threshold(torch.bfloat16) == 8.0
+    assert _fa4_rescale_threshold(torch.float32) == 0.0
+
+
+def test_fa4_correction_skips_rescale_for_small_max_increase():
+    # block_max 11 vs running max 10: the log2-domain delta stays within the
+    # threshold, so the old row max is kept and no full rescale happens.
+    _, _, row_max, rescaled = _correction_merge_for(11.0)
+    assert not rescaled.any().item()
+    assert torch.equal(row_max, torch.tensor([[[[10.0]]]]))
+
+
+def test_fa4_correction_rescales_for_large_max_increase():
+    # block_max 20 vs running max 10: beyond the threshold, full rescale path.
+    _, _, row_max, rescaled = _correction_merge_for(20.0)
+    assert rescaled.all().item()
+    assert (row_max >= 10.0).all()
+
+
+def test_fa4_correction_initializes_empty_state():
+    # Uninitialized rows (row max -inf) must take the full merge path so the
+    # running row max becomes finite even with thresholding enabled.
+    _, _, row_max, rescaled = _correction_merge_for(
+        5.0,
+        out_acc_block=torch.zeros(1, 1, 1, 2),
+        normalizer_block=torch.zeros(1, 1, 1, 1),
+        row_max_block=torch.full((1, 1, 1, 1), float("-inf")),
+    )
+    assert rescaled.all().item()
+    assert torch.isfinite(row_max).all()

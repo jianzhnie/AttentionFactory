@@ -168,9 +168,10 @@ def backward(
     for k_slice in k_slices:
         k_block = k[:, :, k_slice, :]
         v_block = v[:, :, k_slice, :]
-        # FA1 accumulates grad_k and grad_v per K/V tile while revisiting every query tile.
-        # The real backward kernel similarly recomputes local probabilities instead
-        # of reading a stored attention matrix back from global memory.
+        # FA1 accumulates grad_k and grad_v per K/V tile while revisiting
+        # every query tile. The real backward kernel similarly recomputes
+        # local probabilities instead of reading a stored attention matrix
+        # back from global memory.
         grad_k_block = torch.zeros_like(k_block, dtype=torch.float32)
         grad_v_block = torch.zeros_like(v_block, dtype=torch.float32)
 
@@ -203,7 +204,11 @@ def backward(
         grad_k[:, :, k_slice, :] = grad_k_block
         grad_v[:, :, k_slice, :] = grad_v_block
 
-    return BackwardResult(grad_q=grad_q.to(q.dtype), grad_k=grad_k.to(k.dtype), grad_v=grad_v.to(v.dtype))
+    return BackwardResult(
+        grad_q=grad_q.to(q.dtype),
+        grad_k=grad_k.to(k.dtype),
+        grad_v=grad_v.to(v.dtype),
+    )
 
 
 def flash_attention_v1(

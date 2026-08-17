@@ -8,6 +8,7 @@ equivalence between related variants and against PyTorch's SDPA.
 import pytest
 import torch
 import torch.nn.functional as F
+from helpers import make_causal_mask, make_hidden_state, make_padding_mask
 
 from attentionfactory import (
     GroupQueryAttention,
@@ -31,23 +32,6 @@ MODULE_FACTORIES = {
 }
 
 
-def make_input(seed=0):
-    generator = torch.Generator().manual_seed(seed)
-    return torch.randn(BATCH, SEQ, HIDDEN, generator=generator)
-
-
-def make_causal_mask():
-    causal = torch.tril(torch.ones(SEQ, SEQ, dtype=torch.bool))
-    return causal.expand(BATCH, 1, SEQ, SEQ)
-
-
-def make_padding_mask():
-    # (batch, 1, 1, seq) padding mask; every row keeps at least one valid key.
-    mask = torch.ones(BATCH, 1, 1, SEQ, dtype=torch.bool)
-    mask[0, 0, 0, -2:] = False
-    return mask
-
-
 @pytest.fixture(params=list(MODULE_FACTORIES), ids=list(MODULE_FACTORIES))
 def module(request):
     mod = MODULE_FACTORIES[request.param]()
@@ -56,19 +40,21 @@ def module(request):
 
 
 def test_output_shape_and_finiteness(module):
-    out = module(make_input())
+    out = module(make_hidden_state(BATCH, SEQ, HIDDEN))
     assert out.shape == (BATCH, SEQ, HIDDEN)
     assert torch.isfinite(out).all()
 
 
 def test_eval_mode_is_deterministic(module):
-    x = make_input()
+    x = make_hidden_state(BATCH, SEQ, HIDDEN)
     torch.testing.assert_close(module(x), module(x))
 
 
 def test_causal_mask_zeroes_future_attention(module):
     out, weights = module(
-        make_input(), attention_mask=make_causal_mask(), return_attention_weights=True
+        make_hidden_state(BATCH, SEQ, HIDDEN),
+        attention_mask=make_causal_mask(BATCH, SEQ),
+        return_attention_weights=True,
     )
 
     assert out.shape == (BATCH, SEQ, HIDDEN)
@@ -85,7 +71,9 @@ def test_causal_mask_zeroes_future_attention(module):
 def test_padding_mask_shape_is_supported(module):
     """A broadcastable (batch, 1, 1, seq) padding mask must work, as documented."""
     out, weights = module(
-        make_input(), attention_mask=make_padding_mask(), return_attention_weights=True
+        make_hidden_state(BATCH, SEQ, HIDDEN),
+        attention_mask=make_padding_mask(BATCH, SEQ),
+        return_attention_weights=True,
     )
     assert out.shape == (BATCH, SEQ, HIDDEN)
     # Masked key positions receive zero weight in the masked batch row.
@@ -95,7 +83,7 @@ def test_padding_mask_shape_is_supported(module):
 
 
 def test_return_attention_weights_flag(module):
-    x = make_input()
+    x = make_hidden_state(BATCH, SEQ, HIDDEN)
     assert isinstance(module(x), torch.Tensor)
     out, weights = module(x, return_attention_weights=True)
     assert isinstance(out, torch.Tensor)
@@ -103,7 +91,7 @@ def test_return_attention_weights_flag(module):
 
 
 def test_gradient_flows_to_inputs_and_parameters(module):
-    x = make_input().requires_grad_(True)
+    x = make_hidden_state(BATCH, SEQ, HIDDEN).requires_grad_(True)
     module(x).sum().backward()
 
     assert x.grad is not None and torch.isfinite(x.grad).all()
@@ -115,7 +103,7 @@ def test_gradient_flows_to_inputs_and_parameters(module):
 def test_train_mode_dropout_is_stochastic():
     mod = MultiHeadAttention(HIDDEN, HEADS, dropout=0.5)
     mod.train()
-    x = make_input()
+    x = make_hidden_state(BATCH, SEQ, HIDDEN)
     assert not torch.allclose(mod(x), mod(x))
 
 
@@ -143,7 +131,7 @@ def test_gqa_with_full_groups_equals_mha():
     mha.eval()
     gqa.eval()
 
-    x = make_input()
+    x = make_hidden_state(BATCH, SEQ, HIDDEN)
     torch.testing.assert_close(gqa(x), mha(x))
 
 
@@ -155,7 +143,7 @@ def test_gqa_with_single_group_equals_mqa():
     mqa.eval()
     gqa.eval()
 
-    x = make_input()
+    x = make_hidden_state(BATCH, SEQ, HIDDEN)
     torch.testing.assert_close(gqa(x), mqa(x))
 
 
@@ -164,12 +152,12 @@ def test_mha_matches_pytorch_sdpa(use_mask):
     """MHA output must match F.scaled_dot_product_attention on the same projections."""
     mha = MultiHeadAttention(HIDDEN, HEADS, dropout=0.0)
     mha.eval()
-    x = make_input()
+    x = make_hidden_state(BATCH, SEQ, HIDDEN)
 
     query = mha.split_head(mha.q_proj(x))
     key = mha.split_head(mha.k_proj(x))
     value = mha.split_head(mha.v_proj(x))
-    mask = make_causal_mask() if use_mask else None
+    mask = make_causal_mask(BATCH, SEQ) if use_mask else None
 
     ref = F.scaled_dot_product_attention(query, key, value, attn_mask=mask)
     ref = mha.o_proj(mha.combine_head(ref))
@@ -178,15 +166,15 @@ def test_mha_matches_pytorch_sdpa(use_mask):
 
 
 def test_attention_mask_actually_changes_output(module):
-    x = make_input()
+    x = make_hidden_state(BATCH, SEQ, HIDDEN)
     plain = module(x)
-    masked = module(x, attention_mask=make_causal_mask())
+    masked = module(x, attention_mask=make_causal_mask(BATCH, SEQ))
     assert not torch.allclose(plain, masked)
 
 
 def test_fully_masked_rows_produce_zero_output(module):
     """A row with every key masked must yield zeros, not NaN."""
-    x = make_input()
+    x = make_hidden_state(BATCH, SEQ, HIDDEN)
     mask = torch.zeros(BATCH, 1, 1, SEQ, dtype=torch.bool)
 
     out = module(x, attention_mask=mask)
@@ -205,7 +193,7 @@ def test_rejects_non_3d_input(module):
 def test_rejects_mask_with_wrong_batch_size(module):
     bad_mask = torch.ones(BATCH + 1, 1, 1, SEQ, dtype=torch.bool)
     with pytest.raises(ValueError, match="batch size"):
-        module(make_input(), attention_mask=bad_mask)
+        module(make_hidden_state(BATCH, SEQ, HIDDEN), attention_mask=bad_mask)
 
 
 def test_mla_reports_latent_configuration():

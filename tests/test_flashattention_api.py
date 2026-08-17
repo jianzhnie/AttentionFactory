@@ -2,6 +2,7 @@
 
 import pytest
 import torch
+from helpers import make_key_padding_mask, make_qkv, with_grad
 
 from attentionfactory import FlashAttention, flash_attention
 from attentionfactory.flashattention import (
@@ -10,22 +11,15 @@ from attentionfactory.flashattention import (
     list_versions,
 )
 from attentionfactory.flashattention.common import FlashAttentionConfig
+from attentionfactory.flashattention.script_utils import validate_fp8_support
 
 CONFIG = FlashAttentionConfig(block_size_q=8, block_size_kv=8)
 VERSIONS = list_versions()
 
 
-def make_qkv(seed=0):
-    generator = torch.Generator().manual_seed(seed)
-    q = torch.randn(2, 3, 20, 16, generator=generator)
-    k = torch.randn(2, 3, 20, 16, generator=generator)
-    v = torch.randn(2, 3, 20, 24, generator=generator)  # value_dim != head_dim
-    return q, k, v
-
-
 @pytest.mark.parametrize("version", VERSIONS)
 def test_functional_matches_version_modules(version):
-    q, k, v = make_qkv()
+    q, k, v = make_qkv(2, 3, 20, 20, 16, 24)
     direct = ATTENTION_FN_REGISTRY[version](q, k, v, causal=True, config=CONFIG)
     wrapped = flash_attention(q, k, v, version=version, causal=True, config=CONFIG)
     torch.testing.assert_close(wrapped, direct)
@@ -33,12 +27,13 @@ def test_functional_matches_version_modules(version):
 
 @pytest.mark.parametrize("version", VERSIONS)
 def test_attention_is_differentiable(version):
-    """`attention()` must route gradients through the tiled backward pass."""
+    """The flash_attention_v* functions must route into the tiled backward."""
     module = get_version_module(version)
-    q, k, v = (t.requires_grad_(True) for t in make_qkv())
+    attention_fn = ATTENTION_FN_REGISTRY[version]
+    q, k, v = with_grad(*make_qkv(2, 3, 20, 20, 16, 24))
     grad_out = torch.randn(2, 3, 20, 24, generator=torch.Generator().manual_seed(1))
 
-    out = ATTENTION_FN_REGISTRY[version](q, k, v, causal=True, config=CONFIG)
+    out = attention_fn(q, k, v, causal=True, config=CONFIG)
     assert out.grad_fn is not None
     out.backward(grad_out)
 
@@ -55,9 +50,8 @@ def test_attention_is_differentiable(version):
 
 @pytest.mark.parametrize("version", VERSIONS)
 def test_attention_supports_padding_mask_with_autograd(version):
-    q, k, v = (t.requires_grad_(True) for t in make_qkv())
-    mask = torch.rand(2, 20, generator=torch.Generator().manual_seed(2)) > 0.3
-    mask[:, 0] = True
+    q, k, v = with_grad(*make_qkv(2, 3, 20, 20, 16, 24))
+    mask = make_key_padding_mask(2, 20, fully_masked_row=False)
 
     out = flash_attention(
         q, k, v, version=version, key_padding_mask=mask, config=CONFIG
@@ -68,7 +62,7 @@ def test_attention_supports_padding_mask_with_autograd(version):
 
 
 def test_module_wrapper_matches_functional():
-    q, k, v = make_qkv()
+    q, k, v = make_qkv(2, 3, 20, 20, 16, 24)
     attn = FlashAttention(version="fa3", causal=True, config=CONFIG)
 
     torch.testing.assert_close(
@@ -80,7 +74,7 @@ def test_module_wrapper_matches_functional():
 
 
 def test_module_wrapper_is_differentiable():
-    q, k, v = (t.requires_grad_(True) for t in make_qkv())
+    q, k, v = with_grad(*make_qkv(2, 3, 20, 20, 16, 24))
     attn = FlashAttention()  # defaults to fa2
 
     out = attn(q, k, v)
@@ -90,8 +84,20 @@ def test_module_wrapper_is_differentiable():
 
 
 def test_unknown_version_raises():
-    q, k, v = make_qkv()
+    q, k, v = make_qkv(2, 3, 20, 20, 16, 24)
     with pytest.raises(ValueError, match="Unknown FlashAttention version"):
         flash_attention(q, k, v, version="fa9")
     with pytest.raises(ValueError, match="Unknown FlashAttention version"):
         FlashAttention(version="fa9")
+
+
+def test_fp8_guardrails():
+    """`validate_fp8_support` enforces FA3's forward-only FP8 boundary."""
+    with pytest.raises(ValueError, match="only implemented for --version fa3"):
+        validate_fp8_support(version="fa4", fp8=True, script_name="flash_attention")
+    with pytest.raises(ValueError, match="backward is unsupported"):
+        validate_fp8_support(version="fa3", fp8=True, script_name="check_backward")
+    with pytest.raises(ValueError, match="only applies to the FA3 flash path"):
+        validate_fp8_support(
+            version="fa3", fp8=True, script_name="bench", benchmark_type="normal"
+        )
