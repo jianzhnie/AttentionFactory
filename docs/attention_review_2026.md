@@ -690,55 +690,55 @@ Hunyuan 的公开路线是：Dense/MoE 商用模型 -> Hunyuan-A13B 开源 MoE -
 
 ### 7.1 新增文件
 
-- `llminfra/sliding_window_attention.py`
+- `llminfra/attention/sliding_window.py`
   - `SlidingWindowAttention`，继承 `BaseAttention`，支持 `window_size`、`num_kv_groups`、`causal`。
-- `llminfra/block_sparse_attention.py`
+- `llminfra/attention/block_sparse.py`
   - `BlockSparseAttention`，继承 `BaseAttention`，支持 `block_size`、`top_k`、显式 `block_indices`。
-- `llminfra/linear_attention.py`
+- `llminfra/attention/linear.py`
   - `LinearAttention`，继承 `BaseAttention`，支持 `elu/relu/linear` kernel 与因果状态累积。
-- `llminfra/paged_attention.py`
+- `llminfra/inference/paged_attention.py`
   - `PagedKVBlockAllocator`、`PagedAttentionCache` 和 `paged_attention`，模拟 block table、稠密 gather 与序列克隆。
-- `llminfra/positional.py`
+- `llminfra/positional/`
   - `RotaryPositionEmbedding`、`YaRNScaledRotaryEmbedding`、`DynamicNTKRotaryEmbedding`、`ALiBiBias` 和工厂函数。
-- `llminfra/moe.py`
+- `llminfra/moe/mixture.py`
   - `ExpertFFN`、`TopKRouter`、`MixtureOfExperts`、`DeepSeekMoE`、`ExpertParallelMoE`，覆盖 Top-k 路由、共享专家、DeepSeek 风格 MoE 与专家并行模拟。
-- `llminfra/hybrid_attention.py`
+- `llminfra/attention/hybrid.py`
   - `HybridAttention`，按层索引在线性注意力和 GQA 全注意力之间路由，复现 Qwen3-Next/Kimi 的 3:1 混合模式。
-- `llminfra/gated_delta_net.py`
+- `llminfra/attention/gated_delta_net.py`
   - `GatedDeltaNet`，门控 Delta 规则线性注意力的教学实现。
-- `llminfra/lightning_attention.py`
+- `llminfra/attention/lightning.py`
   - `LightningAttention`，分块线性注意力与 intra-block softmax 的 MiniMax 风格实现。
-- `llminfra/sparse_indexer.py`
+- `llminfra/inference/sparse_indexer.py`
   - `BlockSparseIndexer`，学习式 KV block Top-k 选择器，可与 `BlockSparseAttention` 组合。
-- `llminfra/latent_moe.py`
+- `llminfra/moe/latent_moe.py`
   - `LatentMoE`，Nemotron-3 风格的潜空间路由 MoE。
-- `llminfra/attention_residual.py`
+- `llminfra/attention/residual.py`
   - `AttentionResidual`，Kimi K3 Attention Residual 的简化教学版本。
-- `llminfra/multi_token_prediction.py`
+- `llminfra/inference/multi_token_prediction.py`
   - `MultiTokenPredictionHead`，DeepSeek/Nemotron 风格多 Token 预测头。
-- `llminfra/ring_attention.py`
+- `llminfra/attention/ring.py`
   - `ring_attention` 与 `RingAttention`，分块在线 Softmax 精确注意力。
-- `llminfra/compressed_sparse_attention.py`
+- `llminfra/attention/compressed_sparse.py`
   - `CompressedSparseAttention`，CSA 风格 KV 压缩 + block sparse 选择。
-- `llminfra/alibi_attention.py`
+- `llminfra/attention/alibi.py`
   - `AlibiAttention`，GQA 与 ALiBi additive bias 集成。
-- `llminfra/flash_mla.py`
+- `llminfra/attention/flash_mla.py`
   - `FlashMLA`，MLA 推理接口模拟。
-- `llminfra/speculative.py`
+- `llminfra/inference/speculative.py`
   - `SpeculativeDecoder` 与 `EagleSpeculator`，draft-target 与 hidden-state drafting 投机解码教学接口。
-- `llminfra/ssm.py`
+- `llminfra/layers/ssm.py`
   - `Mamba2Layer`，简化固定状态 SSM 层。
-- `llminfra/kv_offload.py`
+- `llminfra/inference/kv_offload.py`
   - `OnDiskKVStore`，on-disk KV cache 接口模拟。
-- `llminfra/positional.py` 扩展
+- `llminfra/positional/` 扩展
   - `LongRoPEScaledRotaryEmbedding`、`TwoDimensionalPositionEmbedding`。
-- `llminfra/moe.py` 扩展
+- `llminfra/moe/mixture.py` 扩展
   - `load_balance_loss`，Top-k MoE 辅助负载均衡损失。
-- `llminfra/norm.py`
+- `llminfra/layers/norm.py`
   - `RMSNorm`，Llama/Qwen/Mistral 等模型使用的归一化层。
-- `llminfra/ffn.py`
+- `llminfra/layers/ffn.py`
   - `SwiGLUFFN` 与 `FeedForward`，覆盖主流 Dense 和 MoE 专家网络。
-- `llminfra/transformer.py`
+- `llminfra/layers/transformer.py`
   - `TransformerBlock`，组合可插拔 Attention、RMSNorm 和 FFN/MoE。
 - `llminfra/model.py`
   - `CausalLMModel`，组合 Embedding、位置编码、Transformer Block、RMSNorm 与 LM Head；支持 `alibi`、`longrope`、`2d` 位置配置。

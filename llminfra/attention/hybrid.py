@@ -12,7 +12,7 @@ import torch
 
 from .base import BaseAttention, validate_attention_inputs
 from .gqa import GroupQueryAttention
-from .linear_attention import LinearAttention
+from .linear import LinearAttention
 
 
 class HybridAttention(BaseAttention):

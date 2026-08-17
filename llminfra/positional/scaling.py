@@ -1,101 +1,25 @@
-"""Educational positional encoding and long-context scaling utilities.
+"""Long-context RoPE scaling variants.
 
-This module provides PyTorch implementations of the position-related
-components referenced by mainstream attention architectures:
-
-- Rotary Position Embedding (RoPE)
-- YaRN-scaled RoPE
-- Dynamic NTK-aware RoPE
-- Attention with Linear Biases (ALiBi)
-
-The implementations are intended for teaching and small-scale experiments.
-Production deployments should compare against the official kernels and
-Transformers implementations, especially for exact YaRN coefficients.
+Teaching implementations of the interpolation/extrapolation formulas used by
+mainstream long-context models: YaRN, dynamic NTK-aware scaling, partial
+RoPE, position interpolation and LongRoPE. Exact numerical behavior should
+be checked against the official implementations, especially for the YaRN
+coefficients.
 """
 
 from __future__ import annotations
 
 import math
-from abc import ABC, abstractmethod
 from dataclasses import dataclass
 
 import torch
-from torch import nn
 
-
-def apply_rotary_pos_emb(
-    x: torch.Tensor, cos: torch.Tensor, sin: torch.Tensor
-) -> torch.Tensor:
-    """Apply rotary position embedding to the last dimension of ``x``.
-
-    Args:
-        x: Tensor with an even final dimension.
-        cos: Cosine frequencies broadcastable to ``x``.
-        sin: Sine frequencies broadcastable to ``x``.
-    """
-    if x.size(-1) % 2 != 0:
-        raise ValueError("RoPE requires an even head dimension")
-    if cos.size(-1) == x.size(-1) // 2:
-        cos = cos.repeat_interleave(2, dim=-1)
-        sin = sin.repeat_interleave(2, dim=-1)
-    x1 = x[..., 0::2]
-    x2 = x[..., 1::2]
-    rotated = torch.stack((-x2, x1), dim=-1).flatten(-2)
-    return x * cos + rotated * sin
-
-
-def _default_inv_freq(
-    dim: int, base: float, dtype: torch.dtype = torch.float32
-) -> torch.Tensor:
-    """Compute the standard inverse frequency for RoPE."""
-    if dim % 2 != 0:
-        raise ValueError("RoPE dimension must be even")
-    indices = torch.arange(0, dim, 2, dtype=dtype)
-    return 1.0 / (base ** (indices / dim))
-
-
-class BasePositionalEncoding(nn.Module, ABC):
-    """Base class for position encoders used by attention implementations."""
-
-    @abstractmethod
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        """Apply positional information to ``x``."""
-
-
-class RotaryPositionEmbedding(BasePositionalEncoding):
-    """Rotary Position Embedding.
-
-    Args:
-        dim: Rotated feature dimension, normally ``head_dim``.
-        base: RoPE base frequency.
-        max_seq_len: Maximum sequence length used for precomputed frequencies.
-    """
-
-    def __init__(
-        self,
-        dim: int,
-        base: float = 10000.0,
-        max_seq_len: int = 4096,
-        dtype: torch.dtype = torch.float32,
-    ) -> None:
-        super().__init__()
-        self.dim = int(dim)
-        self.base = float(base)
-        self.max_seq_len = int(max_seq_len)
-        inv_freq = _default_inv_freq(self.dim, self.base, dtype)
-        self.register_buffer("inv_freq", inv_freq, persistent=False)
-
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        """Rotate ``x`` by position indices derived from its sequence length."""
-        seq_len = x.size(-2)
-        positions = torch.arange(seq_len, device=x.device, dtype=x.dtype)
-        freqs = torch.einsum("s,f->sf", positions, self.inv_freq.to(x.dtype))
-        cos = torch.cos(freqs)
-        sin = torch.sin(freqs)
-        return apply_rotary_pos_emb(x, cos, sin)
-
-    def extra_repr(self) -> str:
-        return f"dim={self.dim}, base={self.base}, max_seq_len={self.max_seq_len}"
+from .base import BasePositionalEncoding
+from .rope import (
+    RotaryPositionEmbedding,
+    _default_inv_freq,
+    apply_rotary_pos_emb,
+)
 
 
 @dataclass(frozen=True)
@@ -355,155 +279,3 @@ class LongRoPEScaledRotaryEmbedding(RotaryPositionEmbedding):
         cos = torch.cos(freqs)
         sin = torch.sin(freqs)
         return apply_rotary_pos_emb(x, cos, sin)
-
-
-class TwoDimensionalPositionEmbedding(BasePositionalEncoding):
-    """Simple 2D position embedding for long-document layouts."""
-
-    def __init__(
-        self,
-        embedding_dim: int,
-        max_blocks: int,
-        max_positions_per_block: int,
-    ) -> None:
-        super().__init__()
-        self.embedding_dim = int(embedding_dim)
-        self.max_blocks = int(max_blocks)
-        self.max_positions_per_block = int(max_positions_per_block)
-        self.block_embeddings = nn.Embedding(max_blocks, embedding_dim)
-        self.position_embeddings = nn.Embedding(max_positions_per_block, embedding_dim)
-
-    def forward(
-        self,
-        x: torch.Tensor,
-        block_ids: torch.Tensor | None = None,
-        positions: torch.Tensor | None = None,
-    ) -> torch.Tensor:
-        """Add block and within-block embeddings to ``x``."""
-        seq_len = x.size(-2)
-        if block_ids is None:
-            block_ids = (
-                torch.arange(seq_len, device=x.device) // self.max_positions_per_block
-            )
-        if positions is None:
-            positions = (
-                torch.arange(seq_len, device=x.device) % self.max_positions_per_block
-            )
-        if block_ids.max() >= self.max_blocks:
-            raise ValueError("block_ids exceeds max_blocks")
-        if positions.max() >= self.max_positions_per_block:
-            raise ValueError("positions exceeds max_positions_per_block")
-        return (
-            x
-            + self.block_embeddings(block_ids).unsqueeze(0)
-            + self.position_embeddings(positions).unsqueeze(0)
-        )
-
-
-class ALiBiBias(BasePositionalEncoding):
-    """Attention with Linear Biases (ALiBi).
-
-    ``forward`` returns a bias tensor of shape
-    ``(1, num_heads, seq_len, seq_len)`` that can be added to attention
-    scores. When ``causal`` is True, future positions receive ``-inf``.
-    """
-
-    def __init__(
-        self,
-        num_heads: int,
-        max_seq_len: int,
-        causal: bool = True,
-        slope_base: float = 2.0,
-    ) -> None:
-        super().__init__()
-        if num_heads < 1:
-            raise ValueError("num_heads must be >= 1")
-        self.num_heads = int(num_heads)
-        self.max_seq_len = int(max_seq_len)
-        self.causal = bool(causal)
-        self.slope_base = float(slope_base)
-        slopes = [
-            slope_base ** (-8 * (head + 1) / self.num_heads)
-            for head in range(self.num_heads)
-        ]
-        self.register_buffer("slopes", torch.tensor(slopes), persistent=False)
-
-    def forward(self, x: torch.Tensor | int | None = None) -> torch.Tensor:
-        """Return ALiBi bias for the sequence length of ``x`` if provided."""
-        if isinstance(x, int):
-            seq_len = x
-        else:
-            seq_len = self.max_seq_len if x is None else x.size(-2)
-        if seq_len > self.max_seq_len:
-            raise ValueError(
-                f"seq_len {seq_len} exceeds max_seq_len {self.max_seq_len}"
-            )
-        q_pos = torch.arange(seq_len).view(-1, 1)
-        k_pos = torch.arange(seq_len).view(1, -1)
-        distance = q_pos - k_pos
-        bias = -self.slopes[:, None, None] * distance.abs().unsqueeze(0)
-        if self.causal:
-            future = q_pos < k_pos
-            bias = bias.masked_fill(future[None], float("-inf"))
-        return bias.unsqueeze(0)
-
-
-def get_positional_encoding(
-    name: str,
-    *,
-    dim: int,
-    num_heads: int | None = None,
-    max_seq_len: int = 4096,
-    **kwargs: object,
-) -> BasePositionalEncoding:
-    """Create a positional encoding module by name.
-
-    Supported names: ``rope``, ``yarn``, ``ntk``, ``alibi``.
-    """
-    if name == "rope":
-        return RotaryPositionEmbedding(dim, max_seq_len=max_seq_len, **kwargs)
-    if name == "yarn":
-        if "params" not in kwargs:
-            raise ValueError("yarn requires a YaRNParameters instance")
-        return YaRNScaledRotaryEmbedding(dim, max_seq_len, **kwargs)
-    if name == "ntk":
-        if "original_max_position_embeddings" not in kwargs:
-            raise ValueError("ntk requires original_max_position_embeddings")
-        return DynamicNTKRotaryEmbedding(
-            dim,
-            max_seq_len=max_seq_len,
-            **kwargs,
-        )
-    if name == "partial_rope":
-        return PartialRotaryPositionEmbedding(dim, max_seq_len=max_seq_len, **kwargs)
-    if name == "interpolation":
-        if "original_max_position_embeddings" not in kwargs:
-            raise ValueError("interpolation requires original_max_position_embeddings")
-        return PositionInterpolation(
-            dim,
-            max_seq_len=max_seq_len,
-            **kwargs,
-        )
-    if name == "longrope":
-        if not {"long_factor", "short_factor"} <= set(kwargs):
-            raise ValueError("longrope requires long_factor and short_factor")
-        if "original_max_position_embeddings" not in kwargs:
-            raise ValueError("longrope requires original_max_position_embeddings")
-        return LongRoPEScaledRotaryEmbedding(
-            dim,
-            max_seq_len=max_seq_len,
-            **kwargs,
-        )
-    if name == "2d":
-        if not {"max_blocks", "max_positions_per_block"} <= set(kwargs):
-            raise ValueError("2d requires max_blocks and max_positions_per_block")
-        return TwoDimensionalPositionEmbedding(
-            dim,
-            max_blocks=kwargs["max_blocks"],
-            max_positions_per_block=kwargs["max_positions_per_block"],
-        )
-    if name == "alibi":
-        if num_heads is None:
-            raise ValueError("alibi requires num_heads")
-        return ALiBiBias(num_heads, max_seq_len, **kwargs)
-    raise ValueError(f"Unknown positional encoding: {name}")

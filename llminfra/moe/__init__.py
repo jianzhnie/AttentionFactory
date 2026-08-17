@@ -1,7 +1,7 @@
 """Mixture-of-Experts components."""
 
 from .latent_moe import LatentMoE
-from .moe import (
+from .mixture import (
     DeepSeekMoE,
     ExpertFFN,
     ExpertParallelMoE,

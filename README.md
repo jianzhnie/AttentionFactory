@@ -346,21 +346,20 @@ python -m pytest -p no:capture -q
 LLMInfra/
 ├── llminfra/
 │   ├── __init__.py          # 顶层 API 导出（from llminfra import X）
-│   ├── attention/           # 全部注意力变体与共享基类
+│   ├── attention/           # 全部注意力变体与共享基类（文件名即机制名）
 │   │   ├── base.py          #   BaseAttention 与输入校验
 │   │   ├── mha.py / mqa.py / gqa.py / mla.py  # 经典变体
-│   │   ├── sliding_window_attention.py / ring_attention.py
-│   │   ├── linear_attention.py / lightning_attention.py / gated_delta_net.py
-│   │   ├── block_sparse_attention.py / compressed_sparse_attention.py
-│   │   ├── hybrid_attention.py / alibi_attention.py / attention_residual.py
-│   │   └── flash_mla.py
+│   │   ├── sliding_window.py / ring.py        # 窗口 / 环形
+│   │   ├── linear.py / lightning.py / gated_delta_net.py  # 线性类
+│   │   ├── block_sparse.py / compressed_sparse.py         # 稀疏类
+│   │   └── hybrid.py / alibi.py / residual.py / flash_mla.py
 │   ├── flashattention/      # FlashAttention v1-v4 教学实现（含 autograd）
 │   │   ├── fa1.py ... fa4.py
 │   │   └── common/          #   共享的在线 softmax / 掩码 / 分块原语
 │   ├── layers/              # ffn.py / norm.py / ssm.py / transformer.py
-│   ├── moe/                 # Top-k Router、MoE、LatentMoE
+│   ├── moe/                 # mixture.py（Router/MoE）/ latent_moe.py
 │   ├── inference/           # PagedAttention、KV offload、投机解码、MTP、稀疏索引
-│   ├── positional.py        # RoPE / YaRN / NTK / ALiBi / 2D 位置编码
+│   ├── positional/          # rope.py / scaling.py / alibi.py / two_d.py / factory.py
 │   ├── model.py             # CausalLMModel
 │   └── registry.py          # Attention / Positional 注册表
 ├── tests/                   # pytest 测试套件

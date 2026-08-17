@@ -8,7 +8,7 @@ from torch import nn
 from .layers.ffn import SwiGLUFFN
 from .layers.norm import RMSNorm
 from .layers.transformer import TransformerBlock
-from .moe.moe import DeepSeekMoE
+from .moe import DeepSeekMoE
 from .positional import ALiBiBias
 from .registry import build_attention, build_positional_encoding
 

@@ -2,19 +2,19 @@
 
 from __future__ import annotations
 
-from .attention.alibi_attention import AlibiAttention
-from .attention.block_sparse_attention import BlockSparseAttention
-from .attention.compressed_sparse_attention import CompressedSparseAttention
+from .attention.alibi import AlibiAttention
+from .attention.block_sparse import BlockSparseAttention
+from .attention.compressed_sparse import CompressedSparseAttention
 from .attention.gated_delta_net import GatedDeltaNet
 from .attention.gqa import GroupQueryAttention
-from .attention.hybrid_attention import HybridAttention
-from .attention.lightning_attention import LightningAttention
-from .attention.linear_attention import LinearAttention
+from .attention.hybrid import HybridAttention
+from .attention.lightning import LightningAttention
+from .attention.linear import LinearAttention
 from .attention.mha import MultiHeadAttention
 from .attention.mla import MultiHeadLatentAttention
 from .attention.mqa import MultiQueryAttention
-from .attention.ring_attention import RingAttention
-from .attention.sliding_window_attention import SlidingWindowAttention
+from .attention.ring import RingAttention
+from .attention.sliding_window import SlidingWindowAttention
 from .positional import (
     BasePositionalEncoding,
     get_positional_encoding,
