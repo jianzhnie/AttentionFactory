@@ -136,6 +136,7 @@ class CausalLMModel(nn.Module):
         input_ids: torch.Tensor,
         attention_mask: torch.Tensor | None = None,
         return_attention_weights: bool = False,
+        prefix_len: int | None = None,
     ) -> torch.Tensor | tuple[torch.Tensor, torch.Tensor]:
         """Run the model over ``input_ids``.
 
@@ -146,6 +147,10 @@ class CausalLMModel(nn.Module):
                 ``(batch, 1, seq_len, seq_len)``.
             return_attention_weights: Return weights from the final block when
                 the attention module supports them.
+            prefix_len: Optional prefix-LM length. When set, the first
+                ``prefix_len`` positions are bidirectionally visible to every
+                position (including each other); all remaining positions stay
+                causal. ``None`` (the default) keeps the purely causal mask.
         """
         if input_ids.dim() != 2:
             raise ValueError("input_ids must have shape (batch, seq_len)")
@@ -160,7 +165,7 @@ class CausalLMModel(nn.Module):
             hidden_state = self.positional(hidden_state)
 
         combined_mask = self._build_mask(
-            attention_mask, batch_size, seq_len, input_ids.device
+            attention_mask, batch_size, seq_len, input_ids.device, prefix_len
         )
         last_weights: torch.Tensor | None = None
         for layer_index, block in enumerate(self.blocks):
@@ -194,11 +199,28 @@ class CausalLMModel(nn.Module):
         batch_size: int,
         seq_len: int,
         device: torch.device,
+        prefix_len: int | None = None,
     ) -> torch.Tensor:
-        """Combine a user padding mask with a causal mask."""
+        """Combine a user padding mask with a causal (or prefix-LM) mask.
+
+        With ``prefix_len`` set, key positions before ``prefix_len`` are
+        visible to every query position (bidirectional prefix), while key
+        positions at or after ``prefix_len`` follow the causal lower
+        triangle. The result is combined with ``attention_mask`` (1 = keep)
+        via logical AND.
+        """
         causal = torch.tril(
             torch.ones(seq_len, seq_len, dtype=torch.bool, device=device)
         ).expand(batch_size, 1, seq_len, seq_len)
+        if prefix_len is not None:
+            if prefix_len < 1 or prefix_len > seq_len:
+                raise ValueError(
+                    f"prefix_len must be in [1, {seq_len}], got {prefix_len}"
+                )
+            prefix_keys = (
+                torch.arange(seq_len, device=device) < prefix_len
+            ).view(1, 1, 1, seq_len)
+            causal = causal | prefix_keys
         if attention_mask is None:
             return causal
         if attention_mask.dim() == 2:

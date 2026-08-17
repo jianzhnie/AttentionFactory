@@ -16,6 +16,7 @@ from llminfra import (
     TopKRouter,
     load_balance_loss,
 )
+from llminfra.moe.mixture import ExpertChoiceRouter, router_z_loss
 
 HIDDEN = 32
 HEADS = 4
@@ -126,3 +127,106 @@ def test_router_noise_epsilon_actually_perturbs_routing():
     assert not torch.equal(indices_1, indices_2) or not torch.allclose(
         weights_1, weights_2
     )
+
+
+def test_sigmoid_scoring_weights_finite_and_normalized():
+    router = TopKRouter(HIDDEN, num_experts=8, top_k=2, scoring_func="sigmoid")
+    x = torch.randn(16, HIDDEN)
+    weights, indices = router(x)
+    assert weights.shape == (16, 2)
+    assert indices.shape == (16, 2)
+    assert torch.isfinite(weights).all()
+    torch.testing.assert_close(weights.sum(dim=-1), torch.ones(16))
+
+
+def test_router_z_loss_finite_scalar_and_backward():
+    router = TopKRouter(HIDDEN, num_experts=8, top_k=2)
+    x = torch.randn(16, HIDDEN, requires_grad=True)
+    logits = router.routing_logits(x)
+    loss = router_z_loss(logits)
+    assert loss.ndim == 0
+    assert torch.isfinite(loss)
+    loss.backward()
+    assert x.grad is not None and torch.isfinite(x.grad).all()
+
+
+def test_aux_free_balance_reduces_expert_count_variance():
+    torch.manual_seed(0)
+    num_experts = 8
+    router = TopKRouter(
+        HIDDEN,
+        num_experts=num_experts,
+        top_k=1,
+        aux_free_balance=True,
+        balance_update_rate=0.05,
+    )
+    router.train()
+    assert router.router_bias is not None
+    assert not router.router_bias.requires_grad
+
+    # Skewed logits: every token strongly favors expert 0.
+    logits = torch.randn(256, num_experts) * 0.1
+    logits[:, 0] += 2.0
+    x = torch.linalg.solve(
+        router.router.weight @ router.router.weight.T + torch.eye(num_experts),
+        logits.T,
+    ).T @ router.router.weight
+
+    def counts():
+        _, indices = router(x)
+        return torch.bincount(indices.flatten(), minlength=num_experts).float()
+
+    initial_variance = counts().var(unbiased=False).item()
+    for _ in range(200):
+        router(x)
+    final_variance = counts().var(unbiased=False).item()
+
+    assert final_variance < initial_variance
+
+
+def test_aux_free_balance_updates_only_in_training():
+    router = TopKRouter(
+        HIDDEN, num_experts=4, top_k=1, aux_free_balance=True,
+        balance_update_rate=0.1,
+    )
+    x = torch.randn(8, HIDDEN)
+    router.eval()
+    router(x)
+    torch.testing.assert_close(router.router_bias, torch.zeros(4))
+    router.train()
+    router(x)
+    assert not torch.equal(router.router_bias, torch.zeros(4))
+
+
+def test_expert_choice_router_shapes():
+    num_experts, top_tokens = 8, 4
+    router = ExpertChoiceRouter(
+        hidden_size=HIDDEN, num_experts=num_experts, top_tokens=top_tokens
+    )
+    x = torch.randn(16, HIDDEN)
+    weights, token_indices = router(x)
+    assert weights.shape == (num_experts, top_tokens)
+    assert token_indices.shape == (num_experts, top_tokens)
+    assert torch.isfinite(weights).all()
+    assert token_indices.max().item() < 16
+    assert token_indices.min().item() >= 0
+
+
+def test_mixture_of_experts_expert_dropout_training_randomness():
+    torch.manual_seed(0)
+    moe = MixtureOfExperts(
+        hidden_size=16,
+        num_experts=8,
+        intermediate_size=32,
+        top_k=2,
+        expert_dropout=0.5,
+    )
+    moe.train()
+    x = torch.randn(4, 16)
+    out_1 = moe(x)
+    out_2 = moe(x)
+    assert not torch.allclose(out_1, out_2)
+
+    # Eval mode disables expert dropout: output is deterministic.
+    moe.eval()
+    torch.testing.assert_close(moe(x), moe(x))

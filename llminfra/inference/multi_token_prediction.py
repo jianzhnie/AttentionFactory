@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import torch
 from torch import nn
+from torch.nn import functional as F
 
 
 class MultiTokenPredictionHead(nn.Module):
@@ -41,3 +42,68 @@ class MultiTokenPredictionHead(nn.Module):
             f"hidden_size={self.hidden_size}, vocab_size={self.vocab_size}, "
             f"num_predictions={self.num_predictions}"
         )
+
+
+def mtp_loss(
+    head: MultiTokenPredictionHead,
+    hidden_state: torch.Tensor,
+    labels: torch.Tensor,
+    *,
+    num_future: int | None = None,
+    weight_decay: float = 1.0,
+) -> torch.Tensor:
+    """Teaching-grade multi-token prediction training loss.
+
+    Shape convention: ``hidden_state`` is ``(batch, seq, hidden_size)`` and
+    ``labels`` is ``(batch, seq)`` token ids. Head ``k`` (0-based) predicts
+    the token ``k + 1`` steps ahead, so its logits at positions
+    ``[:, : seq - k - 1]`` are scored against ``labels[:, k + 1 :]``. Each
+    step contributes a cross-entropy over all such aligned positions, and
+    the returned loss is the weighted mean over steps.
+
+    Simplification: all prediction steps share the same ``hidden_state``
+    (no sequential re-embedding of predicted tokens as in DeepSeek-V3's
+    chained MTP modules).
+
+    Args:
+        head: The MTP head providing one logit tensor per prediction step.
+        hidden_state: Backbone hidden states, ``(batch, seq, hidden_size)``.
+        labels: Target token ids, ``(batch, seq)``; ``seq`` must be greater
+            than ``num_future`` so every used step has targets.
+        num_future: How many of the head's prediction steps to include;
+            defaults to ``head.num_predictions``.
+        weight_decay: Geometric per-step discount; step ``k`` is weighted by
+            ``weight_decay ** k``. 1.0 weights all steps equally.
+
+    Returns:
+        Scalar loss tensor (weighted mean of per-step cross-entropies).
+    """
+    if num_future is None:
+        num_future = head.num_predictions
+    if not 1 <= num_future <= head.num_predictions:
+        raise ValueError(
+            f"num_future must be in [1, {head.num_predictions}], got {num_future}"
+        )
+    if weight_decay <= 0:
+        raise ValueError("weight_decay must be > 0")
+    if labels.shape != hidden_state.shape[:2]:
+        raise ValueError(
+            f"labels shape {tuple(labels.shape)} must match hidden_state "
+            f"(batch, seq) {tuple(hidden_state.shape[:2])}"
+        )
+    if labels.size(1) <= num_future:
+        raise ValueError("sequence length must be greater than num_future")
+
+    logits_list = head(hidden_state)
+    total = torch.zeros((), device=hidden_state.device)
+    weight_sum = 0.0
+    for step in range(num_future):
+        logits = logits_list[step][:, : labels.size(1) - step - 1]
+        targets = labels[:, step + 1 :]
+        step_loss = F.cross_entropy(
+            logits.reshape(-1, logits.size(-1)), targets.reshape(-1)
+        )
+        weight = weight_decay**step
+        total = total + weight * step_loss
+        weight_sum += weight
+    return total / weight_sum

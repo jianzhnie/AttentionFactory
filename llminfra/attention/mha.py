@@ -24,6 +24,10 @@ class MultiHeadAttention(BaseAttention):
             Defaults to 0.1.
         bias (bool, optional): Whether to use bias in linear projections.
             Defaults to True.
+        qk_norm (bool, optional): Whether to RMS-normalize queries and keys
+            over the head dimension (parameter-free, Qwen3-style) after
+            splitting heads and before computing attention scores.
+            Defaults to False.
 
     Attributes:
         num_heads (int): Number of attention heads.
@@ -37,9 +41,14 @@ class MultiHeadAttention(BaseAttention):
     """
 
     def __init__(
-        self, hidden_size: int, num_heads: int, dropout: float = 0.1, bias: bool = True
+        self,
+        hidden_size: int,
+        num_heads: int,
+        dropout: float = 0.1,
+        bias: bool = True,
+        qk_norm: bool = False,
     ) -> None:
-        super().__init__(hidden_size, num_heads, dropout, bias)
+        super().__init__(hidden_size, num_heads, dropout, bias, qk_norm)
 
         # Projection matrices for Q, K, V
         self.q_proj = nn.Linear(hidden_size, hidden_size, bias=bias)
@@ -85,6 +94,9 @@ class MultiHeadAttention(BaseAttention):
         query = self.split_head(self.q_proj(hidden_state))
         key = self.split_head(self.k_proj(hidden_state))
         value = self.split_head(self.v_proj(hidden_state))
+
+        # Optional parameter-free RMSNorm over the head dimension (Qwen3-style)
+        query, key = self._apply_qk_norm(query, key)
 
         # Scaled dot-product attention:
         # (batch_size, num_heads, seq_len, head_dim)

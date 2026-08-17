@@ -20,10 +20,15 @@ class SpeculativeDecoder(nn.Module):
         draft_model: Callable mapping ``(batch, seq)`` ids to logits.
         target_model: Callable mapping ``(batch, seq)`` ids to logits.
         num_speculative_tokens: Number of draft tokens generated per block.
-        temperature: Sampling temperature; 0 selects argmax. Draft
-            verification (rejection of mismatched drafts) only happens at
-            ``temperature == 0``; with sampling every target token is
-            accepted.
+        temperature: Sampling temperature; 0 selects argmax. With
+            ``temperature > 0`` a teaching-grade rejection sampler verifies
+            drafts: a draft token is accepted with probability
+            ``min(1, p_target / p_draft)`` and otherwise replaced by a fresh
+            sample from the target distribution.
+        append_bonus_token: When True, sample one extra "bonus" token from
+            the target logits after a fully accepted draft block (the
+            standard speculative decoding behavior). Defaults to False to
+            preserve the original block-size-only output contract.
     """
 
     def __init__(
@@ -32,6 +37,7 @@ class SpeculativeDecoder(nn.Module):
         target_model: Callable[[torch.Tensor], torch.Tensor],
         num_speculative_tokens: int = 4,
         temperature: float = 0.0,
+        append_bonus_token: bool = False,
     ) -> None:
         super().__init__()
         if num_speculative_tokens < 1:
@@ -42,17 +48,23 @@ class SpeculativeDecoder(nn.Module):
         self.target_model = target_model
         self.num_speculative_tokens = int(num_speculative_tokens)
         self.temperature = float(temperature)
+        self.append_bonus_token = bool(append_bonus_token)
 
     def forward(self, input_ids: torch.Tensor) -> torch.Tensor:
         """Generate one speculative block.
 
         Teaching simplifications: draft tokens are read off the last
         ``num_speculative_tokens`` positions of the draft logits (no
-        autoregressive draft rollout), and no bonus token is appended after
-        a fully accepted block.
+        autoregressive draft rollout), acceptance is decided batch-wide (one
+        rejecting row stops the whole batch), and on rejection with
+        ``temperature > 0`` the corrective token is sampled from the raw
+        target distribution instead of the proper residual distribution
+        ``norm(max(0, p_target - p_draft))``.
 
         Returns:
-            Input ids concatenated with accepted tokens.
+            Input ids concatenated with accepted tokens (plus one bonus
+            token when ``append_bonus_token`` is enabled and every draft
+            was accepted).
         """
         if input_ids.dim() != 2:
             raise ValueError("input_ids must have shape (batch, seq)")
@@ -61,24 +73,54 @@ class SpeculativeDecoder(nn.Module):
                 "input sequence must be at least num_speculative_tokens long"
             )
         draft_logits = self.draft_model(input_ids)
-        draft_tokens = self._sample(draft_logits[:, -self.num_speculative_tokens :])
+        draft_window = draft_logits[:, -self.num_speculative_tokens :]
+        draft_tokens = self._sample(draft_window)
 
         target_input = torch.cat([input_ids, draft_tokens], dim=-1)
         target_logits = self.target_model(target_input)
         accepted: list[torch.Tensor] = []
         start = input_ids.size(1)
         for step in range(self.num_speculative_tokens):
-            target_next = self._sample(
-                target_logits[:, start + step - 1 : start + step]
-            )
-            if (
-                self.temperature == 0.0
-                and (draft_tokens[:, step] != target_next[:, 0]).any()
-            ):
+            step_logits = target_logits[:, start + step - 1 : start + step]
+            if self.temperature == 0.0:
+                target_next = self._sample(step_logits)
                 accepted.append(target_next)
-                break
-            accepted.append(target_next)
+                if (draft_tokens[:, step] != target_next[:, 0]).any():
+                    break
+            else:
+                draft_token = draft_tokens[:, step : step + 1]
+                if self._accept_draft(
+                    draft_window[:, step], step_logits[:, 0], draft_token
+                ):
+                    accepted.append(draft_token)
+                else:
+                    accepted.append(self._sample(step_logits))
+                    break
+        else:
+            if self.append_bonus_token:
+                accepted.append(self._sample(target_logits[:, -1:]))
         return torch.cat([input_ids, *accepted], dim=-1)
+
+    def _accept_draft(
+        self,
+        draft_logits: torch.Tensor,
+        target_logits: torch.Tensor,
+        draft_token: torch.Tensor,
+    ) -> bool:
+        """Batch-wide rejection-sampling decision for one draft position.
+
+        Accepts the draft token with probability ``min(1, p_target/p_draft)``
+        per row, where both distributions are temperature-scaled softmaxes
+        evaluated at the draft token. Returns True only if every batch row
+        accepts.
+        """
+        p_draft = torch.softmax(draft_logits / self.temperature, dim=-1)
+        p_target = torch.softmax(target_logits / self.temperature, dim=-1)
+        p_draft_token = p_draft.gather(-1, draft_token)
+        p_target_token = p_target.gather(-1, draft_token)
+        ratio = p_target_token / p_draft_token.clamp_min(1e-12)
+        accept_prob = torch.clamp(ratio, max=1.0)
+        return bool((torch.rand_like(accept_prob) < accept_prob).all())
 
     def _sample(self, logits: torch.Tensor) -> torch.Tensor:
         if self.temperature <= 0.0:
@@ -91,7 +133,8 @@ class SpeculativeDecoder(nn.Module):
     def extra_repr(self) -> str:
         return (
             f"num_speculative_tokens={self.num_speculative_tokens}, "
-            f"temperature={self.temperature}"
+            f"temperature={self.temperature}, "
+            f"append_bonus_token={self.append_bonus_token}"
         )
 
 
@@ -108,6 +151,9 @@ class EagleSpeculator(nn.Module):
         draft_head: Callable mapping hidden states to logits.
         target_model: Callable mapping ``(batch, seq)`` ids to logits.
         num_speculative_tokens: Number of draft tokens generated per block.
+        append_bonus_token: When True, take one extra "bonus" token (argmax
+            of the final target logits) after a fully accepted draft block.
+            Defaults to False to preserve the original output contract.
     """
 
     def __init__(
@@ -115,6 +161,7 @@ class EagleSpeculator(nn.Module):
         draft_head: Callable[[torch.Tensor], torch.Tensor],
         target_model: Callable[[torch.Tensor], torch.Tensor],
         num_speculative_tokens: int = 4,
+        append_bonus_token: bool = False,
     ) -> None:
         super().__init__()
         if num_speculative_tokens < 1:
@@ -122,6 +169,7 @@ class EagleSpeculator(nn.Module):
         self.draft_head = draft_head
         self.target_model = target_model
         self.num_speculative_tokens = int(num_speculative_tokens)
+        self.append_bonus_token = bool(append_bonus_token)
 
     def forward(
         self,
@@ -145,11 +193,16 @@ class EagleSpeculator(nn.Module):
             target_next = torch.argmax(
                 target_logits[:, start + step - 1 : start + step], dim=-1
             )
-            if (draft_tokens[:, step] != target_next[:, 0]).any():
-                accepted.append(target_next)
-                break
             accepted.append(target_next)
+            if (draft_tokens[:, step] != target_next[:, 0]).any():
+                break
+        else:
+            if self.append_bonus_token:
+                accepted.append(torch.argmax(target_logits[:, -1:], dim=-1))
         return torch.cat([input_ids, *accepted], dim=-1)
 
     def extra_repr(self) -> str:
-        return f"num_speculative_tokens={self.num_speculative_tokens}"
+        return (
+            f"num_speculative_tokens={self.num_speculative_tokens}, "
+            f"append_bonus_token={self.append_bonus_token}"
+        )

@@ -209,3 +209,67 @@ def test_causal_lm_with_2d_position():
     )
     logits = model(torch.randint(0, 32, (2, 8)))
     assert logits.shape == (2, 8, 32)
+
+
+def _make_prefix_model() -> CausalLMModel:
+    model = CausalLMModel(
+        vocab_size=32,
+        hidden_size=16,
+        num_layers=2,
+        num_heads=2,
+        intermediate_size=32,
+        max_seq_len=16,
+        attention_name="mha",
+    )
+    model.eval()
+    return model
+
+
+def test_causal_lm_prefix_region_is_bidirectional():
+    model = _make_prefix_model()
+    input_ids = torch.randint(0, 32, (1, 8))
+    perturbed = input_ids.clone()
+    perturbed[0, 2] = (perturbed[0, 2] + 1) % 32
+    with torch.no_grad():
+        base = model(input_ids, prefix_len=4)
+        changed = model(perturbed, prefix_len=4)
+    # Within the prefix, later tokens are visible to earlier positions...
+    assert not torch.allclose(base[0, 0], changed[0, 0])
+    # ...and prefix tokens remain visible after the prefix boundary.
+    assert not torch.allclose(base[0, 6], changed[0, 6])
+
+
+def test_causal_lm_outside_prefix_stays_causal():
+    model = _make_prefix_model()
+    input_ids = torch.randint(0, 32, (1, 8))
+    perturbed = input_ids.clone()
+    perturbed[0, 6] = (perturbed[0, 6] + 1) % 32
+    with torch.no_grad():
+        base = model(input_ids, prefix_len=3)
+        changed = model(perturbed, prefix_len=3)
+    # Position 6 is outside the prefix: positions before it must not change.
+    assert torch.allclose(base[0, :6], changed[0, :6])
+    assert not torch.allclose(base[0, 6:], changed[0, 6:])
+
+
+def test_causal_lm_prefix_len_combines_with_padding_mask():
+    model = _make_prefix_model()
+    input_ids = torch.randint(0, 32, (2, 8))
+    padding = torch.ones(2, 8, dtype=torch.bool)
+    padding[0, 1] = False  # a padded token inside the prefix
+    perturbed = input_ids.clone()
+    perturbed[0, 1] = (perturbed[0, 1] + 1) % 32
+    with torch.no_grad():
+        base = model(input_ids, attention_mask=padding, prefix_len=3)
+        changed = model(perturbed, attention_mask=padding, prefix_len=3)
+    # The padding mask wins over prefix visibility: masked tokens are ignored.
+    assert torch.allclose(base[0], changed[0])
+
+
+def test_causal_lm_prefix_len_validation():
+    model = _make_prefix_model()
+    input_ids = torch.randint(0, 32, (1, 8))
+    with pytest.raises(ValueError, match="prefix_len"):
+        model(input_ids, prefix_len=0)
+    with pytest.raises(ValueError, match="prefix_len"):
+        model(input_ids, prefix_len=9)

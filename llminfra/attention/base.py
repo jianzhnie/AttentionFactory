@@ -6,7 +6,8 @@ import math
 from abc import ABC, abstractmethod
 
 import torch
-import torch.nn as nn
+import torch.nn.functional as F
+from torch import nn
 
 
 class BaseAttention(nn.Module, ABC):
@@ -17,7 +18,12 @@ class BaseAttention(nn.Module, ABC):
     """
 
     def __init__(
-        self, hidden_size: int, num_heads: int, dropout: float = 0.0, bias: bool = True
+        self,
+        hidden_size: int,
+        num_heads: int,
+        dropout: float = 0.0,
+        bias: bool = True,
+        qk_norm: bool = False,
     ) -> None:
         """Initialize base attention parameters.
 
@@ -26,6 +32,10 @@ class BaseAttention(nn.Module, ABC):
             num_heads: Number of attention heads
             dropout: Dropout probability for attention weights
             bias: Whether to use bias in linear projections
+            qk_norm: Whether to RMS-normalize queries and keys over the
+                head dimension after :meth:`split_head` and before the
+                attention scores are computed (parameter-free, Qwen3-style).
+                Subclasses opt in by calling :meth:`_apply_qk_norm`.
 
         Raises:
             ValueError: If hidden_size is not divisible by num_heads
@@ -43,6 +53,7 @@ class BaseAttention(nn.Module, ABC):
         self.head_dim = hidden_size // num_heads
         self.dropout_prob = dropout
         self.bias = bias
+        self.qk_norm = qk_norm
 
         # Pre-compute scaling factor for efficiency
         self.scale_factor = 1.0 / math.sqrt(self.head_dim)
@@ -86,6 +97,33 @@ class BaseAttention(nn.Module, ABC):
         batch_size, seq_len, features = x.size()
         return x.view(batch_size, seq_len, num_heads, features // num_heads).transpose(
             1, 2
+        )
+
+    def _apply_qk_norm(
+        self, query: torch.Tensor, key: torch.Tensor
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        """RMS-normalize queries and keys over the head dimension.
+
+        Parameter-free normalization (``F.rms_norm`` without a learnable
+        weight) applied to head-split tensors of shape
+        ``(batch_size, num_heads, seq_len, head_dim)``, as in Qwen3. Callers
+        should apply it after :meth:`split_head` and before computing
+        attention scores. It is a no-op unless the module was constructed
+        with ``qk_norm=True``.
+
+        Args:
+            query: Query tensor of shape (batch_size, num_heads, seq_len,
+                head_dim)
+            key: Key tensor of shape (batch_size, num_kv_heads, kv_len,
+                head_dim)
+
+        Returns:
+            The (possibly normalized) query and key tensors.
+        """
+        if not self.qk_norm:
+            return query, key
+        return F.rms_norm(query, (self.head_dim,)), F.rms_norm(
+            key, (self.head_dim,)
         )
 
     def combine_head(self, x: torch.Tensor) -> torch.Tensor:

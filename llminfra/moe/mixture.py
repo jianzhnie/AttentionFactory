@@ -60,6 +60,18 @@ class TopKRouter(nn.Module):
         add_noise: Enable the Switch/GShard-style noise used during training.
         noise_epsilon: Scale of the routing noise.
         dropout: Dropout applied to routing weights.
+        scoring_func: Scoring applied to the selected experts' logits,
+            ``"softmax"`` (default) or ``"sigmoid"``. With ``"sigmoid"`` the
+            weights are ``sigmoid(logits)`` renormalized to sum to 1.
+        aux_free_balance: Enable a DeepSeek-V3-style auxiliary-loss-free
+            balancing bias. A gradient-free ``router_bias`` parameter is
+            registered; top-k selection uses ``logits + router_bias`` while
+            the routing weights are still computed from the unbiased logits.
+            After each training-mode forward the bias is updated by a
+            discrete step proportional to the sign of each expert's load
+            violation. This is a teaching simplification: the real systems
+            update the bias per training step with a tuned schedule.
+        balance_update_rate: Step size ``u`` of the bias update.
     """
 
     def __init__(
@@ -70,20 +82,35 @@ class TopKRouter(nn.Module):
         add_noise: bool = False,
         noise_epsilon: float = 1e-2,
         dropout: float = 0.0,
+        scoring_func: str = "softmax",
+        aux_free_balance: bool = False,
+        balance_update_rate: float = 1e-3,
     ) -> None:
         super().__init__()
         if top_k < 1 or top_k > num_experts:
             raise ValueError("top_k must satisfy 1 <= top_k <= num_experts")
+        if scoring_func not in {"softmax", "sigmoid"}:
+            raise ValueError(f"Unknown scoring_func: {scoring_func}")
         self.hidden_size = int(hidden_size)
         self.num_experts = int(num_experts)
         self.top_k = int(top_k)
         self.add_noise = bool(add_noise)
         self.noise_epsilon = float(noise_epsilon)
+        self.scoring_func = scoring_func
+        self.aux_free_balance = bool(aux_free_balance)
+        self.balance_update_rate = float(balance_update_rate)
         self.router = nn.Linear(hidden_size, num_experts, bias=False)
         self.noise_proj = (
             nn.Linear(hidden_size, num_experts, bias=False) if add_noise else None
         )
         self.dropout = nn.Dropout(dropout)
+        if aux_free_balance:
+            # Gradient-free on purpose: balanced by discrete updates, not SGD.
+            self.router_bias = nn.Parameter(
+                torch.zeros(num_experts), requires_grad=False
+            )
+        else:
+            self.register_parameter("router_bias", None)
         nn.init.xavier_uniform_(self.router.weight)
 
     def forward(self, x: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
@@ -103,10 +130,36 @@ class TopKRouter(nn.Module):
             noise = noise * F.softplus(self.noise_proj(x))
             logits = logits + noise * self.noise_epsilon
 
-        weights, indices = torch.topk(logits, self.top_k, dim=-1)
-        weights = torch.softmax(weights, dim=-1)
+        # The balancing bias steers *which* experts are picked, but never
+        # enters the weights (DeepSeek-V3 auxiliary-loss-free balancing).
+        selection_logits = logits
+        if self.router_bias is not None:
+            selection_logits = logits + self.router_bias
+        _, indices = torch.topk(selection_logits, self.top_k, dim=-1)
+        weights = logits.gather(-1, indices)
+        weights = self._score(weights)
         weights = self.dropout(weights)
+
+        if self.training and self.router_bias is not None:
+            self._update_router_bias(indices)
         return weights, indices
+
+    def _score(self, selected_logits: torch.Tensor) -> torch.Tensor:
+        """Turn selected experts' logits into normalized routing weights."""
+        if self.scoring_func == "softmax":
+            return torch.softmax(selected_logits, dim=-1)
+        weights = torch.sigmoid(selected_logits)
+        return weights / weights.sum(dim=-1, keepdim=True).clamp_min(1e-12)
+
+    @torch.no_grad()
+    def _update_router_bias(self, indices: torch.Tensor) -> None:
+        """Step the bias by ``u * sign(target_load - load)`` per expert."""
+        counts = torch.bincount(
+            indices.reshape(-1), minlength=self.num_experts
+        ).to(torch.float32)
+        target = indices.numel() / self.num_experts
+        violation = target - counts
+        self.router_bias.add_(self.balance_update_rate * torch.sign(violation))
 
     def routing_logits(self, x: torch.Tensor) -> torch.Tensor:
         """Return raw router logits without training noise."""
@@ -115,7 +168,65 @@ class TopKRouter(nn.Module):
     def extra_repr(self) -> str:
         return (
             f"hidden_size={self.hidden_size}, num_experts={self.num_experts}, "
-            f"top_k={self.top_k}, add_noise={self.add_noise}"
+            f"top_k={self.top_k}, add_noise={self.add_noise}, "
+            f"scoring_func={self.scoring_func}, "
+            f"aux_free_balance={self.aux_free_balance}"
+        )
+
+
+class ExpertChoiceRouter(nn.Module):
+    """Expert-choice routing: each expert selects its top tokens.
+
+    Instead of each token picking its top-k experts, each expert picks its
+    top-``top_tokens`` tokens, which guarantees perfectly balanced expert
+    loads by construction (every expert receives the same number of tokens).
+
+    Shape convention: ``forward`` returns ``(weights, token_indices)`` where
+    both have shape ``(num_experts, top_tokens)``. ``token_indices[e, j]`` is
+    the index (into the flattened token axis of the input) of the j-th token
+    chosen by expert ``e``, and ``weights[e, j]`` is that token's routing
+    weight for expert ``e``. Weights come from a softmax over the token axis,
+    so for each expert the weights over all tokens (not only the chosen ones)
+    sum to 1. A token may be chosen by several experts or by none.
+
+    Args:
+        hidden_size: Input feature dimension.
+        num_experts: Number of routed experts.
+        top_tokens: Number of tokens each expert selects.
+    """
+
+    def __init__(
+        self,
+        hidden_size: int,
+        num_experts: int,
+        top_tokens: int,
+    ) -> None:
+        super().__init__()
+        if top_tokens < 1:
+            raise ValueError("top_tokens must be >= 1")
+        self.hidden_size = int(hidden_size)
+        self.num_experts = int(num_experts)
+        self.top_tokens = int(top_tokens)
+        self.router = nn.Linear(hidden_size, num_experts, bias=False)
+        nn.init.xavier_uniform_(self.router.weight)
+
+    def forward(self, x: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
+        """Return ``(weights, token_indices)``, each ``(num_experts, top_tokens)``.
+
+        Args:
+            x: Token features of shape ``(num_tokens, hidden_size)`` with
+                ``num_tokens >= top_tokens``.
+        """
+        logits = self.router(x)  # (num_tokens, num_experts)
+        expert_scores = logits.transpose(0, 1)  # (num_experts, num_tokens)
+        scores = torch.softmax(expert_scores, dim=-1)
+        weights, token_indices = torch.topk(scores, self.top_tokens, dim=-1)
+        return weights, token_indices
+
+    def extra_repr(self) -> str:
+        return (
+            f"hidden_size={self.hidden_size}, num_experts={self.num_experts}, "
+            f"top_tokens={self.top_tokens}"
         )
 
 
@@ -124,6 +235,13 @@ class MixtureOfExperts(nn.Module):
 
     The module does not add a residual connection; callers should apply the
     transformer residual outside this layer.
+
+    Args:
+        expert_dropout: Probability of dropping a token's routed expert
+            weight during training. Dropped weights are zeroed and the
+            surviving experts of that token are renormalized to sum to 1
+            (tokens whose experts were all dropped contribute nothing this
+            step). Teaching simplification of expert-level dropout.
     """
 
     def __init__(
@@ -135,12 +253,16 @@ class MixtureOfExperts(nn.Module):
         activation: str = "silu",
         add_router_noise: bool = False,
         bias: bool = True,
+        expert_dropout: float = 0.0,
     ) -> None:
         super().__init__()
+        if not 0.0 <= expert_dropout < 1.0:
+            raise ValueError("expert_dropout must satisfy 0 <= p < 1")
         self.hidden_size = int(hidden_size)
         self.num_experts = int(num_experts)
         self.intermediate_size = int(intermediate_size)
         self.top_k = int(top_k)
+        self.expert_dropout = float(expert_dropout)
         self.experts = nn.ModuleList(
             ExpertFFN(hidden_size, intermediate_size, activation, bias)
             for _ in range(num_experts)
@@ -156,6 +278,11 @@ class MixtureOfExperts(nn.Module):
         """Route tokens to experts and return the combined output."""
         flat = x.reshape(-1, self.hidden_size)
         routing_weights, expert_indices = self.router(flat)
+        if self.training and self.expert_dropout > 0.0:
+            keep = torch.rand_like(routing_weights) >= self.expert_dropout
+            routing_weights = routing_weights * keep
+            totals = routing_weights.sum(dim=-1, keepdim=True)
+            routing_weights = routing_weights / totals.clamp_min(1e-12)
         output = torch.zeros_like(flat)
 
         for k in range(self.top_k):
@@ -174,7 +301,8 @@ class MixtureOfExperts(nn.Module):
     def extra_repr(self) -> str:
         return (
             f"hidden_size={self.hidden_size}, num_experts={self.num_experts}, "
-            f"intermediate_size={self.intermediate_size}, top_k={self.top_k}"
+            f"intermediate_size={self.intermediate_size}, top_k={self.top_k}, "
+            f"expert_dropout={self.expert_dropout}"
         )
 
 
@@ -326,3 +454,20 @@ def load_balance_loss(
     fraction = counts / max(1, expert_indices.numel())
     probabilities = torch.softmax(router_logits, dim=-1).mean(dim=0)
     return num_experts * (fraction * probabilities).sum()
+
+
+def router_z_loss(router_logits: torch.Tensor) -> torch.Tensor:
+    """Router z-loss: penalizes large-magnitude routing logits.
+
+    Introduced by ST-MoE and used by many production MoE models to keep
+    router logits in a numerically stable range. Defined as
+    ``mean(logsumexp(logits, dim=-1) ** 2)``.
+
+    Args:
+        router_logits: Raw router logits of shape ``(num_tokens, num_experts)``.
+
+    Returns:
+        Scalar z-loss tensor.
+    """
+    log_z = torch.logsumexp(router_logits, dim=-1)
+    return (log_z * log_z).mean()
