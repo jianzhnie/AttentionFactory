@@ -296,8 +296,6 @@ Gemma 是 Google 提供公开 Attention 细节的开放系列。
 | Grok-1 | 2024-03 | 是 | MoE 314B | 25% 层 Attention + 8 KV Head | 8K | 层间稀疏 + 8 专家 Top-2 |
 | Grok-2 / Grok-3 / Grok-4.x | 2024-2026 | 否 | 官方未完全披露 | 官方未完全披露 | 官方未完全披露 | 闭源 |
 
----
-
 ### 2.18 Phi 系列（Microsoft）
 
 Phi 系列的公开配置显示：早期小模型使用 MHA，Phi-4 起明确转向 GQA。
@@ -352,8 +350,6 @@ Baichuan 早期使用独立 MHA 架构，2025 年后的 M 系列直接基于 Qwe
 
 **核验说明**：Baichuan M2/M3 的 HF 配置分别为 `qwen2` 与 `qwen3_moe`，Attention 直接继承 Qwen 架构，不属于全新 Attention 设计。
 
----
-
 ### 2.23 Step 系列（阶跃星辰）
 
 Step 系列早期闭源，2026 年起开始公开 MoE 权重。
@@ -399,8 +395,6 @@ Arctic 是“Dense 主干 + 大规模 MoE 残差”的代表。
 
 **核验说明**：官方配置显示 `model_type=arctic`、35 层、56 heads、8 KV heads、128 experts、Top-2。
 
----
-
 ### 2.27 Hunyuan 系列（腾讯）
 
 Hunyuan 的公开路线是：Dense/MoE 商用模型 -> Hunyuan-A13B 开源 MoE -> Hy3 大规模 MoE。
@@ -413,8 +407,6 @@ Hunyuan 的公开路线是：Dense/MoE 商用模型 -> Hunyuan-A13B 开源 MoE -
 | Hy-MT2-30B-A3B | 2026-05 | 是 | MoE 30B/3B Active | GQA 32Q/4KV | 256K | 128 专家 Top-8，33 语言翻译 |
 
 **核验说明**：Hunyuan-A13B 官方模型卡确认 80B 总参/13B 激活、GQA、256K 上下文；Hy3 官方模型卡确认 295B 总参/21B 激活、GQA 64Q/8KV、256K 上下文、192 专家。
-
----
 
 ### 2.28 遗漏分析：已覆盖 / 未覆盖 / 待补充
 
@@ -744,18 +736,20 @@ Hunyuan 的公开路线是：Dense/MoE 商用模型 -> Hunyuan-A13B 开源 MoE -
   - `CausalLMModel`，组合 Embedding、位置编码、Transformer Block、RMSNorm 与 LM Head；支持 `alibi`、`longrope`、`2d` 位置配置。
 - `llminfra/registry.py`
   - `build_attention`、`build_positional_encoding`、`list_attentions`，统一模块选择入口。
-- `tests/test_extended_attention.py`
-  - 覆盖 shape、梯度、确定性、窗口/块稀疏掩码、PagedAttention 与稠密注意力一致性。
-- `tests/test_positional_and_moe.py`
-  - 覆盖 RoPE 范数保持、YaRN/NTK 有限性、ALiBi 掩码、路由权重归一化、MoE 与 DeepSeekMoE 梯度。
-- `tests/test_blocks_and_hybrid.py`
-  - 覆盖 Hybrid Attention 路由、Partial RoPE、Position Interpolation、RMSNorm、SwiGLU、Transformer Block 与 MoE FFN。
-- `tests/test_model_registry_gated.py`
-  - 覆盖 Gated DeltaNet、注册表、CausalLMModel 的 Dense/MoE/Hybrid 组合与梯度。
-- `tests/test_extra_modules.py`
-  - 覆盖 Lightning Attention、LatentMoE、Attention Residual、Block Sparse Indexer 与 MTP。
-- `tests/test_gap_modules.py`
-  - 覆盖 Ring Attention、CSA、ALiBi Attention、FlashMLA、SpeculativeDecoder、EagleSpeculator、Mamba2Layer、LongRoPE/2D、On-Disk KV、ExpertParallelMoE、Paged clone 与 load-balance loss。
+- `tests/attention/`（test_base / test_classic / test_sparse / test_linear / test_hybrid）
+  - 覆盖 BaseAttention 工具、MHA/GQA/MQA/MLA/Ring、SWA/Block Sparse/CSA、Linear/Lightning/Gated DeltaNet、Hybrid/ALiBi/Residual/FlashMLA。
+- `tests/positional/test_positional.py`
+  - 覆盖 RoPE 范数保持、YaRN/NTK 有限性、ALiBi 掩码、Partial RoPE、Position Interpolation、LongRoPE/2D 与工厂函数。
+- `tests/layers/test_layers.py`
+  - 覆盖 RMSNorm、SwiGLU/FeedForward、Mamba2Layer、TransformerBlock 组合。
+- `tests/moe/test_moe.py`
+  - 覆盖路由权重归一化、MoE/DeepSeekMoE/LatentMoE/ExpertParallelMoE 梯度与负载均衡损失。
+- `tests/inference/test_inference.py`
+  - 覆盖 PagedAttention 与稠密注意力一致性、On-Disk KV、SpeculativeDecoder/EagleSpeculator、MTP、BlockSparseIndexer。
+- `tests/flashattention/`（test_versions / test_api / test_cuda）
+  - 覆盖 FA1-FA4 数值正确性、PyTorch 风格 API 与长序列 CUDA 用例。
+- `tests/test_model.py`
+  - 覆盖注册表、CausalLMModel 的 Dense/MoE/Hybrid 组合与梯度。
 - 修改 `llminfra/__init__.py` 导出新模块。
 
 ### 7.2 设计说明
@@ -770,11 +764,9 @@ Hunyuan 的公开路线是：Dense/MoE 商用模型 -> Hunyuan-A13B 开源 MoE -
 ### 7.3 运行与测试
 
 ```bash
-python -m pytest -p no:capture -q
-python -m ruff check llminfra tests
+python -m pytest tests/ -q
+ruff check llminfra tests
 ```
-
-说明：当前机器默认 pytest 9.0.1 在 capture 初始化阶段会触发 macOS readline 相关段错误，使用 `-p no:capture` 可正常运行；这不是测试本身失败。
 
 ### 7.4 当前覆盖与待补充清单
 
@@ -804,10 +796,10 @@ python -m ruff check llminfra tests
 **测试基线**
 
 ```bash
-python -m pytest -p no:capture -q
-# 171 passed
+python -m pytest tests/ -q
+# 205 passed, 9 skipped（CUDA 长序列用例在无 GPU 机器上跳过）
 
-python -m ruff check llminfra tests
+ruff check llminfra tests
 # All checks passed
 ```
 
