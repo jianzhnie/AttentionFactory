@@ -9,7 +9,7 @@ import pytest
 import torch
 from helpers import make_key_padding_mask, make_qkv, with_grad
 
-from attentionfactory.flashattention import (
+from llminfra.flashattention import (
     ATTENTION_FN_REGISTRY,
     FlashAttentionConfig,
     get_version_module,

@@ -1,35 +1,64 @@
-"""Attention, positional encoding, MoE and educational FlashAttention blocks."""
+"""LLMInfra: attention, positional encoding, MoE and model building blocks.
 
-from .alibi_attention import AlibiAttention
-from .attention_residual import AttentionResidual
-from .base import BaseAttention
-from .block_sparse_attention import BlockSparseAttention
-from .compressed_sparse_attention import CompressedSparseAttention
-from .ffn import FeedForward, SwiGLUFFN
-from .flash_mla import FlashMLA
+The package is organized into subpackages by role:
+
+- `attention`: classic, sparse, linear and hybrid attention variants
+- `flashattention`: educational FlashAttention v1-v4 implementations
+- `layers`: FFN / norm / SSM / transformer block layers
+- `moe`: Mixture-of-Experts components
+- `inference`: KV cache, paging and decoding utilities
+
+All public names are re-exported here, so ``from llminfra import X`` works
+regardless of the internal layout.
+"""
+
+from .attention import (
+    AlibiAttention,
+    AttentionResidual,
+    BaseAttention,
+    BlockSparseAttention,
+    CompressedSparseAttention,
+    FlashMLA,
+    GatedDeltaNet,
+    GroupQueryAttention,
+    HybridAttention,
+    LightningAttention,
+    LinearAttention,
+    MultiHeadAttention,
+    MultiHeadLatentAttention,
+    MultiQueryAttention,
+    RingAttention,
+    SlidingWindowAttention,
+    ring_attention,
+)
 from .flashattention import FlashAttention, flash_attention
-from .gated_delta_net import GatedDeltaNet
-from .gqa import GroupQueryAttention
-from .hybrid_attention import HybridAttention
-from .kv_offload import OnDiskKVStore
-from .latent_moe import LatentMoE
-from .lightning_attention import LightningAttention
-from .linear_attention import LinearAttention
-from .mha import MultiHeadAttention
-from .mla import MultiHeadLatentAttention
+from .inference import (
+    BlockSparseIndexer,
+    EagleSpeculator,
+    MultiTokenPredictionHead,
+    OnDiskKVStore,
+    PagedAttentionCache,
+    PagedKVBlockAllocator,
+    SpeculativeDecoder,
+    paged_attention,
+)
+from .layers import (
+    FeedForward,
+    Mamba2Layer,
+    RMSNorm,
+    SwiGLUFFN,
+    TransformerBlock,
+)
 from .model import CausalLMModel
 from .moe import (
     DeepSeekMoE,
     ExpertFFN,
     ExpertParallelMoE,
+    LatentMoE,
     MixtureOfExperts,
     TopKRouter,
     load_balance_loss,
 )
-from .mqa import MultiQueryAttention
-from .multi_token_prediction import MultiTokenPredictionHead
-from .norm import RMSNorm
-from .paged_attention import PagedAttentionCache, PagedKVBlockAllocator, paged_attention
 from .positional import (
     ALiBiBias,
     DynamicNTKRotaryEmbedding,
@@ -44,12 +73,6 @@ from .positional import (
     get_positional_encoding,
 )
 from .registry import build_attention, build_positional_encoding, list_attentions
-from .ring_attention import RingAttention, ring_attention
-from .sliding_window_attention import SlidingWindowAttention
-from .sparse_indexer import BlockSparseIndexer
-from .speculative import EagleSpeculator, SpeculativeDecoder
-from .ssm import Mamba2Layer
-from .transformer import TransformerBlock
 
 __all__ = [
     "ALiBiBias",

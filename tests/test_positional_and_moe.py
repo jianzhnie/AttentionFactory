@@ -3,7 +3,7 @@
 import pytest
 import torch
 
-from attentionfactory import (
+from llminfra import (
     ALiBiBias,
     DeepSeekMoE,
     DynamicNTKRotaryEmbedding,

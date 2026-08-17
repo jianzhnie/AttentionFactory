@@ -3,8 +3,8 @@
 import pytest
 import torch
 
-from attentionfactory import MultiHeadAttention
-from attentionfactory.base import validate_attention_inputs
+from llminfra import MultiHeadAttention
+from llminfra.attention.base import validate_attention_inputs
 
 
 @pytest.fixture()

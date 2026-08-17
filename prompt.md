@@ -27,7 +27,7 @@
   - RoPE、YaRN、NTK-aware、ALiBi、位置插值、p-RoPE、LongRoPE、2D Position
   - MTP、投机解码、KV offload、on-disk KV cache 等与 Attention 强相关的工程机制
 - 若某版本为闭源模型且官方未公开完整实现细节，必须明确标记“官方未完全披露”，并区分“公开确认信息”“论文/技术报告信息”“基于公开线索的合理推断”，禁止把推断写成事实。
-- 必须做“遗漏分析”：对照 `docs/attention_review_2026.md` 与 `attentionfactory/`，指出当前综述未覆盖的模型和当前代码未覆盖的核心模块。
+- 必须做“遗漏分析”：对照 `docs/attention_review_2026.md` 与 `llminfra/`，指出当前综述未覆盖的模型和当前代码未覆盖的核心模块。
 
 ## 2. Attention 机制级别的技术分析
 
@@ -84,7 +84,7 @@
 
 ## 6. 代码实现任务
 
-在 `/Users/jianzhengnie/AttentionFactory/attentionfactory` 中实现或完善主流 Attention 架构、位置编码、MoE 和其他相关模块，并补充测试。
+在 `/Users/jianzhengnie/LLMInfra/llminfra` 中实现或完善主流 Attention 架构、位置编码、MoE 和其他相关模块，并补充测试。
 
 当前仓库已包含：
 - MHA、MQA、GQA、MLA
@@ -159,4 +159,4 @@
 - 一篇高质量技术综述文档
 - 一份模型 Attention 选型数据库或表格
 - 一份模型与模块覆盖缺口清单
-- 一套在 `AttentionFactory` 仓库中逐步实现主流 Attention 架构及相关模块的开发任务清单
+- 一套在 `LLMInfra` 仓库中逐步实现主流 Attention 架构及相关模块的开发任务清单

@@ -1,4 +1,4 @@
-# AttentionFactory
+# LLMInfra
 
 基于 PyTorch 实现的多种注意力机制模块集合，包含 MHA、MQA、GQA、MLA、SWA、Block Sparse、Linear Attention 等架构的教学实现，以及 FlashAttention v1–v4 的分块（tiled）实现。
 
@@ -47,15 +47,15 @@ pip install torch
 ### 克隆仓库
 
 ```bash
-git clone https://github.com/jianzhnie/AttentionFactory.git
-cd AttentionFactory
+git clone https://github.com/jianzhnie/LLMInfra.git
+cd LLMInfra
 ```
 
 ## 快速开始
 
 ```python
 import torch
-from attentionfactory import MultiHeadAttention
+from llminfra import MultiHeadAttention
 
 hidden_size = 512
 num_heads = 8
@@ -79,7 +79,7 @@ print(attn_weights.shape)  # torch.Size([2, 8, 128, 128])
 多头注意力机制，出自论文 *Attention is All You Need*。每个 Query、Key、Value 各有 `num_heads` 组独立的投影矩阵。
 
 ```python
-from attentionfactory import MultiHeadAttention
+from llminfra import MultiHeadAttention
 
 attention = MultiHeadAttention(
     hidden_size=512,
@@ -100,7 +100,7 @@ attention = MultiHeadAttention(
 多查询注意力机制，出自论文 *Fast Transformer Decoding: One Write-Head is All You Need*。所有 Query 头共享同一组 Key 和 Value 投影，显著减少显存占用和推理计算量。
 
 ```python
-from attentionfactory import MultiQueryAttention
+from llminfra import MultiQueryAttention
 
 attention = MultiQueryAttention(
     hidden_size=512,
@@ -115,7 +115,7 @@ attention = MultiQueryAttention(
 分组查询注意力机制，出自论文 *GQA: Training Generalized Multi-Query Transformer Models from Multi-Head Checkpoints*。MHA 与 MQA 的折中方案，将 Query 头分组，每组共享一组 Key/Value 头。
 
 ```python
-from attentionfactory import GroupQueryAttention
+from llminfra import GroupQueryAttention
 
 attention = GroupQueryAttention(
     hidden_size=512,
@@ -137,7 +137,7 @@ attention = GroupQueryAttention(
 多头潜空间注意力，在注意力计算前先将特征投影到潜空间，再映射回原空间进行注意力计算。
 
 ```python
-from attentionfactory import MultiHeadLatentAttention
+from llminfra import MultiHeadLatentAttention
 
 attention = MultiHeadLatentAttention(
     hidden_size=512,
@@ -155,11 +155,11 @@ attention = MultiHeadLatentAttention(
 
 ### 5. FlashAttention（教学实现）
 
-`attentionfactory.flashattention` 子包以纯 PyTorch 实现了 FlashAttention v1–v4 的核心算法结构（在线 softmax、分块循环、LSE 重算梯度），用于教学目的。提供与 PyTorch 一致的调用方式——函数式接口 `flash_attention`（类似 `F.scaled_dot_product_attention`）和 `nn.Module` 包装，均支持 autograd：
+`llminfra.flashattention` 子包以纯 PyTorch 实现了 FlashAttention v1–v4 的核心算法结构（在线 softmax、分块循环、LSE 重算梯度），用于教学目的。提供与 PyTorch 一致的调用方式——函数式接口 `flash_attention`（类似 `F.scaled_dot_product_attention`）和 `nn.Module` 包装，均支持 autograd：
 
 ```python
 import torch
-from attentionfactory import FlashAttention, flash_attention
+from llminfra import FlashAttention, flash_attention
 
 q = torch.randn(2, 8, 128, 64, requires_grad=True)
 k = torch.randn(2, 8, 128, 64, requires_grad=True)
@@ -179,7 +179,7 @@ out = attn(q, k, v)
 ### 6. Sliding Window Attention (SWA)
 
 ```python
-from attentionfactory import SlidingWindowAttention
+from llminfra import SlidingWindowAttention
 
 attention = SlidingWindowAttention(
     hidden_size=512,
@@ -192,7 +192,7 @@ attention = SlidingWindowAttention(
 ### 7. Block Sparse Attention
 
 ```python
-from attentionfactory import BlockSparseAttention
+from llminfra import BlockSparseAttention
 
 attention = BlockSparseAttention(
     hidden_size=512,
@@ -205,7 +205,7 @@ attention = BlockSparseAttention(
 ### 8. Linear Attention
 
 ```python
-from attentionfactory import LinearAttention
+from llminfra import LinearAttention
 
 attention = LinearAttention(
     hidden_size=512,
@@ -218,7 +218,7 @@ attention = LinearAttention(
 ### 9. PagedAttention 教学接口
 
 ```python
-from attentionfactory import PagedAttentionCache, paged_attention
+from llminfra import PagedAttentionCache, paged_attention
 
 cache = PagedAttentionCache(
     num_blocks=128,
@@ -232,7 +232,7 @@ cache = PagedAttentionCache(
 
 ```python
 import torch
-from attentionfactory import RotaryPositionEmbedding, ALiBiBias
+from llminfra import RotaryPositionEmbedding, ALiBiBias
 
 rope = RotaryPositionEmbedding(dim=64, max_seq_len=4096)
 x = torch.randn(2, 8, 128, 64)
@@ -248,7 +248,7 @@ YaRN 和 Dynamic NTK 版本通过 `YaRNScaledRotaryEmbedding`、`DynamicNTKRotar
 
 ```python
 import torch
-from attentionfactory import MixtureOfExperts, DeepSeekMoE
+from llminfra import MixtureOfExperts, DeepSeekMoE
 
 moe = MixtureOfExperts(
     hidden_size=256,
@@ -273,7 +273,7 @@ y = ds_moe(x)
 
 ```python
 import torch
-from attentionfactory import HybridAttention, TransformerBlock, SwiGLUFFN, RMSNorm
+from llminfra import HybridAttention, TransformerBlock, SwiGLUFFN, RMSNorm
 
 hybrid = HybridAttention(
     hidden_size=256,
@@ -296,7 +296,7 @@ y = block(x, layer_index=3)
 
 ```python
 import torch
-from attentionfactory import GatedDeltaNet, CausalLMModel
+from llminfra import GatedDeltaNet, CausalLMModel
 
 gdn = GatedDeltaNet(hidden_size=256, num_heads=8, feature_dim=64)
 x = torch.randn(2, 32, 256)
@@ -343,43 +343,28 @@ python -m pytest -p no:capture -q
 ## 项目结构
 
 ```
-AttentionFactory/
-├── attentionfactory/
-│   ├── __init__.py          # 模块导出
-│   ├── base.py              # 注意力基类与共享工具函数
-│   ├── mha.py               # 多头注意力
-│   ├── mqa.py               # 多查询注意力
-│   ├── gqa.py               # 分组查询注意力
-│   ├── mla.py               # 多头潜空间注意力
-│   ├── sliding_window_attention.py  # 滑动窗口注意力
-│   ├── block_sparse_attention.py    # 块稀疏注意力
-│   ├── linear_attention.py          # 线性注意力
-│   ├── paged_attention.py           # PagedAttention 教学接口
-│   ├── positional.py                # RoPE / YaRN / NTK / ALiBi
-│   ├── moe.py                       # Top-k Router 与 MoE
-│   ├── hybrid_attention.py          # 线性/全量混合 Attention
-│   ├── gated_delta_net.py           # Gated DeltaNet
-│   ├── lightning_attention.py       # Lightning Attention
-│   ├── sparse_indexer.py            # Block Sparse Indexer
-│   ├── latent_moe.py                # LatentMoE
-│   ├── attention_residual.py        # Attention Residual
-│   ├── multi_token_prediction.py    # Multi-Token Prediction Head
-│   ├── ring_attention.py            # Ring Attention
-│   ├── compressed_sparse_attention.py # Compressed Sparse Attention
-│   ├── alibi_attention.py           # ALiBi Attention
-│   ├── flash_mla.py                 # FlashMLA 接口模拟
-│   ├── speculative.py               # 投机解码接口
-│   ├── ssm.py                       # 简化 Mamba2Layer
-│   ├── kv_offload.py                # On-Disk KV Store
-│   ├── norm.py                      # RMSNorm
-│   ├── ffn.py                       # SwiGLU / FFN
-│   ├── transformer.py               # Transformer Block
-│   ├── model.py                     # CausalLMModel
-│   ├── registry.py                  # Attention / Positional 注册表
-│   └── flashattention/      # FlashAttention v1-v4 教学实现
-│       ├── fa1.py ... fa4.py
-│       └── common/          # 共享的在线 softmax / 掩码 / 分块原语
+LLMInfra/
+├── llminfra/
+│   ├── __init__.py          # 顶层 API 导出（from llminfra import X）
+│   ├── attention/           # 全部注意力变体与共享基类
+│   │   ├── base.py          #   BaseAttention 与输入校验
+│   │   ├── mha.py / mqa.py / gqa.py / mla.py  # 经典变体
+│   │   ├── sliding_window_attention.py / ring_attention.py
+│   │   ├── linear_attention.py / lightning_attention.py / gated_delta_net.py
+│   │   ├── block_sparse_attention.py / compressed_sparse_attention.py
+│   │   ├── hybrid_attention.py / alibi_attention.py / attention_residual.py
+│   │   └── flash_mla.py
+│   ├── flashattention/      # FlashAttention v1-v4 教学实现（含 autograd）
+│   │   ├── fa1.py ... fa4.py
+│   │   └── common/          #   共享的在线 softmax / 掩码 / 分块原语
+│   ├── layers/              # ffn.py / norm.py / ssm.py / transformer.py
+│   ├── moe/                 # Top-k Router、MoE、LatentMoE
+│   ├── inference/           # PagedAttention、KV offload、投机解码、MTP、稀疏索引
+│   ├── positional.py        # RoPE / YaRN / NTK / ALiBi / 2D 位置编码
+│   ├── model.py             # CausalLMModel
+│   └── registry.py          # Attention / Positional 注册表
 ├── tests/                   # pytest 测试套件
+├── docs/                    # 架构综述与选型文档
 ├── pyproject.toml
 ├── LICENSE
 └── README.md

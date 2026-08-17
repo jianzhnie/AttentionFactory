@@ -12,12 +12,12 @@ import pytest
 import torch
 from helpers import make_key_padding_mask, make_qkv, reference_with_grads
 
-from attentionfactory.flashattention import fa1, fa2, fa3, fa4, flash_attention
-from attentionfactory.flashattention.common import (
+from llminfra.flashattention import fa1, fa2, fa3, fa4, flash_attention
+from llminfra.flashattention.common import (
     FlashAttentionConfig,
     reference_attention,
 )
-from attentionfactory.flashattention.fa4 import (
+from llminfra.flashattention.fa4 import (
     _correction_merge,
     _fa4_rescale_threshold,
 )

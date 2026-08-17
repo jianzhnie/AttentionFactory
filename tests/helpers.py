@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import torch
 
-from attentionfactory.flashattention.common import reference_attention
+from llminfra.flashattention.common import reference_attention
 
 
 def make_qkv(

@@ -5,9 +5,9 @@ from __future__ import annotations
 import torch
 from torch import nn
 
+from ..attention.hybrid_attention import HybridAttention
+from ..attention.mha import MultiHeadAttention
 from .ffn import SwiGLUFFN
-from .hybrid_attention import HybridAttention
-from .mha import MultiHeadAttention
 from .norm import RMSNorm
 
 

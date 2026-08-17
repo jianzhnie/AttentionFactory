@@ -690,59 +690,59 @@ Hunyuan 的公开路线是：Dense/MoE 商用模型 -> Hunyuan-A13B 开源 MoE -
 
 ### 7.1 新增文件
 
-- `attentionfactory/sliding_window_attention.py`
+- `llminfra/sliding_window_attention.py`
   - `SlidingWindowAttention`，继承 `BaseAttention`，支持 `window_size`、`num_kv_groups`、`causal`。
-- `attentionfactory/block_sparse_attention.py`
+- `llminfra/block_sparse_attention.py`
   - `BlockSparseAttention`，继承 `BaseAttention`，支持 `block_size`、`top_k`、显式 `block_indices`。
-- `attentionfactory/linear_attention.py`
+- `llminfra/linear_attention.py`
   - `LinearAttention`，继承 `BaseAttention`，支持 `elu/relu/linear` kernel 与因果状态累积。
-- `attentionfactory/paged_attention.py`
+- `llminfra/paged_attention.py`
   - `PagedKVBlockAllocator`、`PagedAttentionCache` 和 `paged_attention`，模拟 block table、稠密 gather 与序列克隆。
-- `attentionfactory/positional.py`
+- `llminfra/positional.py`
   - `RotaryPositionEmbedding`、`YaRNScaledRotaryEmbedding`、`DynamicNTKRotaryEmbedding`、`ALiBiBias` 和工厂函数。
-- `attentionfactory/moe.py`
+- `llminfra/moe.py`
   - `ExpertFFN`、`TopKRouter`、`MixtureOfExperts`、`DeepSeekMoE`、`ExpertParallelMoE`，覆盖 Top-k 路由、共享专家、DeepSeek 风格 MoE 与专家并行模拟。
-- `attentionfactory/hybrid_attention.py`
+- `llminfra/hybrid_attention.py`
   - `HybridAttention`，按层索引在线性注意力和 GQA 全注意力之间路由，复现 Qwen3-Next/Kimi 的 3:1 混合模式。
-- `attentionfactory/gated_delta_net.py`
+- `llminfra/gated_delta_net.py`
   - `GatedDeltaNet`，门控 Delta 规则线性注意力的教学实现。
-- `attentionfactory/lightning_attention.py`
+- `llminfra/lightning_attention.py`
   - `LightningAttention`，分块线性注意力与 intra-block softmax 的 MiniMax 风格实现。
-- `attentionfactory/sparse_indexer.py`
+- `llminfra/sparse_indexer.py`
   - `BlockSparseIndexer`，学习式 KV block Top-k 选择器，可与 `BlockSparseAttention` 组合。
-- `attentionfactory/latent_moe.py`
+- `llminfra/latent_moe.py`
   - `LatentMoE`，Nemotron-3 风格的潜空间路由 MoE。
-- `attentionfactory/attention_residual.py`
+- `llminfra/attention_residual.py`
   - `AttentionResidual`，Kimi K3 Attention Residual 的简化教学版本。
-- `attentionfactory/multi_token_prediction.py`
+- `llminfra/multi_token_prediction.py`
   - `MultiTokenPredictionHead`，DeepSeek/Nemotron 风格多 Token 预测头。
-- `attentionfactory/ring_attention.py`
+- `llminfra/ring_attention.py`
   - `ring_attention` 与 `RingAttention`，分块在线 Softmax 精确注意力。
-- `attentionfactory/compressed_sparse_attention.py`
+- `llminfra/compressed_sparse_attention.py`
   - `CompressedSparseAttention`，CSA 风格 KV 压缩 + block sparse 选择。
-- `attentionfactory/alibi_attention.py`
+- `llminfra/alibi_attention.py`
   - `AlibiAttention`，GQA 与 ALiBi additive bias 集成。
-- `attentionfactory/flash_mla.py`
+- `llminfra/flash_mla.py`
   - `FlashMLA`，MLA 推理接口模拟。
-- `attentionfactory/speculative.py`
+- `llminfra/speculative.py`
   - `SpeculativeDecoder` 与 `EagleSpeculator`，draft-target 与 hidden-state drafting 投机解码教学接口。
-- `attentionfactory/ssm.py`
+- `llminfra/ssm.py`
   - `Mamba2Layer`，简化固定状态 SSM 层。
-- `attentionfactory/kv_offload.py`
+- `llminfra/kv_offload.py`
   - `OnDiskKVStore`，on-disk KV cache 接口模拟。
-- `attentionfactory/positional.py` 扩展
+- `llminfra/positional.py` 扩展
   - `LongRoPEScaledRotaryEmbedding`、`TwoDimensionalPositionEmbedding`。
-- `attentionfactory/moe.py` 扩展
+- `llminfra/moe.py` 扩展
   - `load_balance_loss`，Top-k MoE 辅助负载均衡损失。
-- `attentionfactory/norm.py`
+- `llminfra/norm.py`
   - `RMSNorm`，Llama/Qwen/Mistral 等模型使用的归一化层。
-- `attentionfactory/ffn.py`
+- `llminfra/ffn.py`
   - `SwiGLUFFN` 与 `FeedForward`，覆盖主流 Dense 和 MoE 专家网络。
-- `attentionfactory/transformer.py`
+- `llminfra/transformer.py`
   - `TransformerBlock`，组合可插拔 Attention、RMSNorm 和 FFN/MoE。
-- `attentionfactory/model.py`
+- `llminfra/model.py`
   - `CausalLMModel`，组合 Embedding、位置编码、Transformer Block、RMSNorm 与 LM Head；支持 `alibi`、`longrope`、`2d` 位置配置。
-- `attentionfactory/registry.py`
+- `llminfra/registry.py`
   - `build_attention`、`build_positional_encoding`、`list_attentions`，统一模块选择入口。
 - `tests/test_extended_attention.py`
   - 覆盖 shape、梯度、确定性、窗口/块稀疏掩码、PagedAttention 与稠密注意力一致性。
@@ -756,7 +756,7 @@ Hunyuan 的公开路线是：Dense/MoE 商用模型 -> Hunyuan-A13B 开源 MoE -
   - 覆盖 Lightning Attention、LatentMoE、Attention Residual、Block Sparse Indexer 与 MTP。
 - `tests/test_gap_modules.py`
   - 覆盖 Ring Attention、CSA、ALiBi Attention、FlashMLA、SpeculativeDecoder、EagleSpeculator、Mamba2Layer、LongRoPE/2D、On-Disk KV、ExpertParallelMoE、Paged clone 与 load-balance loss。
-- 修改 `attentionfactory/__init__.py` 导出新模块。
+- 修改 `llminfra/__init__.py` 导出新模块。
 
 ### 7.2 设计说明
 
@@ -771,7 +771,7 @@ Hunyuan 的公开路线是：Dense/MoE 商用模型 -> Hunyuan-A13B 开源 MoE -
 
 ```bash
 python -m pytest -p no:capture -q
-python -m ruff check attentionfactory tests
+python -m ruff check llminfra tests
 ```
 
 说明：当前机器默认 pytest 9.0.1 在 capture 初始化阶段会触发 macOS readline 相关段错误，使用 `-p no:capture` 可正常运行；这不是测试本身失败。
@@ -807,7 +807,7 @@ python -m ruff check attentionfactory tests
 python -m pytest -p no:capture -q
 # 171 passed
 
-python -m ruff check attentionfactory tests
+python -m ruff check llminfra tests
 # All checks passed
 ```
 

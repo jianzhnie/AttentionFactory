@@ -5,7 +5,7 @@ import math
 import pytest
 import torch
 
-from attentionfactory import (
+from llminfra import (
     AlibiAttention,
     CausalLMModel,
     CompressedSparseAttention,

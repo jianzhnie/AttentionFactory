@@ -1,16 +1,16 @@
-"""Composable causal language model built from AttentionFactory modules."""
+"""Composable causal language model built from LLMInfra modules."""
 
 from __future__ import annotations
 
 import torch
 from torch import nn
 
-from .ffn import SwiGLUFFN
-from .moe import DeepSeekMoE
-from .norm import RMSNorm
+from .layers.ffn import SwiGLUFFN
+from .layers.norm import RMSNorm
+from .layers.transformer import TransformerBlock
+from .moe.moe import DeepSeekMoE
 from .positional import ALiBiBias
 from .registry import build_attention, build_positional_encoding
-from .transformer import TransformerBlock
 
 
 class CausalLMModel(nn.Module):

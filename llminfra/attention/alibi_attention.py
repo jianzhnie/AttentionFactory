@@ -5,8 +5,8 @@ from __future__ import annotations
 import torch
 from torch import nn
 
+from ..positional import ALiBiBias
 from .base import BaseAttention, validate_attention_inputs
-from .positional import ALiBiBias
 
 
 class AlibiAttention(BaseAttention):

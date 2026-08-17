@@ -10,7 +10,7 @@ import torch
 import torch.nn.functional as F
 from helpers import make_causal_mask, make_hidden_state, make_padding_mask
 
-from attentionfactory import (
+from llminfra import (
     GroupQueryAttention,
     MultiHeadAttention,
     MultiHeadLatentAttention,

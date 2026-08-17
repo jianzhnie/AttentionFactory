@@ -3,7 +3,7 @@ requires = ["setuptools>=64.0", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "attentionfactory"
+name = "llminfra"
 version = "1.0.0"
 description = ""
 readme = "README.md"
@@ -29,14 +29,14 @@ dependencies = [
 ]
 
 [project.urls]
-Homepage = "https://gitee.com/jianzhnie/AttentionFactory"
-Repository = "https://gitee.com/jianzhnie/AttentionFactory"
-Issues = "https://gitee.com/jianzhnie/AttentionFactory/issues"
+Homepage = "https://github.com/jianzhnie/LLMInfra"
+Repository = "https://github.com/jianzhnie/LLMInfra"
+Issues = "https://github.com/jianzhnie/LLMInfra/issues"
 
 
 [tool.setuptools.packages.find]
 where = ["."]
-include = ["attentionfactory*"]
+include = ["llminfra*"]
 
 [tool.ruff]
 line-length = 88
@@ -71,7 +71,7 @@ ignore = [
 ]
 
 [tool.ruff.lint.isort]
-known-first-party = ["attentionfactory"]
+known-first-party = ["llminfra"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
