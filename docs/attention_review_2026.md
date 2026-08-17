@@ -60,6 +60,7 @@
 - Zamba-7B 的 Attention 核心修正为 Mamba + Shared Attention，避免与 Zamba2 的 Mamba2 混淆。
 - Hunyuan-A13B、Hy3、Hy-MT2、Step-3.7、MiMo-V2.5-Pro、Zamba2、Arctic 均以官方 HF 配置或官方模型卡核验。
 - Step-3.7-Flash 的 KV head 数量未在顶层配置完整公开，本文按“GQA 类”表述，不写成确定值。
+- 2026-08 复核：Kimi K3、DeepSeek-V4-Pro-0813、GLM-5.2、Qwen3-Next/Qwen3.8 全系列、MiniMax-M3、MiMo-V2.5-Pro、Hy3 的关键参数已与官方 HF config.json 逐字段核对；Qwen3-Next/Qwen3.8 的位置编码由“RoPE/YaRN”修正为 Partial RoPE（`partial_rotary_factor=0.25`），YaRN 仅为 1M 扩展手段。
 - GPT、Gemini、Claude 等闭源模型的 Attention 细节继续标注“官方未完全披露”，不将推测写成事实。
 - 文中量化数字均来自对应技术报告、官方模型卡或论文；不同测试口径不直接横向比较。
 
@@ -84,7 +85,8 @@ Qwen 的演进路线可以概括为：GQA 基线 -> Gated DeltaNet + Gated Atten
 
 - Qwen3-Next 官方模型卡明确给出 Hidden Layout：`12 * (3 * (Gated DeltaNet -> MoE) -> 1 * (Gated Attention -> MoE))`，其中 Gated DeltaNet 使用 32 个 V head、16 个 QK head，head_dim 128；Gated Attention 使用 16Q/2KV，head_dim 256。
 - Qwen3.8-27B 官方模型卡给出：`16 * (3 * (Gated DeltaNet -> FFN) -> 1 * (Gated Attention -> FFN))`；Gated Attention 为 24Q/4KV，Gated DeltaNet 为 48 V head / 16 QK head。
-- Qwen3.8-2.4T 官方模型卡给出 23 个类似隐藏块，512 个专家、每 Token 激活 10 个专家。
+- Qwen3.8-2.4T 官方模型卡给出 23 个类似隐藏块，512 个专家、每 Token 激活 10 个专家。官方配置进一步确认：92 层（`full_attention_interval=4`）、Gated Attention 64Q/4KV、Gated DeltaNet 128 V head / 16 QK head，并含 1 个共享专家（intermediate 2048）。
+- 位置编码方面，Qwen3-Next 与 Qwen3.8 系列的官方配置均为 Partial RoPE（`partial_rotary_factor=0.25`，theta 1e7），Qwen3.8-27B 另以 mrope 支持多模态；配置中未启用 YaRN，YaRN 仅是官方推荐的 1M 扩展手段。
 - 从 Qwen3-Next 开始，Qwen 系列从“GQA 全量注意力”转向“少量全量注意力 + 线性注意力”的混合路线，目标是在 256K 到 1M 上下文下降低解码成本。
 
 ### 2.2 DeepSeek 系列（深度求索）
@@ -106,7 +108,8 @@ DeepSeek 是 MLA 的提出者和主要推动者，2026 年进一步进入“MLA 
 - 官方技术报告标题为《DeepSeek-V4: Towards Highly Efficient Million-Token Context Intelligence》。
 - V4 使用混合注意力：CSA 先把每 `m` 个 Token 的 KV 压缩为一个 entry，再执行 DeepSeek Sparse Attention；HCA 使用更大压缩比例 `m' >> m` 并把压缩后的 KV 保持为稠密注意力。
 - 配置中出现 `q_lora_rank`、`qk_rope_head_dim`、`sliding_window=128` 和 1 个共享 KV head，说明 MLA 的低秩潜向量、解耦 RoPE 和局部窗口分支在 V4 中继续保留。
-- 推理侧还包含 FP4 indexer cache、DSpark 投机解码、异构 KV cache 与 on-disk KV cache，这些是系统层优化而非模型数学本身。
+- V4-Pro-0813 官方配置（config.json）进一步确认：61 层、384 个路由专家（Top-6）+ 1 个共享专家、`q_lora_rank=1536`、`qk_rope_head_dim=64`、`head_dim=512`；稀疏 indexer 为 64 head、Top-1024 block；`compress_ratios` 按层在 4（CSA）与 128（HCA）之间交替，末 3 层为 0（全量注意力）；长上下文经 YaRN（factor 16，original 64K）扩展到 1,048,576。
+- 推理侧还包含 FP4 indexer cache、DSpark 投机解码、异构 KV cache 与 on-disk KV cache，这些是系统层优化而非模型数学本身。DSpark 在配置中带独立参数块（目标层 58-60、block size 5、Markov rank 512），vLLM/SGLang 均以内建开关支持。
 
 ### 2.3 GLM 系列（智谱 AI）
 
@@ -126,7 +129,7 @@ GLM 的公开演进路线是：MHA -> MQA -> GQA -> MLA + DSA。
 **关键事实**
 
 - GLM-5 官方模型卡确认从 355B/32B Active 扩展到 744B/40B Active，并集成 DSA 以降低部署成本。
-- GLM-5.2 官方模型卡提出 IndexShare：每 4 个稀疏注意力层共享同一个 indexer，在 1M 上下文降低每 Token FLOPs 约 2.9 倍。
+- GLM-5.2 官方模型卡提出 IndexShare：每 4 个稀疏注意力层共享同一个 indexer，在 1M 上下文降低每 Token FLOPs 约 2.9 倍。官方配置确认：78 层（前 3 层稠密）、256 个路由专家（Top-8）+ 1 个共享专家、`q_lora_rank=2048`、`kv_lora_rank=512`、`qk_rope_head_dim=64`；indexer 为 32 head、Top-2048 block，`indexer_types` 按“1 full + 3 shared”每 4 层循环，即 IndexShare 的配置级证据；上下文 1,048,576。
 - GLM-4.7 的配置仍为纯 GQA（96Q/8KV），GLM-4.7-Flash 已出现 `kv_lora_rank=512`，说明智谱在轻量模型上先验证 MLA，再在 GLM-5 系列大规模启用。
 
 ### 2.4 Kimi 系列（月之暗面）
@@ -164,7 +167,7 @@ MiniMax 的路线从“线性注意力 + 全量注意力混合”转向“GQA �
 
 - MSA 论文明确：MSA 是建立在 GQA 上的 blockwise sparse attention，Index Branch 为每个 GQA group 独立选择 Top-k KV block，Main Branch 只对选中 block 做精确 block-sparse attention。
 - MSA 论文在 109B 模型上报告：1M 上下文每 Token 注意力计算降低 28.4x，H800 上 prefill 14.2x、decode 7.6x 墙钟加速。
-- MiniMax-M3 模型卡报告：相对 M2，在 1M 上下文下 prefill 9x、decode 15x 加速，每 Token 计算降至 1/20。两份数字测试口径不同，均保留。
+- MiniMax-M3 模型卡报告：相对 M2，在 1M 上下文下 prefill 9x、decode 15x 加速，每 Token 计算降至 1/20。两份数字测试口径不同，均保留。官方配置确认：60 层（前 3 层稠密）、GQA 64Q/4KV、128 个路由专家（Top-4）+ 1 个共享专家；MSA 稀疏参数为 16 个 Top block、block 大小 128、4 个 index head；Partial RoPE 0.5、theta 5M；另含 7 个 MTP 模块与 CLIP 视觉塔（原生多模态）。
 
 ### 2.6 Llama 系列（Meta）
 
@@ -372,7 +375,7 @@ MiMo 是 SWA + Global Attention 混合的 1M 上下文 MoE 系列。
 | MiMo-V2-Flash | 2025-12 | 是 | MoE | SWA + Global Attention | 1M | 混合注意力 + MTP |
 | MiMo-V2.5-Pro | 2026-04 | 是 | MoE 1.02T/42B Active | SWA + GA 6:1，GQA 128Q/8KV | 1M | KV Cache 减少约 7x，3 层 MTP，27T Token 预训练 |
 
-**核验说明**：MiMo-V2.5-Pro 官方模型卡明确给出 70 层、10 个 Full Attention 层、SWA 窗口 128、QK head dim 192、V head dim 128。
+**核验说明**：MiMo-V2.5-Pro 官方模型卡明确给出 70 层、10 个 Full Attention 层、SWA 窗口 128、QK head dim 192、V head dim 128。官方配置进一步确认：`hybrid_layer_pattern` 中 10 个全量层呈约 6:1 间隔、384 个路由专家（Top-8）、`partial_rotary_factor` 约 0.334、RoPE theta 1e7，SWA 与全量层同为 128Q/8KV。
 
 ### 2.25 Zamba 系列（Zyphra）
 
@@ -406,7 +409,7 @@ Hunyuan 的公开路线是：Dense/MoE 商用模型 -> Hunyuan-A13B 开源 MoE -
 | Hy3 | 2026-07 | 是 | MoE 295B/21B Active | GQA 64Q/8KV | 256K | 192 专家 Top-8，MTP 3.8B 参数 |
 | Hy-MT2-30B-A3B | 2026-05 | 是 | MoE 30B/3B Active | GQA 32Q/4KV | 256K | 128 专家 Top-8，33 语言翻译 |
 
-**核验说明**：Hunyuan-A13B 官方模型卡确认 80B 总参/13B 激活、GQA、256K 上下文；Hy3 官方模型卡确认 295B 总参/21B 激活、GQA 64Q/8KV、256K 上下文、192 专家。
+**核验说明**：Hunyuan-A13B 官方模型卡确认 80B 总参/13B 激活、GQA、256K 上下文；Hy3 官方模型卡确认 295B 总参/21B 激活、GQA 64Q/8KV、256K 上下文、192 专家。Hy3 官方配置进一步确认：80 层（首层稠密）、1 个共享专家、`num_nextn_predict_layers=1`（MTP）、RoPE theta 约 1.1e7。
 
 ### 2.28 遗漏分析：已覆盖 / 未覆盖 / 待补充
 
@@ -568,9 +571,9 @@ Hunyuan 的公开路线是：Dense/MoE 商用模型 -> Hunyuan-A13B 开源 MoE -
 
 | 系列 | 版本 | 发布时间 | 开源 | 基础架构 | Attention 核心 | 位置编码/长上下文 | 上下文窗口 | KV/内存优化 | 关键优化 | 来源与可信度 |
 |------|------|----------|------|----------|----------------|--------------------|------------|--------------|----------|--------------|
-| Qwen | Qwen3.8-2.4T-A95B | 2026-08 | 是 | MoE 2.4T/95B Active | Gated DeltaNet + Gated Attention | RoPE/YaRN | 262K，扩展 1M | 线性状态 + GQA 4 KV | 512 专家 Top-10 | 官方 HF 模型卡，高 |
-| Qwen | Qwen3.8-27B | 2026-08 | 是 | Dense 27B | Gated DeltaNet + Gated Attention | RoPE/YaRN | 262K，托管 1M | 线性状态 + GQA 4 KV | 多模态、Agent | 官方 HF 模型卡，高 |
-| Qwen | Qwen3-Next | 2025-09 | 是 | MoE 80B/3B Active | Gated DeltaNet + Gated Attention | YaRN | 256K，扩展 1,010,000 | KDA 状态 + GQA 2 KV | 3:1 混合 | 官方 HF 模型卡，高 |
+| Qwen | Qwen3.8-2.4T-A95B | 2026-08 | 是 | MoE 2.4T/95B Active | Gated DeltaNet + Gated Attention | Partial RoPE (0.25)，theta 1e7 | 262K，扩展 1M | 线性状态 + GQA 4 KV | 512 专家 Top-10 | 官方 HF 模型卡/配置，高 |
+| Qwen | Qwen3.8-27B | 2026-08 | 是 | Dense 27B | Gated DeltaNet + Gated Attention | Partial RoPE (0.25) + mrope | 262K，托管 1M | 线性状态 + GQA 4 KV | 多模态、Agent | 官方 HF 模型卡/配置，高 |
+| Qwen | Qwen3-Next | 2025-09 | 是 | MoE 80B/3B Active | Gated DeltaNet + Gated Attention | Partial RoPE (0.25)，YaRN 扩展 | 256K，扩展 1,010,000 | KDA 状态 + GQA 2 KV | 3:1 混合 | 官方 HF 模型卡/配置，高 |
 | DeepSeek | V4-Pro-0813 | 2026-08 | 是 | MoE 1.6T/49B Active | MLA + CSA + HCA | Partial RoPE + YaRN | 1M | KV 相对 V3.2 约 10% | DSpark、FP4 indexer | 官方报告/模型卡，高 |
 | DeepSeek | V4-Flash-0731 | 2026-07 | 是 | MoE 284B/13B Active | MLA + CSA + HCA | Partial RoPE + YaRN | 1M | KV 相对 V3.2 约 7% | 1M 推理 FLOPs 约 10% | 官方报告/模型卡，高 |
 | DeepSeek | V3 | 2024-12 | 是 | MoE 671B/37B Active | MLA | RoPE | 128K | 低秩 KV | DeepSeekMoE | 官方技术报告，高 |
