@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import torch
+
 from .alibi import ALiBiBias
 from .base import BasePositionalEncoding
 from .mrope import MultiModalRotaryPositionEmbedding
@@ -58,10 +60,19 @@ def get_positional_encoding(
             preset = kwargs.pop("preset")
             if not isinstance(preset, str):
                 raise ValueError("longrope preset must be a string")
+            dtype = kwargs.pop("dtype", torch.float32)
+            base = kwargs.pop("base", 10000.0)
+            if kwargs:
+                raise ValueError(
+                    f"unsupported longrope preset arguments: {sorted(kwargs)}"
+                )
+            if not isinstance(dtype, torch.dtype) or not isinstance(base, (int, float)):
+                raise ValueError("longrope dtype/base have invalid types")
             return LongRoPEScaledRotaryEmbedding.from_preset(
                 preset,
                 dim=dim,
-                dtype=kwargs.pop("dtype", torch.float32),
+                base=float(base),
+                dtype=dtype,
             )
         if not {"long_factor", "short_factor"} <= set(kwargs):
             raise ValueError("longrope requires long_factor and short_factor")

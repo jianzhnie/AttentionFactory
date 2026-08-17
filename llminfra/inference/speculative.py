@@ -38,6 +38,7 @@ class SpeculativeDecoder(nn.Module):
         num_speculative_tokens: int = 4,
         temperature: float = 0.0,
         append_bonus_token: bool = False,
+        pad_token_id: int = 0,
     ) -> None:
         super().__init__()
         if num_speculative_tokens < 1:
@@ -49,15 +50,16 @@ class SpeculativeDecoder(nn.Module):
         self.num_speculative_tokens = int(num_speculative_tokens)
         self.temperature = float(temperature)
         self.append_bonus_token = bool(append_bonus_token)
+        self.pad_token_id = int(pad_token_id)
+        self.last_num_drafted = 0
+        self.last_num_accepted = 0
 
     def forward(self, input_ids: torch.Tensor) -> torch.Tensor:
         """Generate one speculative block.
 
-        Teaching simplifications: draft tokens are read off the last
-        ``num_speculative_tokens`` positions of the draft logits (no
-        autoregressive draft rollout), and acceptance is decided batch-wide
-        (one rejecting row stops the whole batch). The probability correction
-        itself follows standard speculative sampling.
+        Draft tokens are rolled out autoregressively and every batch row is
+        verified independently. Because rows may accept different numbers of
+        tokens, shorter results are right-padded with ``pad_token_id``.
 
         Returns:
             Input ids concatenated with accepted tokens (plus one bonus
@@ -66,55 +68,84 @@ class SpeculativeDecoder(nn.Module):
         """
         if input_ids.dim() != 2:
             raise ValueError("input_ids must have shape (batch, seq)")
-        if input_ids.size(1) < self.num_speculative_tokens:
-            raise ValueError(
-                "input sequence must be at least num_speculative_tokens long"
-            )
-        draft_logits = self.draft_model(input_ids)
-        draft_window = draft_logits[:, -self.num_speculative_tokens :]
-        draft_tokens = self._sample(draft_window)
+        if input_ids.size(1) < 1:
+            raise ValueError("input sequence must contain at least one token")
+        rows: list[torch.Tensor] = []
+        total_accepted = 0
+        for row in input_ids:
+            decoded, num_accepted = self._decode_row(row[None])
+            rows.append(decoded[0])
+            total_accepted += num_accepted
+        max_length = max(row.numel() for row in rows)
+        output = input_ids.new_full(
+            (input_ids.size(0), max_length),
+            self.pad_token_id,
+        )
+        for row_index, row in enumerate(rows):
+            output[row_index, : row.numel()] = row
+        self.last_num_drafted = input_ids.size(0) * self.num_speculative_tokens
+        self.last_num_accepted = total_accepted
+        return output
 
-        target_input = torch.cat([input_ids, draft_tokens], dim=-1)
+    def _decode_row(self, input_ids: torch.Tensor) -> tuple[torch.Tensor, int]:
+        """Autoregressively draft and independently verify one batch row."""
+        draft_tokens: list[torch.Tensor] = []
+        draft_step_logits: list[torch.Tensor] = []
+        draft_input = input_ids
+        for _ in range(self.num_speculative_tokens):
+            logits = self.draft_model(draft_input)[:, -1]
+            token = self._sample(logits)
+            draft_step_logits.append(logits)
+            draft_tokens.append(token[:, None])
+            draft_input = torch.cat([draft_input, token[:, None]], dim=-1)
+
+        drafted = torch.cat(draft_tokens, dim=-1)
+        target_input = torch.cat([input_ids, drafted], dim=-1)
         target_logits = self.target_model(target_input)
+        prompt_length = input_ids.size(1)
         accepted: list[torch.Tensor] = []
-        start = input_ids.size(1)
+        num_accepted = 0
         for step in range(self.num_speculative_tokens):
-            step_logits = target_logits[:, start + step - 1 : start + step]
+            target_step_logits = target_logits[:, prompt_length + step - 1]
+            draft_token = drafted[:, step : step + 1]
             if self.temperature == 0.0:
-                target_next = self._sample(step_logits)
-                accepted.append(target_next)
-                if (draft_tokens[:, step] != target_next[:, 0]).any():
-                    break
-            else:
-                draft_token = draft_tokens[:, step : step + 1]
-                if self._accept_draft(
-                    draft_window[:, step], step_logits[:, 0], draft_token
-                ):
+                target_token = self._sample(target_step_logits)[:, None]
+                if torch.equal(draft_token, target_token):
                     accepted.append(draft_token)
-                else:
-                    accepted.append(
-                        self._sample_residual(
-                            draft_window[:, step], step_logits[:, 0]
-                        )
+                    num_accepted += 1
+                    continue
+                accepted.append(target_token)
+                break
+
+            accepted_mask = self._accept_draft(
+                draft_step_logits[step], target_step_logits, draft_token
+            )
+            if bool(accepted_mask.item()):
+                accepted.append(draft_token)
+                num_accepted += 1
+            else:
+                accepted.append(
+                    self._sample_residual(
+                        draft_step_logits[step], target_step_logits
                     )
-                    break
+                )
+                break
         else:
             if self.append_bonus_token:
-                accepted.append(self._sample(target_logits[:, -1:]))
-        return torch.cat([input_ids, *accepted], dim=-1)
+                accepted.append(self._sample(target_logits[:, -1])[:, None])
+        return torch.cat([input_ids, *accepted], dim=-1), num_accepted
 
     def _accept_draft(
         self,
         draft_logits: torch.Tensor,
         target_logits: torch.Tensor,
         draft_token: torch.Tensor,
-    ) -> bool:
-        """Batch-wide rejection-sampling decision for one draft position.
+    ) -> torch.Tensor:
+        """Return one rejection-sampling decision per batch row.
 
         Accepts the draft token with probability ``min(1, p_target/p_draft)``
         per row, where both distributions are temperature-scaled softmaxes
-        evaluated at the draft token. Returns True only if every batch row
-        accepts.
+        evaluated at the draft token.
         """
         p_draft = torch.softmax(draft_logits / self.temperature, dim=-1)
         p_target = torch.softmax(target_logits / self.temperature, dim=-1)
@@ -122,7 +153,7 @@ class SpeculativeDecoder(nn.Module):
         p_target_token = p_target.gather(-1, draft_token)
         ratio = p_target_token / p_draft_token.clamp_min(1e-12)
         accept_prob = torch.clamp(ratio, max=1.0)
-        return bool((torch.rand_like(accept_prob) < accept_prob).all())
+        return (torch.rand_like(accept_prob) < accept_prob).squeeze(-1)
 
     def _sample(self, logits: torch.Tensor) -> torch.Tensor:
         if self.temperature <= 0.0:
@@ -159,7 +190,8 @@ class SpeculativeDecoder(nn.Module):
         return (
             f"num_speculative_tokens={self.num_speculative_tokens}, "
             f"temperature={self.temperature}, "
-            f"append_bonus_token={self.append_bonus_token}"
+            f"append_bonus_token={self.append_bonus_token}, "
+            f"pad_token_id={self.pad_token_id}"
         )
 
 

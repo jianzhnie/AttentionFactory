@@ -21,11 +21,15 @@ from .mrope import MultiModalRotaryPositionEmbedding
 from .rope import RotaryPositionEmbedding, apply_rotary_pos_emb
 from .scaling import (
     DynamicNTKRotaryEmbedding,
+    LONGROPE_PRESETS,
+    LongRoPEPreset,
     LongRoPEScaledRotaryEmbedding,
     PartialRotaryPositionEmbedding,
     PositionInterpolation,
     YaRNParameters,
     YaRNScaledRotaryEmbedding,
+    get_longrope_preset,
+    register_longrope_preset,
 )
 from .two_d import TwoDimensionalPositionEmbedding
 
@@ -34,6 +38,8 @@ __all__ = [
     "BasePositionalEncoding",
     "DynamicNTKRotaryEmbedding",
     "LongRoPEScaledRotaryEmbedding",
+    "LONGROPE_PRESETS",
+    "LongRoPEPreset",
     "MultiModalRotaryPositionEmbedding",
     "PartialRotaryPositionEmbedding",
     "PositionInterpolation",
@@ -43,4 +49,6 @@ __all__ = [
     "YaRNScaledRotaryEmbedding",
     "apply_rotary_pos_emb",
     "get_positional_encoding",
+    "get_longrope_preset",
+    "register_longrope_preset",
 ]

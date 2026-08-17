@@ -20,7 +20,7 @@ from .mha import MultiHeadAttention
 from .mla import MultiHeadLatentAttention
 from .mqa import MultiQueryAttention
 from .residual import AttentionResidual
-from .ring import RingAttention, ring_attention
+from .ring import RingAttention, distributed_ring_attention, ring_attention
 from .sliding_window import SlidingWindowAttention
 
 __all__ = [
@@ -40,6 +40,7 @@ __all__ = [
     "MultiQueryAttention",
     "RingAttention",
     "SlidingWindowAttention",
+    "distributed_ring_attention",
     "ring_attention",
     "validate_attention_inputs",
 ]
