@@ -15,7 +15,21 @@ from .mla import MultiHeadLatentAttention
 
 
 class FlashMLA(nn.Module):
-    """Thin interface wrapper around ``MultiHeadLatentAttention``."""
+    """Thin interface wrapper around ``MultiHeadLatentAttention``.
+
+    Args:
+        hidden_size: Dimensionality of input and output features.
+        num_heads: Number of attention heads.
+        q_latent_size: Latent dimension of the query branch.
+        kv_latent_size: Latent dimension of the key/value branch.
+        max_batch_size: Stored for interface parity with the real kernel's
+            cache pre-allocation; not enforced.
+
+    Note:
+        ``prefill`` *records* latent KV states in ``latent_cache`` for
+        inspection, but ``decode`` does not attend to the cache — this
+        simulates the cache-oriented interface, not the cached computation.
+    """
 
     def __init__(
         self,

@@ -51,10 +51,30 @@ def test_feed_forward_shape():
 def test_mamba2_layer_shape_and_gradient():
     layer = Mamba2Layer(HIDDEN, d_state=8)
     x = make_hidden_state(BATCH, SEQ, HIDDEN).requires_grad_(True)
-    out = layer(x)
+    out, state = layer(x)
     assert out.shape == x.shape
+    assert state.shape == (BATCH, 8)
     out.sum().backward()
     assert x.grad is not None and torch.isfinite(x.grad).all()
+
+
+def test_mamba2_state_threading_matches_full_forward():
+    """Chunked decoding with a threaded state must equal one full pass."""
+    layer = Mamba2Layer(HIDDEN, d_state=8).eval()
+    x = make_hidden_state(BATCH, SEQ, HIDDEN)
+
+    full_out, _ = layer(x)
+    first_out, state = layer(x[:, :3])
+    second_out, state = layer(x[:, 3:], state=state)
+    torch.testing.assert_close(torch.cat([first_out, second_out], dim=1), full_out)
+
+
+def test_mamba2_empty_sequence():
+    layer = Mamba2Layer(HIDDEN, d_state=8)
+    x = make_hidden_state(BATCH, SEQ, HIDDEN)
+    out, state = layer(x[:, :0])
+    assert out.shape == (BATCH, 0, HIDDEN)
+    assert state.shape == (BATCH, 8)
 
 
 def test_transformer_block_shape_and_gradient():

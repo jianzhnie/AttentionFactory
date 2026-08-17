@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import torch
 from torch import nn
 
 from .mixture import MixtureOfExperts
@@ -44,7 +45,7 @@ class LatentMoE(nn.Module):
             top_k=top_k,
         )
 
-    def forward(self, x):
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
         """Project to latent space, route experts, then project back."""
         latent = self.down_proj(x)
         routed = self.moe(latent)

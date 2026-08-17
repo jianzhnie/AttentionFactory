@@ -81,20 +81,30 @@ class LinearAttention(BaseAttention):
             value = value * key_padding_mask.unsqueeze(-1)
 
         if self.causal:
-            key_sum = key.cumsum(dim=2)
-            kv_state = torch.einsum("bhsf,bhvd->bhsfvd", key, value)
-            kv_state = kv_state.cumsum(dim=2)
-            out_unnorm = torch.einsum("bhsf,bhsfvd->bhsd", query, kv_state)
-            normalizer = torch.einsum("bhsf,bhsf->bhs", query, key_sum)
+            # Causal form: out[s] = q_s · sum_{s'<=s} (k_s' ⊗ v_s'). The
+            # outer products accumulate over the same position axis, so no
+            # future values can leak in.
+            kv_state = torch.einsum("bhsf,bhsd->bhsfd", key, value).cumsum(dim=2)
+            out_unnorm = torch.einsum("bhsf,bhsfd->bhsd", query, kv_state)
+            normalizer = torch.einsum(
+                "bhsf,bhsf->bhs", query, key.cumsum(dim=2)
+            )
         else:
-            key_sum = key.sum(dim=2, keepdim=True)
-            kv_state = torch.einsum("bhsf,bhvd->bhfvd", key, value)
-            out_unnorm = torch.einsum("bhsf,bhfvd->bhsd", query, kv_state)
-            normalizer = torch.einsum("bhsf,bhf->bhs", query, key_sum)
+            # Non-causal form: out = q · sum_s (k_s ⊗ v_s); the (f, d) state
+            # is shared by all positions.
+            kv_state = torch.einsum("bhsf,bhsd->bhfd", key, value)
+            out_unnorm = torch.einsum("bhsf,bhfd->bhsd", query, kv_state)
+            normalizer = torch.einsum("bhsf,bhf->bhs", query, key.sum(dim=2))
 
-        safe_normalizer = normalizer.clamp_min(torch.finfo(normalizer.dtype).eps)
+        # Sign-safe division: elu/relu kernels give non-negative normalizers,
+        # but the identity ("linear") kernel may legitimately produce negative
+        # ones. Only exactly-zero rows (fully masked) are zeroed out.
+        eps = torch.finfo(normalizer.dtype).eps
+        safe_normalizer = torch.where(
+            normalizer >= 0, normalizer.clamp_min(eps), normalizer.clamp_max(-eps)
+        )
         output = out_unnorm / safe_normalizer.unsqueeze(-1)
-        output = output.where(normalizer.unsqueeze(-1) > 0, torch.zeros_like(output))
+        output = output.where(normalizer.unsqueeze(-1) != 0, torch.zeros_like(output))
         output = self.combine_head(output)
         output = self.o_proj(output)
         if self.training and self.dropout_prob > 0:

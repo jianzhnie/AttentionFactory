@@ -19,12 +19,20 @@ class CompressedSparseAttention(BaseAttention):
     Args:
         hidden_size: Dimensionality of input and output features.
         num_heads: Number of query heads.
-        compress_ratio: Number of original key/value tokens per entry.
+        compress_ratio: Number of original key/value tokens per entry. The
+            sequence length must be divisible by it.
         num_kv_groups: Number of shared key/value head groups.
         top_k: Number of compressed blocks selected per query block.
-        causal: Apply causal masking.
+        causal: Apply causal masking. A compressed entry becomes visible to a
+            query only once its *last* source token is in the past.
         dropout: Dropout probability for attention weights.
         bias: Whether linear projections use biases.
+
+    Note:
+        ``attention_mask`` is compressed to block granularity: a block is
+        visible if any of its tokens is valid. The compressed K/V mean still
+        averages in masked tokens, which is a deliberate teaching
+        simplification.
     """
 
     def __init__(
@@ -70,7 +78,19 @@ class CompressedSparseAttention(BaseAttention):
         return_attention_weights: bool = False,
         block_indices: torch.Tensor | None = None,
     ) -> torch.Tensor | tuple[torch.Tensor, torch.Tensor]:
-        """Run compressed sparse attention over ``hidden_state``."""
+        """Run compressed sparse attention over ``hidden_state``.
+
+        Args:
+            hidden_state: Input of shape ``(batch, seq_len, hidden_size)``;
+                ``seq_len`` must be divisible by ``compress_ratio``.
+            attention_mask: Optional key padding mask, ``(batch, 1, 1, seq)``
+                or broadcastable; compressed to block granularity (see the
+                class docstring for the simplification).
+            return_attention_weights: Also return the sparse weights.
+            block_indices: Optional explicit selected blocks, shape
+                ``(heads, num_q_blocks, top_k)`` or
+                ``(batch, heads, num_q_blocks, top_k)``.
+        """
         validate_attention_inputs(hidden_state, attention_mask, self.num_heads)
         batch_size, seq_len, _ = hidden_state.size()
         if seq_len % self.compress_ratio != 0:
@@ -96,9 +116,16 @@ class CompressedSparseAttention(BaseAttention):
             batch_size, self.num_heads, seq_len, compressed_len
         )
         if attention_mask is not None:
-            if attention_mask.dim() == 3:
-                attention_mask = attention_mask.unsqueeze(1)
-            sparse_mask = sparse_mask & attention_mask.bool()
+            # Compress the key mask to block granularity: a block stays
+            # visible if any of its source tokens is valid.
+            key_mask = attention_mask
+            if key_mask.dim() == 4:
+                key_mask = key_mask[..., 0, :]
+            key_mask = key_mask.reshape(key_mask.size(0), -1).bool()
+            key_blocks = key_mask.view(
+                batch_size, compressed_len, self.compress_ratio
+            ).any(dim=-1)
+            sparse_mask = sparse_mask & key_blocks[:, None, None, :]
 
         weights = self.compute_attention_weights(scores, sparse_mask)
         output = torch.matmul(weights, value)
@@ -143,8 +170,18 @@ class CompressedSparseAttention(BaseAttention):
             indices = self._fallback_indices(batch_size, num_q_blocks, device)
         elif block_indices.dim() == 3:
             indices = block_indices.unsqueeze(0).expand(batch_size, -1, -1, -1)
-        else:
+        elif block_indices.dim() == 4:
             indices = block_indices
+        else:
+            raise ValueError(
+                "block_indices must be 3D (heads, q_blocks, top_k) or "
+                f"4D (batch, heads, q_blocks, top_k), got {block_indices.dim()}D"
+            )
+        indices = indices.to(device)
+        if indices.numel() and (
+            indices.min() < 0 or indices.max() >= compressed_len
+        ):
+            raise ValueError("block_indices out of range")
 
         selected = torch.zeros(
             batch_size,
@@ -154,12 +191,16 @@ class CompressedSparseAttention(BaseAttention):
             dtype=torch.bool,
             device=device,
         )
-        selected.scatter_(-1, indices.to(device), True)
+        selected.scatter_(-1, indices, True)
         allowed = selected[:, :, q_block, :]
         if self.causal:
-            k_pos = torch.arange(compressed_len, device=device)
+            # Entry k aggregates tokens [k*ratio, (k+1)*ratio - 1]; a query may
+            # only see it once the entry's LAST source token is in the past.
+            entry_end = (
+                torch.arange(compressed_len, device=device) + 1
+            ) * self.compress_ratio - 1
             allowed = allowed & (
-                (k_pos * self.compress_ratio)[None, None, None, :]
+                entry_end[None, None, None, :]
                 <= torch.arange(q_len, device=device)[None, None, :, None]
             )
         return allowed

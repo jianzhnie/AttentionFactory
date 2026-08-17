@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from .attention.alibi import AlibiAttention
+from .attention.base import BaseAttention
 from .attention.block_sparse import BlockSparseAttention
 from .attention.compressed_sparse import CompressedSparseAttention
 from .attention.gated_delta_net import GatedDeltaNet
@@ -20,7 +21,7 @@ from .positional import (
     get_positional_encoding,
 )
 
-ATTENTION_REGISTRY = {
+ATTENTION_REGISTRY: dict[str, type[BaseAttention]] = {
     "alibi": AlibiAttention,
     "mha": MultiHeadAttention,
     "mqa": MultiQueryAttention,
@@ -42,7 +43,7 @@ def build_attention(
     hidden_size: int,
     num_heads: int,
     **kwargs: object,
-):
+) -> BaseAttention:
     """Build an attention module by registry name.
 
     Required extra keyword arguments depend on the architecture, for example

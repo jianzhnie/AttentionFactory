@@ -9,7 +9,6 @@ from .layers.ffn import SwiGLUFFN
 from .layers.norm import RMSNorm
 from .layers.transformer import TransformerBlock
 from .moe import DeepSeekMoE
-from .positional import ALiBiBias
 from .registry import build_attention, build_positional_encoding
 
 
@@ -19,6 +18,29 @@ class CausalLMModel(nn.Module):
     This class composes embedding, positional encoding, transformer blocks,
     RMSNorm and an output head. It is intended for architecture experiments,
     not for reproducing a specific production model.
+
+    Args:
+        vocab_size: Vocabulary size for the embedding and LM head.
+        hidden_size: Model hidden dimension.
+        num_layers: Number of transformer blocks.
+        num_heads: Number of attention heads.
+        intermediate_size: FFN (or expert) intermediate dimension.
+        max_seq_len: Maximum supported sequence length.
+        attention_name: Registry name of the attention module (see
+            ``list_attentions()``). Note: ``positional="alibi"`` forces
+            ``attention_name="alibi"``, because ALiBi is applied as an
+            attention-score bias rather than an input embedding.
+        attention_kwargs: Extra keyword arguments for the attention module.
+            For ``"gqa"``, ``num_kv_groups`` defaults to ``num_heads // 2``.
+        positional: Positional encoding name (``rope``, ``yarn``, ``ntk``,
+            ``alibi``, ``2d``, ...) or ``"none"``.
+        positional_kwargs: Extra keyword arguments for the positional module.
+        use_moe: Replace the FFN with a ``DeepSeekMoE``.
+        num_experts: Number of routed experts when ``use_moe`` is set.
+        expert_top_k: Experts selected per token when ``use_moe`` is set.
+        num_shared_experts: Always-on shared experts when ``use_moe`` is set.
+        norm_eps: RMSNorm epsilon.
+        tie_word_embeddings: Share the LM head weight with the token embedding.
     """
 
     def __init__(
@@ -30,9 +52,9 @@ class CausalLMModel(nn.Module):
         intermediate_size: int,
         max_seq_len: int = 4096,
         attention_name: str = "gqa",
-        attention_kwargs: dict | None = None,
+        attention_kwargs: dict[str, object] | None = None,
         positional: str = "rope",
-        positional_kwargs: dict | None = None,
+        positional_kwargs: dict[str, object] | None = None,
         use_moe: bool = False,
         num_experts: int = 8,
         expert_top_k: int = 2,
@@ -51,6 +73,8 @@ class CausalLMModel(nn.Module):
         self.intermediate_size = int(intermediate_size)
         self.max_seq_len = int(max_seq_len)
         if positional == "alibi":
+            # ALiBi is an attention-score bias, not an input embedding: swap
+            # in the ALiBi attention module and skip input-side encoding.
             attention_name = "alibi"
             positional = "none"
         self.attention_name = attention_name
@@ -132,7 +156,7 @@ class CausalLMModel(nn.Module):
             )
 
         hidden_state = self.embed_tokens(input_ids)
-        if self.positional is not None and not isinstance(self.positional, ALiBiBias):
+        if self.positional is not None:
             hidden_state = self.positional(hidden_state)
 
         combined_mask = self._build_mask(

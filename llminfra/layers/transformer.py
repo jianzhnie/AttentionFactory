@@ -19,9 +19,15 @@ class TransformerBlock(nn.Module):
         num_heads: Number of attention heads.
         intermediate_size: FFN intermediate dimension.
         attention: Optional attention module. Defaults to ``MultiHeadAttention``.
+            The module must accept ``attention_mask`` and
+            ``return_attention_weights`` keyword arguments (the
+            `BaseAttention` interface); ``HybridAttention`` additionally
+            receives ``layer_index``.
         ffn: Optional FFN module. Defaults to ``SwiGLUFFN``.
         norm_eps: RMSNorm epsilon.
-        pre_norm: Whether to apply pre-norm residual style.
+        pre_norm: Whether to apply pre-norm residual style. With
+            ``pre_norm=False`` each norm is applied after its residual add
+            (standard post-norm).
     """
 
     def __init__(
@@ -39,8 +45,12 @@ class TransformerBlock(nn.Module):
         self.num_heads = int(num_heads)
         self.intermediate_size = int(intermediate_size)
         self.pre_norm = bool(pre_norm)
-        self.attention = attention or MultiHeadAttention(hidden_size, num_heads)
-        self.ffn = ffn or SwiGLUFFN(hidden_size, intermediate_size)
+        if attention is None:
+            attention = MultiHeadAttention(hidden_size, num_heads)
+        if ffn is None:
+            ffn = SwiGLUFFN(hidden_size, intermediate_size)
+        self.attention = attention
+        self.ffn = ffn
         self.norm1 = RMSNorm(hidden_size, eps=norm_eps)
         self.norm2 = RMSNorm(hidden_size, eps=norm_eps)
 
@@ -56,17 +66,19 @@ class TransformerBlock(nn.Module):
         ``layer_index`` is forwarded to ``HybridAttention`` when used, so the
         caller can reproduce Qwen3-Next/Kimi-style 3:1 linear/full layouts.
         """
-        normed = self.norm1(hidden_state)
+        # Pre-norm feeds the normalized input to the attention sublayer;
+        # post-norm feeds it the raw input and normalizes after the residual.
+        attention_input = self.norm1(hidden_state) if self.pre_norm else hidden_state
         if isinstance(self.attention, HybridAttention):
             result = self.attention(
-                normed,
+                attention_input,
                 attention_mask=attention_mask,
                 return_attention_weights=return_attention_weights,
                 layer_index=layer_index,
             )
         else:
             result = self.attention(
-                normed,
+                attention_input,
                 attention_mask=attention_mask,
                 return_attention_weights=return_attention_weights,
             )

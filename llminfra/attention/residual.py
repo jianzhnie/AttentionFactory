@@ -12,16 +12,24 @@ from torch import nn
 
 
 class AttentionResidual(nn.Module):
-    """Learned residual connection specialized for attention outputs."""
+    """Learned residual connection specialized for attention outputs.
+
+    Args:
+        hidden_size: Feature dimension of both inputs.
+        init_scale: Initial value of the per-dimension residual gate.
+    """
 
     def __init__(self, hidden_size: int, init_scale: float = 1.0) -> None:
         super().__init__()
         self.hidden_size = int(hidden_size)
+        self.init_scale = float(init_scale)
         self.weight = nn.Parameter(torch.full((hidden_size,), init_scale))
 
-    def forward(self, hidden_state: torch.Tensor, attention_output: torch.Tensor):
+    def forward(
+        self, hidden_state: torch.Tensor, attention_output: torch.Tensor
+    ) -> torch.Tensor:
         """Return ``hidden_state + weight * attention_output``."""
         return hidden_state + self.weight * attention_output
 
     def extra_repr(self) -> str:
-        return f"hidden_size={self.hidden_size}"
+        return f"hidden_size={self.hidden_size}, init_scale={self.init_scale}"

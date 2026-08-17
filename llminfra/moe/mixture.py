@@ -58,7 +58,7 @@ class TopKRouter(nn.Module):
         num_experts: Number of routed experts.
         top_k: Number of experts selected per token.
         add_noise: Enable the Switch/GShard-style noise used during training.
-        noise_epsilon: Small constant added to the noise logit.
+        noise_epsilon: Scale of the routing noise.
         dropout: Dropout applied to routing weights.
     """
 
@@ -89,14 +89,19 @@ class TopKRouter(nn.Module):
     def forward(self, x: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
         """Return ``(routing_weights, expert_indices)``.
 
-        ``routing_weights`` has shape ``(batch, top_k)`` and sums to 1 along
-        the last dimension. ``expert_indices`` has shape ``(batch, top_k)``.
+        ``routing_weights`` has shape ``(batch, top_k)`` and
+        ``expert_indices`` has shape ``(batch, top_k)``. With ``dropout=0``
+        the weights sum to 1 along the last dimension (dropout during
+        training rescales them, as usual).
         """
         logits = self.router(x)
         if self.training and self.add_noise and self.noise_proj is not None:
+            # Switch/GShard-style: noise scaled by a learned per-expert std
+            # and the configured epsilon. A constant shift would not change
+            # the top-k ranking, so the epsilon must multiply the noise.
             noise = torch.randn_like(logits)
             noise = noise * F.softplus(self.noise_proj(x))
-            logits = logits + noise + self.noise_epsilon
+            logits = logits + noise * self.noise_epsilon
 
         weights, indices = torch.topk(logits, self.top_k, dim=-1)
         weights = torch.softmax(weights, dim=-1)

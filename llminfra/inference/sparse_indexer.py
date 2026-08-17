@@ -14,6 +14,15 @@ class BlockSparseIndexer(nn.Module):
     ``(batch, heads, num_q_blocks, top_k)`` tensor that can be passed to
     ``BlockSparseAttention``. This is a simplified teaching version of the
     learned indexers used by MSA/DSA.
+
+    Note:
+        When fewer than ``top_k`` candidate blocks exist (early query blocks
+        under ``causal=True``), the selection is padded by repeating the last
+        valid block index. Consumers that build a boolean mask from the
+        indices (such as `BlockSparseAttention`) treat duplicates
+        idempotently, so the padding does not double-count attention. Block
+        scores are means over zero-padded tails, so the final partial block
+        is scored slightly low.
     """
 
     def __init__(

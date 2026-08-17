@@ -25,6 +25,9 @@ class LightningAttention(BaseAttention):
         feature_dim: Feature dimension of the linear kernel map.
         block_size: Number of tokens per intra-block softmax chunk.
         kernel: Feature map, one of ``"elu"``, ``"relu"`` or ``"linear"``.
+        causal: Whether keys after the current query are masked out. The
+            inter-block linear state is inherently causal (it only accumulates
+            past blocks); this flag controls the intra-block softmax mask.
         dropout: Dropout applied to the output.
         bias: Whether linear projections use biases.
     """
@@ -36,6 +39,7 @@ class LightningAttention(BaseAttention):
         feature_dim: int | None = None,
         block_size: int = 64,
         kernel: str = "elu",
+        causal: bool = True,
         dropout: float = 0.0,
         bias: bool = True,
     ) -> None:
@@ -47,6 +51,7 @@ class LightningAttention(BaseAttention):
         self.feature_dim = feature_dim or self.head_dim
         self.block_size = int(block_size)
         self.kernel_name = kernel
+        self.causal = bool(causal)
 
         self.q_proj = nn.Linear(hidden_size, num_heads * self.feature_dim, bias=bias)
         self.k_proj = nn.Linear(hidden_size, num_heads * self.feature_dim, bias=bias)
@@ -108,10 +113,27 @@ class LightningAttention(BaseAttention):
             v_block = value[:, :, start:stop]
 
             scores = torch.einsum("bhid,bhjd->bhij", raw_q_block, raw_k_block) * scale
+            if self.causal:
+                # Within a block, query row i may only attend to keys j <= i.
+                future = torch.triu(
+                    torch.ones(
+                        stop - start,
+                        stop - start,
+                        dtype=torch.bool,
+                        device=hidden_state.device,
+                    ),
+                    diagonal=1,
+                )
+                scores = scores.masked_fill(future, float("-inf"))
             intra = torch.softmax(scores, dim=-1) @ v_block
             intra = torch.nan_to_num(intra, nan=0.0)
 
-            safe_normalizer = normalizer.clamp_min(torch.finfo(normalizer.dtype).eps)
+            # Sign-safe normalizer: elu/relu kernels give non-negative sums,
+            # but the identity ("linear") kernel may produce negative ones.
+            eps = torch.finfo(normalizer.dtype).eps
+            safe_normalizer = torch.where(
+                normalizer >= 0, normalizer.clamp_min(eps), normalizer.clamp_max(-eps)
+            )
             inter = torch.einsum("bhsf,bhfd->bhsd", q_block, state) / safe_normalizer
             outputs.append(intra + inter)
 
@@ -155,5 +177,6 @@ class LightningAttention(BaseAttention):
     def extra_repr(self) -> str:
         return (
             f"{super().extra_repr()}, feature_dim={self.feature_dim}, "
-            f"block_size={self.block_size}, kernel={self.kernel_name}"
+            f"block_size={self.block_size}, kernel={self.kernel_name}, "
+            f"causal={self.causal}"
         )

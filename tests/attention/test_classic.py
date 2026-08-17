@@ -245,3 +245,20 @@ def test_ring_attention_module_shape_and_gradient():
     assert out.shape == x.shape
     out.sum().backward()
     assert x.grad is not None and torch.isfinite(x.grad).all()
+
+
+def test_ring_attention_supports_different_value_dim():
+    """The output accumulator must use V's feature dim, not Q/K's head dim."""
+    q, k, _ = make_qkv(1, 2, 8, 8, 16, 16)
+    v = torch.randn(1, 2, 8, 24, generator=torch.Generator().manual_seed(3))
+
+    out = ring_attention(q, k, v, causal=True, num_chunks=3)
+
+    assert out.shape == (1, 2, 8, 24)
+    assert torch.isfinite(out).all()
+
+
+def test_ring_attention_rejects_attention_mask():
+    module = RingAttention(HIDDEN, HEADS, num_chunks=2)
+    with pytest.raises(ValueError, match="attention_mask"):
+        module(make_hidden_state(BATCH, SEQ, HIDDEN), attention_mask=make_causal_mask(BATCH, SEQ))

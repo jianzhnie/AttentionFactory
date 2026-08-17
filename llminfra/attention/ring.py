@@ -52,7 +52,9 @@ def ring_attention(
 
     q_start = 0
     for q_chunk in q_chunks:
-        out = torch.zeros_like(q_chunk)
+        # The accumulator has V's feature dimension, which may differ from
+        # Q/K's head dimension.
+        out = q_chunk.new_zeros(batch, heads, q_chunk.size(2), v.size(-1))
         row_max = torch.full(
             (batch, heads, q_chunk.size(2), 1),
             float("-inf"),
@@ -102,7 +104,21 @@ def ring_attention(
 
 
 class RingAttention(BaseAttention):
-    """Multi-head attention with exact chunked online-softmax forward."""
+    """Multi-head attention with exact chunked online-softmax forward.
+
+    Args:
+        hidden_size: Dimensionality of input and output features.
+        num_heads: Number of attention heads.
+        num_chunks: Number of sequence chunks processed by the online softmax.
+        dropout: Dropout applied to the output when training (this module
+            never materializes attention weights, so there is nothing to
+            drop out on the probabilities).
+        bias: Whether linear projections use biases.
+
+    The forward pass is always causal and does not support
+    ``attention_mask``; use another attention module if you need padding or
+    custom masks.
+    """
 
     def __init__(
         self,
@@ -130,9 +146,16 @@ class RingAttention(BaseAttention):
 
         Attention weights are not materialized in Ring Attention, so
         ``return_attention_weights=True`` is not supported.
+
+        Raises:
+            ValueError: If ``return_attention_weights`` is True or an
+                ``attention_mask`` is passed (chunked causal attention does
+                not support custom masks).
         """
         if return_attention_weights:
             raise ValueError("RingAttention does not materialize attention weights")
+        if attention_mask is not None:
+            raise ValueError("RingAttention does not support attention_mask")
         validate_attention_inputs(hidden_state, attention_mask, self.num_heads)
         q = self.split_head(self.q_proj(hidden_state))
         k = self.split_head(self.k_proj(hidden_state))
