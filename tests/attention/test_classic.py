@@ -1,20 +1,25 @@
-"""Behavioral and numerical tests for the attention module implementations.
+"""Behavioral and numerical tests for the classic full-attention modules.
 
-Covers MHA, GQA, MQA and MLA: output shapes, masking semantics, attention
+Covers MHA, GQA, MQA and MLA (output shapes, masking semantics, attention
 weight properties, gradient flow, constructor validation, and numerical
-equivalence between related variants and against PyTorch's SDPA.
+equivalence between related variants and against PyTorch's SDPA) plus ring
+attention, which computes exact full attention in chunks.
 """
+
+import math
 
 import pytest
 import torch
 import torch.nn.functional as F
-from helpers import make_causal_mask, make_hidden_state, make_padding_mask
+from helpers import make_causal_mask, make_hidden_state, make_padding_mask, make_qkv
 
 from llminfra import (
     GroupQueryAttention,
     MultiHeadAttention,
     MultiHeadLatentAttention,
     MultiQueryAttention,
+    RingAttention,
+    ring_attention,
 )
 
 HIDDEN = 64
@@ -212,3 +217,31 @@ def test_mla_uses_shared_projection_init():
     for name, param in mla.named_parameters():
         if name.endswith("bias"):
             assert (param == 0).all(), f"{name} was not zero-initialized"
+
+
+# --- Ring attention: exact full attention computed in chunks -------------------
+
+
+def dense_reference(q, k, v, causal=True):
+    scale = 1.0 / math.sqrt(q.size(-1))
+    scores = torch.einsum("bhid,bhjd->bhij", q, k) * scale
+    if causal:
+        mask = torch.tril(torch.ones(q.size(2), k.size(2), dtype=torch.bool))
+        scores = scores.masked_fill(~mask, float("-inf"))
+    weights = torch.softmax(scores, dim=-1)
+    return weights @ v
+
+
+def test_ring_attention_matches_dense():
+    q, k, v = make_qkv(BATCH, HEADS, 8, 8, 8, 8)
+    actual = ring_attention(q, k, v, causal=True, num_chunks=3)
+    torch.testing.assert_close(actual, dense_reference(q, k, v), atol=1e-5, rtol=1e-4)
+
+
+def test_ring_attention_module_shape_and_gradient():
+    layer = RingAttention(HIDDEN, HEADS, num_chunks=3)
+    x = make_hidden_state(BATCH, 8, HIDDEN).requires_grad_(True)
+    out = layer(x)
+    assert out.shape == x.shape
+    out.sum().backward()
+    assert x.grad is not None and torch.isfinite(x.grad).all()

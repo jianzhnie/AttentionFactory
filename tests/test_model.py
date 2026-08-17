@@ -1,12 +1,20 @@
-"""Tests for Gated DeltaNet, registry helpers and CausalLMModel."""
+"""Tests for the attention registry helpers and CausalLMModel.
+
+Covers ``build_attention``/``list_attentions`` and the CausalLMModel wrapper:
+output shapes, gradient flow, padding masks, MoE and hybrid-attention wiring,
+tied embeddings and positional-encoding selection.
+"""
 
 import pytest
 import torch
 
 from llminfra import (
+    AlibiAttention,
     CausalLMModel,
+    CompressedSparseAttention,
     GatedDeltaNet,
     MultiHeadAttention,
+    RingAttention,
     SlidingWindowAttention,
     build_attention,
     list_attentions,
@@ -14,35 +22,6 @@ from llminfra import (
 
 HIDDEN = 32
 HEADS = 4
-SEQ = 7
-BATCH = 2
-
-
-def test_gated_delta_net_shape_and_gradient():
-    layer = GatedDeltaNet(
-        HIDDEN,
-        HEADS,
-        feature_dim=8,
-        normalize=True,
-    )
-    x = torch.randn(BATCH, SEQ, HIDDEN, requires_grad=True)
-    out = layer(x)
-    assert out.shape == x.shape
-    out.sum().backward()
-    assert x.grad is not None and torch.isfinite(x.grad).all()
-
-
-def test_gated_delta_net_does_not_return_weights():
-    layer = GatedDeltaNet(HIDDEN, HEADS, feature_dim=8)
-    with pytest.raises(ValueError, match="does not materialize"):
-        layer(torch.randn(BATCH, SEQ, HIDDEN), return_attention_weights=True)
-
-
-def test_gated_delta_net_masked_input_is_finite():
-    layer = GatedDeltaNet(HIDDEN, HEADS, feature_dim=8)
-    mask = torch.zeros(BATCH, 1, SEQ, dtype=torch.bool)
-    out = layer(torch.randn(BATCH, SEQ, HIDDEN), attention_mask=mask)
-    assert torch.isfinite(out).all()
 
 
 def test_build_attention_registry():
@@ -71,6 +50,26 @@ def test_build_attention_registry():
     assert "hybrid" in list_attentions()
     with pytest.raises(ValueError, match="Unknown attention"):
         build_attention("unknown", hidden_size=HIDDEN, num_heads=HEADS)
+
+
+def test_gap_modules_in_registry():
+    assert isinstance(
+        build_attention("ring", hidden_size=HIDDEN, num_heads=HEADS),
+        RingAttention,
+    )
+    assert isinstance(
+        build_attention("alibi", hidden_size=HIDDEN, num_heads=HEADS),
+        AlibiAttention,
+    )
+    assert isinstance(
+        build_attention(
+            "compressed_sparse",
+            hidden_size=HIDDEN,
+            num_heads=HEADS,
+            compress_ratio=2,
+        ),
+        CompressedSparseAttention,
+    )
 
 
 def test_causal_lm_shape_and_gradient():
@@ -170,3 +169,43 @@ def test_causal_lm_with_alibi():
     input_ids = torch.randint(0, 32, (2, 6))
     logits = model(input_ids)
     assert logits.shape == (2, 6, 32)
+
+
+def test_causal_lm_with_longrope():
+    factors = [1.0] * 16
+    model = CausalLMModel(
+        vocab_size=32,
+        hidden_size=32,
+        num_layers=1,
+        num_heads=4,
+        intermediate_size=64,
+        max_seq_len=32,
+        attention_name="mha",
+        positional="longrope",
+        positional_kwargs={
+            "original_max_position_embeddings": 16,
+            "long_factor": factors,
+            "short_factor": factors,
+        },
+    )
+    logits = model(torch.randint(0, 32, (2, 24)))
+    assert logits.shape == (2, 24, 32)
+
+
+def test_causal_lm_with_2d_position():
+    model = CausalLMModel(
+        vocab_size=32,
+        hidden_size=32,
+        num_layers=1,
+        num_heads=4,
+        intermediate_size=64,
+        max_seq_len=16,
+        attention_name="mha",
+        positional="2d",
+        positional_kwargs={
+            "max_blocks": 4,
+            "max_positions_per_block": 4,
+        },
+    )
+    logits = model(torch.randint(0, 32, (2, 8)))
+    assert logits.shape == (2, 8, 32)

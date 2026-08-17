@@ -1,4 +1,4 @@
-"""Tests for the shared BaseAttention helpers in base.py."""
+"""Tests for the shared BaseAttention helpers in llminfra/attention/base.py."""
 
 import pytest
 import torch

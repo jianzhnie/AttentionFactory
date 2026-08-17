@@ -362,7 +362,12 @@ LLMInfra/
 │   ├── positional/          # rope.py / scaling.py / alibi.py / two_d.py / factory.py
 │   ├── model.py             # CausalLMModel
 │   └── registry.py          # Attention / Positional 注册表
-├── tests/                   # pytest 测试套件
+├── tests/                   # pytest 测试套件，目录镜像包结构
+│   ├── attention/           #   classic / sparse / linear / hybrid 变体与基类
+│   ├── flashattention/      #   FA 教学实现：versions / api / cuda
+│   ├── positional/  layers/  moe/  inference/
+│   ├── helpers.py           #   共享的带种子输入构造器
+│   └── test_model.py        #   CausalLMModel 与注册表
 ├── docs/                    # 架构综述与选型文档
 ├── pyproject.toml
 ├── LICENSE
