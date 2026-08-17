@@ -150,3 +150,31 @@ def test_compressed_sparse_attention_shape_and_gradient():
     assert out.shape == x.shape
     out.sum().backward()
     assert x.grad is not None and torch.isfinite(x.grad).all()
+
+
+def test_csa_padding_mask_with_compression():
+    """Padding masks must be compressed to block granularity, not crash."""
+    module = CompressedSparseAttention(HIDDEN, HEADS, compress_ratio=2, top_k=2).eval()
+    x = make_hidden_state(BATCH, 8, HIDDEN)
+    mask = torch.ones(BATCH, 1, 1, 8, dtype=torch.bool)
+    mask[0, 0, 0, -2:] = False
+
+    out = module(x, attention_mask=mask)
+
+    assert out.shape == (BATCH, 8, HIDDEN)
+    assert torch.isfinite(out).all()
+
+
+def test_csa_causal_boundary_excludes_unfinished_entry():
+    """A compressed entry is hidden until its last source token is in the past."""
+    module = CompressedSparseAttention(
+        HIDDEN, HEADS, compress_ratio=2, top_k=4, causal=True
+    ).eval()
+    x = make_hidden_state(1, 4, HIDDEN)
+    perturbed = x.clone()
+    perturbed[:, 3] += 10.0  # belongs to entry 1 (tokens 2-3), future for queries 0-2
+
+    out = module(x)
+    out_perturbed = module(perturbed)
+    torch.testing.assert_close(out[:, :3], out_perturbed[:, :3])
+    assert not torch.allclose(out[:, 3], out_perturbed[:, 3])

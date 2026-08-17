@@ -261,4 +261,7 @@ def test_ring_attention_supports_different_value_dim():
 def test_ring_attention_rejects_attention_mask():
     module = RingAttention(HIDDEN, HEADS, num_chunks=2)
     with pytest.raises(ValueError, match="attention_mask"):
-        module(make_hidden_state(BATCH, SEQ, HIDDEN), attention_mask=make_causal_mask(BATCH, SEQ))
+        module(
+            make_hidden_state(BATCH, SEQ, HIDDEN),
+            attention_mask=make_causal_mask(BATCH, SEQ),
+        )

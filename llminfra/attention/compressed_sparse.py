@@ -178,9 +178,7 @@ class CompressedSparseAttention(BaseAttention):
                 f"4D (batch, heads, q_blocks, top_k), got {block_indices.dim()}D"
             )
         indices = indices.to(device)
-        if indices.numel() and (
-            indices.min() < 0 or indices.max() >= compressed_len
-        ):
+        if indices.numel() and (indices.min() < 0 or indices.max() >= compressed_len):
             raise ValueError("block_indices out of range")
 
         selected = torch.zeros(

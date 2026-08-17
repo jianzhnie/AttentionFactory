@@ -204,3 +204,31 @@ def test_block_sparse_indexer_integrates_with_sparse_attention():
     x = torch.randn(BATCH, SEQ, HIDDEN)
     indices = indexer(x)
     assert sparse(x, block_indices=indices).shape == x.shape
+
+
+def _constant_model(vocab_size: int = 32):
+    def model(ids: torch.Tensor) -> torch.Tensor:
+        return torch.zeros(ids.size(0), ids.size(1), vocab_size)
+
+    return model
+
+
+def test_speculative_decoder_validates_arguments():
+    model = _constant_model()
+    with pytest.raises(ValueError, match=">= 1"):
+        SpeculativeDecoder(model, model, num_speculative_tokens=0)
+    with pytest.raises(ValueError, match=">= 0"):
+        SpeculativeDecoder(model, model, temperature=-0.5)
+
+
+def test_speculative_decoder_rejects_short_input():
+    model = _constant_model()
+    decoder = SpeculativeDecoder(model, model, num_speculative_tokens=4)
+    with pytest.raises(ValueError, match="at least num_speculative_tokens"):
+        decoder(torch.zeros(1, 2, dtype=torch.long))
+
+
+def test_eagle_speculator_validates_arguments():
+    model = _constant_model()
+    with pytest.raises(ValueError, match=">= 1"):
+        EagleSpeculator(model, model, num_speculative_tokens=0)

@@ -86,9 +86,7 @@ class LinearAttention(BaseAttention):
             # future values can leak in.
             kv_state = torch.einsum("bhsf,bhsd->bhsfd", key, value).cumsum(dim=2)
             out_unnorm = torch.einsum("bhsf,bhsfd->bhsd", query, kv_state)
-            normalizer = torch.einsum(
-                "bhsf,bhsf->bhs", query, key.cumsum(dim=2)
-            )
+            normalizer = torch.einsum("bhsf,bhsf->bhs", query, key.cumsum(dim=2))
         else:
             # Non-causal form: out = q · sum_s (k_s ⊗ v_s); the (f, d) state
             # is shared by all positions.

@@ -125,3 +125,14 @@ def test_transformer_block_with_moe_ffn():
     )
     x = make_hidden_state(BATCH, SEQ, HIDDEN)
     assert block(x).shape == x.shape
+
+
+def test_transformer_block_post_norm_matches_manual_computation():
+    """post-norm: attention sees the raw input; norms follow the residuals."""
+    block = TransformerBlock(HIDDEN, HEADS, intermediate_size=64, pre_norm=False).eval()
+    x = make_hidden_state(BATCH, SEQ, HIDDEN)
+
+    expected = block.norm1(x + block.attention(x))
+    expected = block.norm2(expected + block.ffn(expected))
+
+    torch.testing.assert_close(block(x), expected)

@@ -5,6 +5,7 @@ ExpertParallelMoE and the load-balancing auxiliary loss.
 """
 
 import torch
+from helpers import make_hidden_state
 
 from llminfra import (
     DeepSeekMoE,
@@ -109,3 +110,19 @@ def test_load_balance_loss_is_finite():
     loss = load_balance_loss(logits, indices, num_experts=8)
     assert loss.ndim == 0
     assert torch.isfinite(loss)
+
+
+def test_router_noise_epsilon_actually_perturbs_routing():
+    """noise_epsilon must scale the noise (adding a constant would be a no-op)."""
+    router = TopKRouter(
+        HIDDEN, num_experts=8, top_k=2, add_noise=True, noise_epsilon=1.0
+    )
+    router.train()
+    x = make_hidden_state(16, 1, HIDDEN)[:, 0]
+
+    weights_1, indices_1 = router(x)
+    weights_2, indices_2 = router(x)
+
+    assert not torch.equal(indices_1, indices_2) or not torch.allclose(
+        weights_1, weights_2
+    )

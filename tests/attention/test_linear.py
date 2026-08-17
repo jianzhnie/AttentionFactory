@@ -122,3 +122,31 @@ def test_gated_delta_net_masked_input_is_finite():
     mask = torch.zeros(BATCH, 1, SEQ, dtype=torch.bool)
     out = layer(make_hidden_state(BATCH, SEQ, HIDDEN), attention_mask=mask)
     assert torch.isfinite(out).all()
+
+
+def test_linear_attention_non_causal_runs():
+    """The non-causal path must work (it previously crashed on an einsum)."""
+    module = LinearAttention(HIDDEN, HEADS, causal=False).eval()
+    out = module(make_hidden_state(BATCH, SEQ, HIDDEN))
+    assert out.shape == (BATCH, SEQ, HIDDEN)
+    assert torch.isfinite(out).all()
+
+
+def test_linear_attention_causal_does_not_see_future():
+    """Perturbing the last token must not change earlier outputs."""
+    module = LinearAttention(HIDDEN, HEADS, kernel="linear", causal=True).eval()
+    x = make_hidden_state(BATCH, SEQ, HIDDEN)
+    perturbed = x.clone()
+    perturbed[:, -1] += 10.0
+
+    torch.testing.assert_close(module(x)[:, :-1], module(perturbed)[:, :-1])
+
+
+def test_lightning_attention_causal_does_not_see_future():
+    """Intra-block softmax must be causally masked within each block."""
+    module = LightningAttention(HIDDEN, HEADS, block_size=4, causal=True).eval()
+    x = make_hidden_state(BATCH, SEQ, HIDDEN)
+    perturbed = x.clone()
+    perturbed[:, 1] += 10.0  # inside the first block, ahead of position 0
+
+    torch.testing.assert_close(module(x)[:, 0], module(perturbed)[:, 0])
