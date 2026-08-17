@@ -14,10 +14,14 @@ from __future__ import annotations
 import torch
 from torch import nn
 
+from ..attention.linear import LinearAttention
 from ..attention.mha import MultiHeadAttention
-from .ssm import Mamba2Layer
+from .ffn import SwiGLUFFN
+from .norm import RMSNorm
+from .ssm import Mamba2Layer, Mamba2State
 
 VALID_TOKENS = ("ssm", "attn")
+HYBRID_LAYER_TYPES = ("linear", "ssm", "full")
 
 
 class HybridSSMBlock(nn.Module):
@@ -97,4 +101,143 @@ class HybridSSMBlock(nn.Module):
         return (
             f"hidden_size={self.hidden_size}, num_heads={self.num_heads}, "
             f"pattern={':'.join(self.pattern)}"
+        )
+
+
+class HybridLayerStack(nn.Module):
+    """Pre-norm residual stack with a Linear/SSM/Full layer map.
+
+    This module provides one model-level layout interface for Qwen3-Next-like
+    linear/full mixtures, Zamba-like SSM/shared-attention mixtures, and custom
+    three-way combinations. Every layer contains a mixer followed by a
+    SwiGLU FFN. ``full`` layers may share one attention module to reproduce
+    Zamba's shared-attention pattern.
+
+    Args:
+        hidden_size: Input/output feature dimension.
+        num_heads: Head count for linear and full attention.
+        intermediate_size: SwiGLU intermediate dimension.
+        layer_map: Colon-separated string or sequence containing ``linear``,
+            ``ssm`` and ``full``.
+        d_state: State size for every SSM layer.
+        shared_full_attention: Reuse one full-attention module for all
+            ``full`` positions.
+        full_attention: Optional custom full-attention module.
+        dropout: Dropout on mixer and FFN residual branches.
+        norm_eps: RMSNorm epsilon.
+    """
+
+    def __init__(
+        self,
+        hidden_size: int,
+        num_heads: int,
+        intermediate_size: int,
+        layer_map: str | list[str] = "linear:linear:ssm:full",
+        d_state: int = 16,
+        shared_full_attention: bool = False,
+        full_attention: nn.Module | None = None,
+        dropout: float = 0.0,
+        norm_eps: float = 1e-5,
+    ) -> None:
+        super().__init__()
+        tokens = layer_map.split(":") if isinstance(layer_map, str) else list(layer_map)
+        tokens = ["full" if token == "attn" else token for token in tokens]
+        if not tokens:
+            raise ValueError("layer_map must contain at least one layer")
+        invalid = [token for token in tokens if token not in HYBRID_LAYER_TYPES]
+        if invalid:
+            raise ValueError(
+                f"unknown layer types {invalid}; expected {list(HYBRID_LAYER_TYPES)}"
+            )
+        if not 0.0 <= dropout < 1.0:
+            raise ValueError("dropout must satisfy 0 <= dropout < 1")
+
+        self.hidden_size = int(hidden_size)
+        self.num_heads = int(num_heads)
+        self.intermediate_size = int(intermediate_size)
+        self.layer_map = tuple(tokens)
+        self.shared_full_attention = bool(shared_full_attention)
+        shared_attention = full_attention
+        if shared_full_attention and shared_attention is None:
+            shared_attention = MultiHeadAttention(hidden_size, num_heads)
+
+        mixers: list[nn.Module] = []
+        for token in tokens:
+            if token == "linear":
+                mixers.append(LinearAttention(hidden_size, num_heads, causal=True))
+            elif token == "ssm":
+                mixers.append(Mamba2Layer(hidden_size, d_state=d_state))
+            elif shared_attention is not None:
+                mixers.append(shared_attention)
+            else:
+                mixers.append(MultiHeadAttention(hidden_size, num_heads))
+        self.mixers = nn.ModuleList(mixers)
+        self.mixer_norms = nn.ModuleList(
+            RMSNorm(hidden_size, eps=norm_eps) for _ in tokens
+        )
+        self.ffn_norms = nn.ModuleList(
+            RMSNorm(hidden_size, eps=norm_eps) for _ in tokens
+        )
+        self.ffns = nn.ModuleList(
+            SwiGLUFFN(hidden_size, intermediate_size) for _ in tokens
+        )
+        self.dropout = nn.Dropout(dropout)
+
+    def forward(
+        self,
+        hidden_state: torch.Tensor,
+        attention_mask: torch.Tensor | None = None,
+        states: list[Mamba2State | None] | None = None,
+        return_state: bool = False,
+        scan: str = "recurrent",
+        chunk_size: int = 16,
+    ) -> torch.Tensor | tuple[torch.Tensor, list[Mamba2State | None]]:
+        """Evaluate the configured layer map and optionally return SSM states.
+
+        ``states`` is aligned with ``layer_map``; non-SSM entries must be
+        ``None``. This makes state ownership explicit during streaming decode.
+        """
+        if states is None:
+            states = [None] * len(self.mixers)
+        if len(states) != len(self.mixers):
+            raise ValueError("states must have one entry per layer_map position")
+
+        next_states: list[Mamba2State | None] = []
+        for layer_type, mixer, mixer_norm, ffn_norm, ffn, state in zip(
+            self.layer_map,
+            self.mixers,
+            self.mixer_norms,
+            self.ffn_norms,
+            self.ffns,
+            states,
+            strict=True,
+        ):
+            normalized = mixer_norm(hidden_state)
+            if layer_type == "ssm":
+                if not isinstance(mixer, Mamba2Layer):
+                    raise TypeError("ssm layer map entry must contain Mamba2Layer")
+                mixed, next_state = mixer(
+                    normalized,
+                    state=state,
+                    scan=scan,
+                    chunk_size=chunk_size,
+                )
+                next_states.append(next_state)
+            else:
+                if state is not None:
+                    raise ValueError("non-SSM layer state must be None")
+                mixed = mixer(normalized, attention_mask=attention_mask)
+                next_states.append(None)
+            hidden_state = hidden_state + self.dropout(mixed)
+            hidden_state = hidden_state + self.dropout(ffn(ffn_norm(hidden_state)))
+
+        if return_state:
+            return hidden_state, next_states
+        return hidden_state
+
+    def extra_repr(self) -> str:
+        return (
+            f"hidden_size={self.hidden_size}, num_heads={self.num_heads}, "
+            f"layer_map={':'.join(self.layer_map)}, "
+            f"shared_full_attention={self.shared_full_attention}"
         )

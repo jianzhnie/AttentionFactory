@@ -50,8 +50,9 @@ class MultiHeadLatentAttention(BaseAttention):
         kv_latent_size: int,
         dropout: float = 0.0,
         bias: bool = True,
+        qk_norm: bool = False,
     ) -> None:
-        super().__init__(hidden_size, num_heads, dropout, bias)
+        super().__init__(hidden_size, num_heads, dropout, bias, qk_norm)
 
         self.q_latent_size = q_latent_size
         self.kv_latent_size = kv_latent_size
@@ -115,6 +116,7 @@ class MultiHeadLatentAttention(BaseAttention):
         query = self.split_head(query)
         key = self.split_head(key)
         value = self.split_head(value)
+        query, key = self._apply_qk_norm(query, key)
 
         # Scaled dot-product attention
         attention_scores = (

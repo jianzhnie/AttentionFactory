@@ -52,8 +52,9 @@ class GroupQueryAttention(BaseAttention):
         num_kv_groups: int,
         dropout: float = 0.1,
         bias: bool = True,
+        qk_norm: bool = False,
     ) -> None:
-        super().__init__(hidden_size, num_heads, dropout, bias)
+        super().__init__(hidden_size, num_heads, dropout, bias, qk_norm)
         if num_heads % num_kv_groups != 0:
             raise ValueError(
                 f"num_heads ({num_heads}) must be divisible "
@@ -113,6 +114,7 @@ class GroupQueryAttention(BaseAttention):
         query = self.split_head(self.q_proj(hidden_state))
         key = self.split_head_grouped(self.k_proj(hidden_state))
         value = self.split_head_grouped(self.v_proj(hidden_state))
+        query, key = self._apply_qk_norm(query, key)
 
         # Scaled dot-product attention:
         # (batch_size, num_heads, seq_len, head_dim)

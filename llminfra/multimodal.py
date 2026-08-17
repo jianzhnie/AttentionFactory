@@ -19,10 +19,14 @@ Simplifications (documented for teaching purposes):
 
 from __future__ import annotations
 
+from dataclasses import dataclass
+
 import torch
+import torch.nn.functional as F
 from torch import nn
 
 from .encoder_decoder import CrossAttention
+from .model import CausalLMModel, CausalLMOutput
 
 
 class VisionEncoderAdapter(nn.Module):
@@ -122,3 +126,305 @@ class CrossAttentionFuser(CrossAttention):
             attention_mask=attention_mask,
             return_attention_weights=return_attention_weights,
         )
+
+
+def build_multimodal_position_ids(
+    image_grid_thw: torch.Tensor,
+    text_length: int,
+    *,
+    expected_image_tokens: int | None = None,
+) -> torch.Tensor:
+    """Build temporal/height/width ids for ``[vision, text]`` sequences.
+
+    Args:
+        image_grid_thw: Integer tensor shaped ``(batch, 3)``. Each row holds
+            the temporal, height and width grid sizes after patch merging.
+        text_length: Number of text tokens following the vision tokens.
+        expected_image_tokens: Optional validation target for ``t * h * w``.
+
+    Returns:
+        Position ids shaped ``(3, batch, image_tokens + text_length)``.
+
+    All examples in a dense batch must contain the same number of vision
+    tokens. Text positions begin after the largest axis coordinate, matching
+    the non-overlapping multimodal position convention used by mRoPE models.
+    """
+    if image_grid_thw.dim() != 2 or image_grid_thw.size(-1) != 3:
+        raise ValueError("image_grid_thw must have shape (batch, 3)")
+    if text_length < 0:
+        raise ValueError("text_length must be >= 0")
+    if (image_grid_thw < 1).any():
+        raise ValueError("all image grid dimensions must be >= 1")
+    token_counts = image_grid_thw.prod(dim=-1)
+    if not torch.equal(token_counts, token_counts[:1].expand_as(token_counts)):
+        raise ValueError("dense batches require equal image token counts")
+    image_tokens = int(token_counts[0].item())
+    if expected_image_tokens is not None and image_tokens != expected_image_tokens:
+        raise ValueError(
+            f"image grid produces {image_tokens} tokens, "
+            f"but vision_features contains {expected_image_tokens}"
+        )
+
+    rows: list[torch.Tensor] = []
+    for grid in image_grid_thw:
+        temporal, height, width = (int(value.item()) for value in grid)
+        t_ids = torch.arange(temporal, device=grid.device).view(-1, 1, 1)
+        h_ids = torch.arange(height, device=grid.device).view(1, -1, 1)
+        w_ids = torch.arange(width, device=grid.device).view(1, 1, -1)
+        vision_ids = torch.stack(
+            [
+                t_ids.expand(temporal, height, width).reshape(-1),
+                h_ids.expand(temporal, height, width).reshape(-1),
+                w_ids.expand(temporal, height, width).reshape(-1),
+            ]
+        )
+        text_start = max(temporal, height, width)
+        text_ids = torch.arange(
+            text_start,
+            text_start + text_length,
+            device=grid.device,
+        ).expand(3, -1)
+        rows.append(torch.cat([vision_ids, text_ids], dim=-1))
+    return torch.stack(rows, dim=1)
+
+
+@dataclass
+class MultimodalCausalLMOutput:
+    """Outputs from :class:`MultimodalCausalLM`."""
+
+    logits: torch.Tensor
+    loss: torch.Tensor | None = None
+    attention_weights: torch.Tensor | None = None
+    mtp_logits: list[torch.Tensor] | None = None
+    alignment_logits: torch.Tensor | None = None
+
+
+class MultimodalCausalLM(nn.Module):
+    """End-to-end text/vision causal model with early or cross fusion.
+
+    The class consumes pre-computed vision patch features rather than pixels.
+    In ``early`` mode projected patches are prepended as a bidirectional
+    prefix and receive temporal/height/width mRoPE ids. In
+    ``cross_attention`` mode text embeddings first attend to projected vision
+    features and then enter the causal LM. A cosine alignment head is exposed
+    for contrastive or reward-style auxiliary objectives.
+
+    This is a model-level reference architecture, not a pretrained ViT or a
+    checkpoint-compatible implementation of a particular multimodal model.
+    """
+
+    def __init__(
+        self,
+        vocab_size: int,
+        vision_dim: int,
+        hidden_size: int,
+        num_layers: int,
+        num_heads: int,
+        intermediate_size: int,
+        *,
+        mrope_section: tuple[int, int, int],
+        fusion_mode: str = "early",
+        alignment_dim: int | None = None,
+        max_seq_len: int = 4096,
+        attention_name: str = "gqa",
+        attention_kwargs: dict[str, object] | None = None,
+        **language_model_kwargs: object,
+    ) -> None:
+        super().__init__()
+        if fusion_mode not in {"early", "cross_attention"}:
+            raise ValueError("fusion_mode must be 'early' or 'cross_attention'")
+        self.fusion_mode = fusion_mode
+        self.hidden_size = int(hidden_size)
+        self.vision_adapter = VisionEncoderAdapter(vision_dim, hidden_size)
+        self.cross_attention = (
+            CrossAttentionFuser(hidden_size, num_heads)
+            if fusion_mode == "cross_attention"
+            else None
+        )
+        self.language_model = CausalLMModel(
+            vocab_size,
+            hidden_size,
+            num_layers,
+            num_heads,
+            intermediate_size,
+            max_seq_len=max_seq_len,
+            attention_name=attention_name,
+            attention_kwargs=attention_kwargs,
+            positional="mrope",
+            positional_kwargs={"mrope_section": mrope_section},
+            **language_model_kwargs,
+        )
+        projection_dim = int(alignment_dim or hidden_size)
+        self.text_alignment = nn.Linear(hidden_size, projection_dim, bias=False)
+        self.vision_alignment = nn.Linear(hidden_size, projection_dim, bias=False)
+
+    def forward(
+        self,
+        input_ids: torch.Tensor,
+        vision_features: torch.Tensor,
+        image_grid_thw: torch.Tensor,
+        attention_mask: torch.Tensor | None = None,
+        vision_attention_mask: torch.Tensor | None = None,
+        labels: torch.Tensor | None = None,
+        return_attention_weights: bool = False,
+        return_mtp: bool = False,
+    ) -> MultimodalCausalLMOutput:
+        """Fuse vision patches with text tokens and run the causal LM."""
+        if input_ids.dim() != 2:
+            raise ValueError("input_ids must have shape (batch, text_len)")
+        batch_size, text_length = input_ids.shape
+        vision_state = self.vision_adapter(vision_features)
+        if vision_state.size(0) != batch_size:
+            raise ValueError("vision and text batch sizes must match")
+        vision_length = vision_state.size(1)
+        build_multimodal_position_ids(
+            image_grid_thw,
+            text_length,
+            expected_image_tokens=vision_length,
+        )
+        text_state = self.language_model.embed_tokens(input_ids)
+
+        if self.fusion_mode == "early":
+            output, text_offset = self._early_fusion(
+                text_state,
+                vision_state,
+                image_grid_thw,
+                attention_mask,
+                vision_attention_mask,
+                labels,
+                return_attention_weights,
+                return_mtp,
+            )
+        else:
+            output, text_offset = self._cross_attention_fusion(
+                text_state,
+                vision_state,
+                attention_mask,
+                vision_attention_mask,
+                labels,
+                return_attention_weights,
+                return_mtp,
+            )
+
+        text_summary = text_state.mean(dim=1)
+        vision_summary = vision_state.mean(dim=1)
+        alignment_logits = F.cosine_similarity(
+            self.text_alignment(text_summary),
+            self.vision_alignment(vision_summary),
+            dim=-1,
+        )
+        return MultimodalCausalLMOutput(
+            logits=output.logits[:, text_offset:],
+            loss=output.loss,
+            attention_weights=output.attention_weights,
+            mtp_logits=(
+                None
+                if output.mtp_logits is None
+                else [logits[:, text_offset:] for logits in output.mtp_logits]
+            ),
+            alignment_logits=alignment_logits,
+        )
+
+    def _early_fusion(
+        self,
+        text_state: torch.Tensor,
+        vision_state: torch.Tensor,
+        image_grid_thw: torch.Tensor,
+        attention_mask: torch.Tensor | None,
+        vision_attention_mask: torch.Tensor | None,
+        labels: torch.Tensor | None,
+        return_attention_weights: bool,
+        return_mtp: bool,
+    ) -> tuple[CausalLMOutput, int]:
+        """Prepend vision patches as a bidirectional causal-LM prefix."""
+        batch_size, text_length, _ = text_state.shape
+        vision_length = vision_state.size(1)
+        embeddings = torch.cat([vision_state, text_state], dim=1)
+        text_mask = self._normalize_mask(
+            attention_mask, batch_size, text_length, embeddings.device
+        )
+        vision_mask = self._normalize_mask(
+            vision_attention_mask,
+            batch_size,
+            vision_length,
+            embeddings.device,
+        )
+        combined_mask = torch.cat([vision_mask, text_mask], dim=-1)
+        position_ids = build_multimodal_position_ids(
+            image_grid_thw.to(embeddings.device),
+            text_length,
+            expected_image_tokens=vision_length,
+        )
+        combined_labels: torch.Tensor | None = None
+        if labels is not None:
+            if labels.shape != (batch_size, text_length):
+                raise ValueError("labels must match input_ids")
+            ignored = labels.new_full((batch_size, vision_length), -100)
+            combined_labels = torch.cat([ignored, labels], dim=-1)
+        output = self.language_model(
+            inputs_embeds=embeddings,
+            attention_mask=combined_mask,
+            prefix_len=vision_length,
+            position_ids=position_ids,
+            labels=combined_labels,
+            return_dict=True,
+            return_attention_weights=return_attention_weights,
+            return_mtp=return_mtp,
+        )
+        if not isinstance(output, CausalLMOutput):
+            raise TypeError("language model must return CausalLMOutput")
+        return output, vision_length
+
+    def _cross_attention_fusion(
+        self,
+        text_state: torch.Tensor,
+        vision_state: torch.Tensor,
+        attention_mask: torch.Tensor | None,
+        vision_attention_mask: torch.Tensor | None,
+        labels: torch.Tensor | None,
+        return_attention_weights: bool,
+        return_mtp: bool,
+    ) -> tuple[CausalLMOutput, int]:
+        """Fuse projected patches into text through cross attention."""
+        if self.cross_attention is None:
+            raise RuntimeError("cross-attention fuser is not initialized")
+        batch_size, text_length, _ = text_state.shape
+        vision_mask = self._normalize_mask(
+            vision_attention_mask,
+            batch_size,
+            vision_state.size(1),
+            text_state.device,
+        )
+        fused = text_state + self.cross_attention(
+            text_state,
+            vision_state,
+            attention_mask=vision_mask[:, None, None],
+        )
+        positions = torch.arange(text_length, device=text_state.device)
+        position_ids = positions.expand(3, batch_size, -1)
+        output = self.language_model(
+            inputs_embeds=fused,
+            attention_mask=attention_mask,
+            position_ids=position_ids,
+            labels=labels,
+            return_dict=True,
+            return_attention_weights=return_attention_weights,
+            return_mtp=return_mtp,
+        )
+        if not isinstance(output, CausalLMOutput):
+            raise TypeError("language model must return CausalLMOutput")
+        return output, 0
+
+    @staticmethod
+    def _normalize_mask(
+        mask: torch.Tensor | None,
+        batch_size: int,
+        seq_len: int,
+        device: torch.device,
+    ) -> torch.Tensor:
+        """Return a validated two-dimensional keep mask."""
+        if mask is None:
+            return torch.ones(batch_size, seq_len, dtype=torch.bool, device=device)
+        if tuple(mask.shape) != (batch_size, seq_len):
+            raise ValueError(f"mask must have shape {(batch_size, seq_len)}")
+        return mask.to(device=device, dtype=torch.bool)

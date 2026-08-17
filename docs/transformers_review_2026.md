@@ -4,7 +4,15 @@
 
 > 资料口径：本文优先采用官方 Hugging Face 模型卡、官方技术报告、官方仓库和 arXiv 论文。闭源模型若官方未披露实现细节，统一标注“官方未完全披露”，不把社区推测写成事实。
 > 量化口径：不同论文和团队使用不同 GPU、序列长度、批大小与量化方式，所有性能数字只在各自来源口径内成立，不能直接横向比较。
-> 核验记录：本次修订已根据官方 HF 配置修正 GLM-5.1 上下文为 202,752；新增 Phi、DBRX、Nemotron、InternLM、Baichuan、Step、MiMo、Zamba、Arctic 系列的 Attention 配置均来自官方模型卡/配置或可复核的公开配置镜像。
+> 核验记录：文档信息截止 2026-08-17。模型架构数据以本文第九章所列来源为准；代码覆盖与测试状态则以同日本地仓库快照为准。`docs/attention_review_2026.md` 当前不存在，因此无法完成与该文件的逐项差异核对；本文已将这一点列为文档缺口。
+
+### 证据与可信度分级
+
+- **公开确认**：官方模型卡、官方配置、官方仓库或产品文档直接披露。
+- **论文/报告**：技术报告或论文披露，但可能与最终发布权重或服务配置有差异。
+- **合理推断**：由兼容配置、衍生模型或第三方镜像推得；只能用于待验证线索，不作为已确认事实。
+
+> 本文旧表格中的“高/中/低”可信度不再作为独立分级：官方配置与官方模型卡归入“公开确认”，技术论文归入“论文/报告”，社区镜像或间接引用归入“合理推断”。
 
 ---
 
@@ -18,12 +26,12 @@
 6. **GQA 仍是最稳妥的默认基线**：Qwen2.5、Llama 3/4、MiniMax M2/M2.7、GLM-4.7 继续使用 GQA；MLA 更适合超大 MoE 与 1M 上下文高并发场景。
 7. **闭源模型透明性显著低于开源**：GPT-5.6 Sol、Claude Fable 5/Mythos 5、Gemini 3.x 架构细节未披露；本文仅将闭源模型列为「官方未完全披露」，不做架构推断。
 8. **位置编码与 Attention 强耦合**：RoPE、YaRN、NTK-aware、ALiBi、Partial RoPE（0.25–0.5）、mRope、NoPE 间隔层直接影响长上下文效果，不能把上下文长度单独归因于 Attention 升级。
-9. **归一化三件套已收敛**：「RMSNorm + Pre-Norm + SwiGLU」取代 2017–2022 年的「LayerNorm + Post-Norm + ReLU/GELU FFN」，成为 2026 年开源模型的压倒性默认组合（所有受访旗舰配置无一例外）。
-10. **MoE 进入第三代**：第一代 Switch Top-1 → 第二代 Mixtral Top-2+辅助损失 → 第三代 DeepSeekMoE「细粒度路由专家 + 共享专家 + 无辅助损失偏置（noaux_tc）+ 首层稠密」；2026 年主流规模为 256–896 路由专家、Top-4–Top-16 激活、1–2 共享专家、稀疏度 1.6%–3%。
+9. **归一化与 FFN 形成稳定基线**：在已公开配置的 decoder-only 模型中，「RMSNorm + Pre-Norm + SwiGLU」是最常见组合；但 DeepNorm、Sandwich-LN、并行块和 GELU/GeGLU 仍在特定架构中有价值，不应表述为“完全取代”。
+10. **MoE 进入细粒度与系统协同阶段**：Switch Top-1 → Mixtral Top-2+辅助损失 → DeepSeekMoE 的细粒度路由、共享专家与无辅助损失偏置。本文样本中 2026 年代表模型覆盖 128–896 路由专家、Top-4–Top-16 激活；这是样本分布，不是行业统一标准。
 11. **层间配比成为核心超参**：纯 Attention 时代的固定堆叠已经结束，2026 年主要设计空间是"线性:全量 3:1""SWA:全局 6:1""1 个稀疏 indexer + 3 个共享""首 1–3 层稠密""末 3 层全量"等层类型配比。
-12. **量化从部署压缩前置为架构属性**：FP8 训练已是默认（DeepSeek-V4、MiMo），FP4/MXFP4 QAT 下沉到旗舰模型（Kimi K3、Nemotron-3-Super、DeepSeek-V4-Pro 专家权重直接 FP4 存储），不再是训练后可选步骤。
+12. **量化从部署选项前置到训练设计**：FP8 在若干超大模型训练中已常见，FP4/MXFP4 QAT 也开始进入旗舰模型；但 BF16 仍广泛使用，尚不能把 FP8/FP4 称为所有模型的默认。
 13. **多模态从外挂走向原生**：Kimi K3（MoonViT-V2 401M）、MiniMax-M3（CLIP + patch merge）、Qwen3.8-27B（27 层视觉塔 + mrope 交错 `mrope_section=[11,11,10]`）均在 2026 年旗舰中内置多模态塔与专属位置编码。
-14. **残差/层间出现首次大改动**：Kimi K3 用 Attention Residuals（AttnRes，block_size=12）替代传统 Pre-Norm 相加残差，是 2020 年 Pre-Norm 收敛以来层间路径的首次旗舰级实验。
+14. **残差/层间路径重新成为设计变量**：Kimi K3 的 Attention Residuals（AttnRes，`block_size=12`）显示，除 Pre/Post-Norm 外，跨层信息通路也可成为旗舰模型的试验方向；其可复现性与泛化收益仍需更多公开证据。
 15. **未来 1–2 年主线：混合架构 + 量化前置 + 层配比搜索**：GQA 在中小模型/部分 MoE 继续稳固，MLA + 稀疏/线性/SSM 混合主导 1M 上下文和超大 MoE；归一化/FFN 趋于收敛后，AttnRes 类跨层通路、层配比 NAS、原生多模态将是新的试验田；只看 Attention 会错过至少一半的架构信息量。
 
 ---
@@ -420,30 +428,27 @@ Hunyuan 的公开路线是：Dense/MoE 商用模型 -> Hunyuan-A13B 开源 MoE -
 
 ### 2.28 遗漏分析：已覆盖 / 未覆盖 / 待补充
 
-**已覆盖模型系列**
+**模型范围。** 必选的 Qwen、DeepSeek、GLM、Kimi、MiniMax、Step、Xiaomi MiMo、Hunyuan、Llama 均已覆盖；另补充 GPT、Gemini、Claude、Mistral/Mixtral、Yi、Gemma、Falcon、PaLM、MiniCPM、Grok、Phi、DBRX、Nemotron、InternLM、Baichuan、Zamba 和 Snowflake Arctic，超过“额外 ≥12 个”的要求。
 
-- 必选系列：Qwen、DeepSeek、GLM、Kimi、MiniMax、Step、Xiaomi MiMo、Llama。
-- 额外系列：GPT、Gemini、Claude、Mistral、Mixtral、Yi、Gemma、Falcon、PaLM、MiniCPM、Grok、Phi、DBRX、Nemotron、InternLM、Baichuan、Zamba、Snowflake Arctic、Hunyuan。
+**A-K 文档/代码覆盖快照。** “已覆盖”表示存在可运行的 PyTorch 实现或完整接口；“待补充”表示仅教学级、局部接口或未进入模型级组合；“未覆盖”表示当前仓库无对应实现。
 
-**已覆盖核心模块**
+| 类别 | 文档状态 | 当前代码状态 | 主要缺口 | 优先级 |
+|------|----------|------------------|----------|--------|
+| A. Attention | 已覆盖 | 已覆盖 MHA/MQA/GQA/MLA/SWA/BlockSparse/Linear/Hybrid/GDN/Lightning/Ring/CSA/ALiBi/FlashMLA/FA1-4 | Ring 无真实分布式通信；FlashMLA/DSA/MSA/CSA 无生产 kernel；FA1-4 是算法教学实现 | 高 |
+| B. 位置编码 | 已覆盖 | 已覆盖 RoPE/YaRN/NTK/ALiBi/Partial RoPE/PI/LongRoPE/2D | LongRoPE 缺官方 preset；mRoPE 缺图文位置拼接的模型级实现 | 中 |
+| C. FFN/MLP | 已覆盖 | FeedForward/SwiGLU/GeGLU/ReGLU/Clamp-SwiGLU/FFN factory 已实现 | FP8/INT8 QAT 包装器未实现；工厂尚未统一所有激活变体 | 中 |
+| D. 归一化 | 已覆盖 | RMSNorm/LayerNorm/DeepNorm/LayerScale/QK-Norm 已实现 | QK-Norm 对不同 Attention 子类的自动接入与测试仍不完整 | 中 |
+| E. 激活函数 | 已覆盖 | 精确 GELU/tanh GELU/ReLU/Squared ReLU/SiLU/Clipped SiLU 已实现 | 缺独立 erf 名称别名与量化数值边界测试 | 低 |
+| F. 残差/层序 | 已覆盖 | Pre/Post/Sandwich-LN、Parallel Block、AttnRes 已集成 `TransformerBlock` | LayerScale/DeepNorm 尚未统一接入 Block 工厂；AttnRes 为简化版 | 中 |
+| G. MoE | 已覆盖 | Top-k/共享专家/LatentMoE/Z-Loss/无辅助偏置/Expert Choice/Expert Dropout 已实现 | 无 all-to-all、Group GEMM 与真实多节点 EP；无 Gumbel-Softmax | 高 |
+| H. SSM/Hybrid | 已覆盖 | `Mamba2Layer` 与 `HybridSSMBlock` 已实现 | 状态维度被简化，chunked scan 仍有 Python 循环；无 fused selective-scan kernel | 高 |
+| I. Embedding/输出头 | 已覆盖 | tied embeddings、`MultiTokenPredictionHead`、`mtp_loss` 已实现 | MTP 尚未集成 `CausalLMModel` 的统一训练返回 | 中 |
+| J. 整体架构 | 已覆盖 | Decoder-only、Encoder-Decoder/CrossAttn、Prefix LM、Vision Adapter/CrossAttn Fusion 已实现 | 多模态仅骨架；Prefix LM 存在一个待修复测试 | 中-高 |
+| K. 训练/推理系统 | 已覆盖 | Paged KV、On-disk KV、Speculative/EAGLE 接口、FA1-4 已实现 | 无 HBM/CPU/NVMe 分层调度、COW、DSpark、严格残差分布拒绝采样、QAT 统一包装 | 高 |
 
-- Attention：MHA、MQA、GQA、MLA、SWA、Block Sparse、Linear、Hybrid、Gated DeltaNet、Lightning Attention、Ring Attention、Compressed Sparse Attention、ALiBi Attention、PagedAttention、FlashAttention v1-v4。
-- 位置编码：RoPE、YaRN、Dynamic NTK、ALiBi、Partial RoPE、Position Interpolation、LongRoPE、2D Position。
-- MoE：ExpertFFN、TopKRouter、MixtureOfExperts、DeepSeekMoE、LatentMoE、ExpertParallelMoE、load-balance loss。
-- 系统/工程接口：FlashMLA、SpeculativeDecoder、EagleSpeculator、OnDiskKVStore。
-- Transformer 基础：RMSNorm、SwiGLU FFN、FeedForward、TransformerBlock、CausalLMModel、BlockSparseIndexer、AttentionResidual、MultiTokenPredictionHead。
+**文档缺口。** `docs/attention_review_2026.md` 未在仓库中出现，所以 prompt 要求的“两份文档逐项对照”当前不可执行。高优先级选项是恢复该文件，或将其明确废弃并把 Attention 专题维护入本文第四章，避免两份文档继续漂移。
 
-**未覆盖或仍需待补充**
-
-- 真实生产级 FlashMLA / CSA / DSA CUDA kernel。
-- 分布式 Ring Attention 多设备通信与调度。
-- ALiBi 已接入 CausalLMModel，但仍需生产级 kernel 优化。
-- LongRoPE 与 2D Position 已支持 CausalLMModel 配置，仍需官方精确系数与大规模验证。
-- Mamba-2 精确选择性扫描 / 并行扫描。
-- DSpark / EAGLE 真实投机解码调度。
-- PagedAttention 与 KV offload 的生产级内存调度、copy-on-write。
-- MoE group GEMM / 真实 multi-node all-reduce，当前为 ExpertParallelMoE 教学接口。
-- Step、MiMo、Zamba、Arctic 的完整技术报告级细节仍受公开资料限制，部分参数以官方配置为准。
+**模型资料缺口。** GPT、Gemini、Claude、Grok 的新版本仍属“官方未完全披露”；Step、MiMo、Zamba、Arctic 的部分训练细节只能从官方配置反推。本文对这些系列宁可保留空值，不用其他开源模型的常见设计填充。
 
 ---
 
@@ -493,12 +498,12 @@ Attention 是 2026 年架构差异化的主线，但模型的最终形态同样�
 ### 3.6 Embedding 与输出头
 
 - **词表持续膨胀**：多语言与 Agent 场景推动词表从 32K/50K 时代进入 130K-250K 区间——DeepSeek-V4 129,280、MiMo 152,576、GLM-5.2 154,880、Kimi K3 160K、Qwen3.8 达 248,320。
-- **权重共享退场**：`tie_word_embeddings` 在早期小模型（Gemma、Phi-4-mini）中常见，2026 年大模型配置中几乎全部关闭（embedding 与 LM head 各自独立），用显存换表达力。
+- **权重共享呈现规模分化**：`tie_word_embeddings` 在 Gemma、Phi-4-mini 等小中型模型中仍常见；若干超大模型选择不共享，用更多参数与显存换取输入表示和输出分类器的独立容量。
 - **输出头精度保护**：Hy3 开启 `enable_lm_head_fp32`，在低精度存储时代保留输出头的高精度计算。
 
 ### 3.7 量化感知训练（QAT）进入架构定义
 
-- **FP8 block-wise**：DeepSeek-V3 开创的 FP8 训练在 2026 年成为大模型默认（V4-Pro 权重 FP8、`ue8m0` 缩放格式；MiMo 同为 FP8 block 量化）。
+- **FP8 block-wise**：DeepSeek-V3 之后，FP8 训练在若干超大模型中快速普及（如 V4-Pro 的 FP8 权重与 `ue8m0` 缩放格式、MiMo 的 block-wise FP8）；同期 BF16 配置仍很常见。
 - **FP4 推进**：Nemotron-3-Super 使用 NVFP4 预训练；Kimi K3 从 SFT 阶段起做 MXFP4 权重 + MXFP8 激活的量化感知训练；DeepSeek-V4-Pro 专家权重 FP4 存储。量化从"部署压缩"前置为"架构属性"。
 
 ### 3.8 多模态从外挂走向原生
@@ -510,17 +515,41 @@ Attention 是 2026 年架构差异化的主线，但模型的最终形态同样�
 
 | 组件 | 2017-2022 | 2023-2024 | 2025-2026 主流 |
 |------|-----------|-----------|----------------|
-| 归一化 | LayerNorm | RMSNorm（Llama 普及） | RMSNorm + QK-Norm 标配化 |
+| 归一化 | LayerNorm | RMSNorm（Llama 普及） | RMSNorm 为主，QK-Norm 在长训练/大 head_dim 场景增多 |
 | FFN 激活 | ReLU/GELU | SwiGLU | SwiGLU + clamp 变体、输出门控 |
 | MoE 路由 | Switch top-1 | Mixtral top-2、辅助损失 | sigmoid/sqrtsoftplus + noaux_tc、共享专家、首层稠密 |
 | 残差/层间 | Post-Norm | Pre-Norm | Pre-Norm + AttnRes 实验 + MTP 层 |
 | Embedding | 32K 词表、共享权重 | 128K 词表 | 130K-250K 词表、不共享、fp32 输出头 |
-| 量化 | 训练后 PTQ | FP8 训练（V3） | FP8 默认、FP4/MXFP4 QAT |
+| 量化 | 训练后 PTQ | FP8 训练（V3） | BF16/FP8 并存，FP4/MXFP4 QAT 起步 |
 | 多模态 | 无/外挂 CLIP | ViT 投影外挂 | 原生视觉塔 + mrope |
+
+### 3.10 A-K 模块级设计矩阵
+
+| 类别 | 核心数学/结构 | 关键参数 | 主要目标 | 收益与代价 | 典型协同/冲突 |
+|------|---------------|----------|----------|--------------|----------------|
+| A. Attention | `softmax(QK^T/sqrt(d)+M)V`；MQA/GQA 共享 KV，MLA 缓存低秩潜向量，线性注意力维护递推状态 | Q/KV head 数、`head_dim`、低秩维度、窗口/块大小、Top-k | 质量、KV 容量、prefill FLOPs、decode 带宽 | MQA/GQA/MLA 降 KV；SWA/稀疏/线性降长序列成本；代价是表达损失、indexer 误差或 kernel 复杂度 | 与 RoPE/QK-Norm/FlashAttention 正交；RoPE 解耦是 MLA 矩阵吸收的关键约束 |
+| B. 位置编码 | RoPE 以旋转相位编码相对位置；ALiBi 向 score 加线性距离偏置；PI/NTK/YaRN/LongRoPE 调整频率尺度 | `rope_theta`、factor、original max length、rotary fraction、mRoPE section | 长度外推、长训练稳定、多模态位置对齐 | 可低成本扩展上下文；但不替代长语料训练，外推质量受频率缩放影响 | RoPE 影响 Q/K `head_dim`；Linear/SSM 可使用 NoPE 或少量全局 RoPE 层 |
+| C. FFN/MLP | 两层 FFN：`W2 act(W1x)`；GLU：`W_down(act(W_gx) * W_ux)` | intermediate ratio、bias、clamp、初始化、专家宽度 | 非线性容量、参数/计算效率、低精度稳定 | SwiGLU 常以约 `8/3*d_model` 对齐经典 4x FFN 参数；额外门控投影增加 kernel 复杂度 | Parallel Block 可降低串行深度；MoE 以路由专家替换 FFN |
+| D. 归一化 | LayerNorm 去均值并缩放方差；RMSNorm 仅用 RMS；QK-Norm 分别规范化 Q/K | eps、缩放参数、Pre/Post/Sandwich 位置、DeepNorm alpha | 深层稳定、logit 尺度、收敛 | RMSNorm 算子简洁；Pre-Norm 降低深层优化难度；QK-Norm 增加少量计算与参数 | Post-LN 常需残差缩放/更仔细的优化；QK-Norm 对大 `head_dim` 更有价值 |
+| E. 激活 | GELU/SiLU 为平滑激活，Squared ReLU 放大正区间，Clamp 限制离群值 | 近似方式、clamp limit、alpha | 质量、梯度平滑性、FP8/FP4 数值范围 | 平滑激活通常质量好，clamp 利于低精度；过度裁剪会损失容量 | 与 GLU 门控、QAT scale、专家路由数值范围直接耦合 |
+| F. 残差/层序 | 串行：`x+A(N(x))` 后 `+F(N(x))`；并行：`x+A(N1(x))+F(N2(x))` | norm style、残差缩放、LayerScale init、dropout/drop-path | 深层可训练性、通信/串行延迟、跨层信息保留 | Pre-Norm 稳定；Parallel 可提高并行度；Sandwich/AttnRes 增加参数和验证成本 | 与 MoE all-to-all 及 TP 通信排序强相关 |
+| G. MoE | `y=sum_{i in TopK} p_i E_i(x) + E_shared(x)` | 专家数、Top-k、capacity、分组、共享专家、aux/Z-loss/bias | 容量-计算解耦、训练吞吐、服务成本 | 以较小激活参数获得大容量；代价是路由不平衡、all-to-all 与 Group GEMM 复杂度 | 首层稠密、共享专家、EP/TP 是一体化设计；过大 Top-k 会吞噬稀疏收益 |
+| H. SSM/Hybrid | SSM 递推：`s_t=A_t s_{t-1}+B_t x_t`, `y_t=C_t s_t+D x_t`；Hybrid 按层混合 SSM/Linear/Full Attention | `d_state`、`d_inner`、dt、chunk size、层比例 | 线性长序列、流式推理、固定状态 | 无传统 KV 或 KV 更小；代价是内容寻址/精确回忆较弱且 fused scan 难 | 间隔 Full Attention 补长程召回；层比例需与 FFN/MoE 计算预算共同搜索 |
+| I. Embedding/输出头 | `h_0=Embed(ids)`，`logits=h_L W_vocab^T`；MTP 从共享 hidden 预测多个未来 token | vocab size、tie flag、MTP 步数/损失权重、LM-head dtype | 词表覆盖、参数节省、投机解码接受长度 | tied 节省参数但限制输入/输出解耦；MTP 增加训练头与验证逻辑 | MTP 需与 EAGLE/DSpark/服务调度配套；低精度下可保留 LM head 高精度 |
+| J. 整体范式 | Encoder-only、Decoder-only、Encoder-Decoder、Prefix LM；多模态采用 early/cross/late fusion | mask 类型、交叉注意力层、模态 token 比例、共享词表 | 生成、理解、条件生成、多模态对齐 | Decoder-only 生态最强；Encoder-Decoder 对条件任务更自然；多模态融合增加序列长度与对齐成本 | mask、位置编码、CrossAttn 与 KV cache 必须联合设计 |
+| K. 训练/推理系统 | 混合精度/QAT、TP/PP/DP/EP/ZeRO、checkpoint/offload、Paged KV、speculative decoding | dtype/scale granularity、并行拓扑、page size、draft length、分层存储策略 | 吞吐、显存、延迟、集群利用率 | 往往带来最大的墙钟收益，但不改变模型数学；引入调度、数值与故障复杂度 | MoE 需 EP，长上下文需 CP/KV 分层，FP4/FP8 需激活裁剪与 kernel 支持 |
 
 ---
 
 ## 四、Attention 机制专题解析
+
+### 4.0 阅读前的五项强制澄清
+
+1. **FlashAttention 是 IO-aware kernel 优化，不是新的 Attention 数学形式**；它可与 MHA/MQA/GQA/MLA 等组合，是否能直接组合取决于 kernel 对布局和 mask 的支持。
+2. **PagedAttention 是推理系统对 KV 内存的分页与调度**，并非模型权重定义的 Attention 变体。
+3. **长上下文能力不等于 Attention 升级**；位置编码缩放、长序列训练数据、curriculum、上下文并行和评测方法都可能是决定因素。
+4. **FFN、归一化、激活与残差对训练稳定性和质量的影响不亚于 Attention**；只比较 Attention 会遗漏大量计算与优化差异。
+5. **MoE 不能只看专家总数**；Top-k、路由分数、capacity/drop 策略、共享专家、负载均衡、EP 通信与 Group GEMM 共同决定质量和墙钟性能。
 
 ### 4.1 MHA
 
@@ -541,10 +570,10 @@ Attention 是 2026 年架构差异化的主线，但模型的最终形态同样�
 
 ### 4.3 GQA
 
-- 核心原理：把 Query Head 分成 `g` 组，每组共享一组 Key/Value；`g=1` 为 MQA，`g=h` 为 MHA。
-- 关键参数：`num_heads`、`num_kv_groups`。
+- 核心原理：设 Query Head 数为 `h`、KV Head 数为 `h_kv`，每 `r=h/h_kv` 个 Query Head 共享一组 K/V；`h_kv=1` 退化为 MQA，`h_kv=h` 退化为 MHA。
+- 关键参数：`num_heads`、`num_key_value_heads`、`head_dim`，且通常要求 `h % h_kv == 0`。
 - 代表模型：Llama 2/3/4、Qwen2/2.5/3、GLM-4/4.7、Mistral 7B、MiniMax M2/M2.7。
-- 收益：KV Cache 降到 MHA 的 `1/g`，质量损失远小于 MQA。
+- 收益：不计其他缓存时，KV Cache 约降到 MHA 的 `h_kv/h = 1/r`；质量通常介于 MHA 与 MQA 之间。
 - 代价：仍需要完整注意力计算，长上下文显存仍随序列增长。
 
 ### 4.4 MLA
@@ -573,7 +602,7 @@ Attention 是 2026 年架构差异化的主线，但模型的最终形态同样�
 
 - 核心原理：用可分解核函数替代 Softmax，使 KV 信息进入固定大小状态。
 - 代表模型：Kimi Linear/K3 的 KDA、Qwen3-Next/3.5/3.6/3.8 的 Gated DeltaNet、MiniMax-01 的 Lightning Attention。
-- 收益：推理状态 O(1)，不随上下文线性增长；Kimi Linear 报告 KV Cache 最高减少 75%，解码吞吐最高提升约 6x。
+- 收益：递推状态对序列长度 `n` 为 O(1)（状态本身仍受 head/feature 维度影响）；Kimi Linear 报告 KV Cache 最高减少 75%、解码吞吐最高提升约 6x。
 - 代价：纯线性注意力表达力弱，通常需要 3:1 或类似比例混合全量注意力层。
 
 ### 4.8 FlashAttention v1/v2/v3/v4
@@ -587,7 +616,7 @@ Attention 是 2026 年架构差异化的主线，但模型的最终形态同样�
 
 - 核心原理：把 KV Cache 切成固定大小物理 block，通过 block table 管理序列。
 - 代表用途：vLLM 推理引擎。
-- 量化：vLLM 论文报告相对 FasterTransformer、Orca 等系统吞吐提升约 2-4x，KV 显存接近零浪费。
+- 量化：vLLM 论文报告相对 FasterTransformer、Orca 等对照系统吞吐提升约 2-4x，并将 KV 内存浪费控制在 4% 以下；这些数字只在论文的硬件、工作负载与对照设置下成立。
 - 澄清：PagedAttention 更多是系统层调度优化，不是模型数学上的新 Attention 变种。
 
 ### 4.10 RoPE、YaRN、NTK、ALiBi 与位置编码扩展
@@ -743,28 +772,28 @@ Attention 是 2026 年架构差异化的主线，但模型的最终形态同样�
 
 ### 表 2：Attention 类型能力对比表
 
-| Attention 类型 | 代表模型 | 时间/显存特征 | 典型优势 | 典型局限 | 适用场景 |
-|----------------|----------|--------------|----------|----------|----------|
-| MHA | GPT-3、Llama 1 | 训练 O(n^2)，KV 最大 | 表达力强、实现简单 | 长上下文成本高 | 基线、中小模型 |
-| MQA | PaLM、Falcon | KV 约 1/h | 解码带宽最低 | 表达力弱 | 极端解码成本约束 |
-| GQA | Llama、Qwen、GLM | KV 约 1/g | 质量与成本平衡 | 注意力仍是 O(n^2) | 主流 Dense/MoE |
-| MLA | DeepSeek、Kimi K2、GLM-5 | KV 低秩压缩 | 显存大幅下降 | 实现复杂、需 kernel | 超大 MoE、长上下文 |
-| SWA | Mistral 7B、Gemma | 计算 O(nw) | 局部高效 | 长距离受限 | 局部依赖、边缘部署 |
-| Block Sparse | MiniMax M3、DeepSeek-V4 | 只计算选中 block | 长上下文成本可控 | 选择器影响召回 | 1M 上下文服务 |
-| Linear/Hybrid | Qwen3-Next、Kimi K3 | 解码状态固定 | 解码成本低 | 训练与精度复杂 | 超长上下文、Agent |
-| FlashAttention | 主流训练框架 | IO-aware，不物化矩阵 | 训练/推理 kernel 加速 | 不改变模型数学 | 所有 Transformer |
-| PagedAttention | vLLM | block 管理 KV | 吞吐提升、显存浪费少 | 系统层优化 | 高并发推理服务 |
-| RoPE/YaRN/NTK/ALiBi | Llama、Qwen、Falcon | 位置编码扩展 | 提升外推能力 | 不等同 Attention 升级 | 长上下文训练/推理 |
+| Attention 类型 | 代表模型 | 时间/显存特征 | 典型优势 | 典型局限 | 适用场景 | 推荐位置/归一化搭配 |
+|----------------|----------|--------------|----------|----------|----------|------------------------|
+| MHA | GPT-3、Llama 1 | 训练 O(n^2)，KV 最大 | 表达力强、实现简单 | 长上下文成本高 | 基线、中小模型 | RoPE/absolute + Pre-Norm；大 head_dim 可加 QK-Norm |
+| MQA | PaLM、Falcon | KV 约为 MHA 的 `1/h` | 解码带宽最低 | 表达力可能受限 | 极端解码成本约束 | RoPE 或 ALiBi + Pre-Norm |
+| GQA | Llama、Qwen、GLM | KV 约为 MHA 的 `h_kv/h` | 质量与成本平衡 | 注意力仍是 O(n^2) | 主流 Dense/MoE | RoPE/Partial RoPE + RMSNorm，必须满足 head 分组约束 |
+| MLA | DeepSeek、Kimi K2、GLM-5 | KV 低秩压缩 | 显存大幅下降 | 实现复杂、需 kernel | 超大 MoE、长上下文 | 解耦/Partial RoPE + RMSNorm，可加 QK-Norm |
+| SWA | Mistral 7B、Gemma | 计算 O(nw) | 局部高效 | 长距离受限 | 局部依赖、边缘部署 | RoPE + Pre-Norm，间隔全局层 |
+| Block Sparse | MiniMax M3、DeepSeek-V4 | 只计算选中 block | 长上下文成本可控 | 选择器影响召回 | 1M 上下文服务 | Partial/YaRN RoPE + QK-Norm，保留少量全量层 |
+| Linear/Hybrid | Qwen3-Next、Kimi K3 | 解码状态不随 `n` 增长 | 解码成本低 | 训练与精度复杂 | 超长上下文、Agent | Linear 层 NoPE/Partial RoPE，Full 层 RoPE + RMSNorm |
+| FlashAttention | 主流训练框架 | IO-aware，不物化矩阵 | 训练/推理 kernel 加速 | 不改变模型数学 | 所有 Transformer | 沿用底层 Attention 的位置与 norm，kernel 需支持相应 bias/mask |
+| PagedAttention | vLLM | block 管理 KV | 吞吐提升、显存浪费少 | 系统层优化 | 高并发推理服务 | 与模型位置/norm 无关，需匹配 KV 布局 |
+| RoPE/YaRN/NTK/ALiBi | Llama、Qwen、Falcon | 位置编码扩展 | 提升外推能力 | 不等同 Attention 升级 | 长上下文训练/推理 | 本行是位置方案，不是 Attention 数学类型 |
 
 ### 表 3：FFN/MLP 类型能力对比表
 
-| FFN 类型 | 数学结构 | 参数/计算特征 | 代表模型 | 典型优势 | 典型局限 | 适用场景 |
-|----------|----------|---------------|----------|----------|----------|----------|
-| 两层 ReLU/GELU FFN | `W2·act(W1x)` | 中间维度约 4x | GPT-2/3、BERT | 简单稳定 | 参数效率一般 | 早期 Dense 模型 |
-| SwiGLU | `W2·(SiLU(W1x)⊗W3x)` | 中间维度约 8/3x | PaLM、Llama 全系、2026 主流 | 质量/参数最优平衡 | 三组投影矩阵 | 当前默认选择 |
-| Clamp-SwiGLU | SwiGLU + 上限裁剪 | 多一组 clamp 超参 | GPT-OSS、MiniMax-M3、DeepSeek-V4 | 抑制极端激活、稳定超大训练 | 需调 limit/alpha | 超大模型训练 |
-| GeGLU/ReGLU | GELU/ReLU 门控 | 同 SwiGLU 族 | T5、GLM-130B | 与 SwiGLU 同源 | 2026 年新机型少采用 | 早期 GLM/T5 系列 |
-| MoE-FFN | SwiGLU 专家化 + 路由 | 容量与计算解耦 | Mixtral、DeepSeek、Qwen3.8 | 相同计算下容量数倍 | 路由与均衡复杂 | 大模型主力形态 |
+| FFN 类型 | 数学结构 | 参数/计算特征 | 代表模型 | 典型优势 | 典型局限 | 适用场景 | 推荐激活 |
+|----------|----------|---------------|----------|----------|----------|----------|----------|
+| 两层 ReLU/GELU FFN | `W2·act(W1x)` | 中间维度约 4x | GPT-2/3、BERT | 简单稳定 | 参数效率一般 | 早期 Dense 模型 | GELU（质量）或 ReLU（简洁） |
+| SwiGLU | `W2·(SiLU(W1x)⊗W3x)` | 中间维度约 8/3x | PaLM、Llama 系列、2026 多数公开配置 | 质量/参数平衡 | 三组投影矩阵 | 通用 decoder-only 基线 | SiLU/Swish |
+| Clamp-SwiGLU | SwiGLU + 上限裁剪 | 多 clamp 超参 | GPT-OSS、MiniMax-M3、DeepSeek-V4 | 抑制极端激活、利于低精度 | 需调 limit/alpha | 超大/低精度训练 | Clipped SiLU |
+| GeGLU/ReGLU | GELU/ReLU 门控 | 同 SwiGLU 族 | T5、GLM-130B | 与 SwiGLU 同源 | 近期新模型样本较少 | Encoder-Decoder/存量架构 | GELU/ReLU |
+| MoE-FFN | SwiGLU 专家化 + 路由 | 容量与计算解耦 | Mixtral、DeepSeek、Qwen3.8 | 相同激活计算下容量更大 | 路由与均衡复杂 | 大模型/多领域 | SwiGLU 为常见基线，QAT 时可加 clamp |
 
 ### 表 4：归一化与残差设计对比表
 
@@ -801,31 +830,23 @@ Attention 是 2026 年架构差异化的主线，但模型的最终形态同样�
 
 ### 表 7：模型与模块覆盖缺口表（按 A-K 模块类别，Prompt §4 要求）
 
-> 新增字段：**模块类别(A-K)** 与 **与现有接口兼容方案**（与 `BaseAttention`/`build_*`/`TransformerBlock`/`CausalLMModel` 的集成方式）。
+> 本表仅保留当前真正未完成或仅有教学版的项目；已完成项的逐项证据见 8.2。
 
-| 模型/模块 | 模块类别(A-K) | 当前文档是否覆盖 | 当前代码是否覆盖 | 优先级 | 建议实现方式 | 与现有接口兼容方案 |
-|-----------|----------------|------------------|------------------|--------|--------------|---------------------|
-| Step 系列 | 模型库(L) | 已覆盖 | 不适用 | 中 | 文档继续维护官方配置 | 无需代码改动 |
-| Xiaomi MiMo 系列 | 模型库(L) | 已覆盖 | 不适用 | 中 | 文档继续维护官方配置 | 无需代码改动 |
-| Zamba 系列 | 模型库(L) | 已覆盖 | 不适用 | 中 | 文档继续维护官方配置 | 无需代码改动 |
-| Snowflake Arctic 系列 | 模型库(L) | 已覆盖 | 不适用 | 中 | 文档继续维护官方配置 | 无需代码改动 |
-| Ring Attention 多设备通信 | A.Attention | 已覆盖(原理) | 仅教学单机版 | 高 | 增加 torch.distributed all-to-all/reduce-scatter 通信实现 | 保留 `RingAttention` 接口，新增 `world_size/rank` 构造参数，内部 dispatch 到分布式路径 |
-| FlashMLA / CSA / HCA / DSA / MSA 生产级 CUDA kernel | A.Attention | 已覆盖(原理+接口) | 仅 CSA 教学 + FlashMLA 接口 | 高 | 新增 Triton/CUDA 内核，或与 FA v3/v4 内核做适配层 | 保持 `FlashMLA.forward` 签名不变，内核通过 `backend=` 参数切换；DSA/MSA 复用 `BlockSparseIndexer` 输出 |
-| ALiBi 生产级 additive bias kernel | A.Attention + B.位置编码 | 已覆盖(文档) | 已接入 CausalLMModel (positional=alibi) | 中 | 优化 AlibiAttention 的 bias 生成（避免逐元素 broadcast），可做 Triton kernel | 通过 `build_attention(attention_type="alibi")` 与 `build_positional_encoding("alibi")` 双入口保持兼容 |
-| LongRoPE 官方精确系数 | B.位置编码 | 已覆盖(文档) | 已接入 CausalLMModel | 中 | 补充 256K/512K/1M 各档 ntk 因子与重要性采样系数 | 在 `LongRoPEScaledRotaryEmbedding` 新增 `preset=` 参数可直接选已核验档位 |
-| mRope / 2D Position 多模态拼接 | B.位置编码 + J.多模态 | 已覆盖(文档) | 2D Position 已独立实现 | 中 | 在 CausalLMModel 中新增 vision/text 双位置编码拼接与 mrope_section 配置 | 通过 `CausalLMModel(positional="2d" or "mrope")` + `mrope_section` 配置接入 |
-| GeGLU / ReGLU / GEGLU 变体 + Clamp-SwiGLU + FFN 工厂 | C.FFN/MLP | 已覆盖(原理) | 仅 SwiGLU + 基础 FFN | 高 | 在 `layers/ffn.py` 新增 GeGLU/ReGLU/ClampSwiGLU 类 + `build_ffn(ffn_type=, intermediate_mult=)` 工厂 | 所有变体均遵循 `(hidden_size, intermediate_size, bias)` 与 `forward(x) -> Tensor` 签名，可直接替换 TransformerBlock 的 ffn 字段 |
-| FP8 / INT8 量化感知(QAT) FFN/Attention 包装器 | C.FFN + A.Attention + K.系统 | 已覆盖(文档) | 未实现 | 中 | 新增 `QuantizedAttention` / `QuantizedFFN` 包装模块，支持 FP8/INT8 伪量化 forward | 以装饰器/组合方式包装现有 `BaseAttention` / FFN 实例，不改内部逻辑 |
-| LayerNorm / DeepNorm + QK-Norm + LayerScale | D.归一化 | 已覆盖(文档) | 仅 RMSNorm | 高 | 在 `layers/norm.py` 新增 LayerNorm/DeepNorm/LayerScale；在 Attention 中注入 QK-Norm | QK-Norm 作为可选 kwarg 接入 GQA/MLA 等 Attention 类；TransformerBlock 新增 norm_type 参数 |
-| Squared ReLU / Clipped SiLU / 精确 GELU + tanh/erf 近似 接口 | E.激活函数 | 已覆盖(文档) | 仅 PyTorch 原生 | 中 | 在 `layers/ffn.py` 中新增可选激活枚举/工厂，或激活模块文件 | FFN 通过 `activation=` 字符串枚举即可切换，无需新接口 |
-| Parallel Block + Sandwich-LN + AttnRes 通用集成 | F.残差/层间 | 已覆盖(文档) | 仅 Pre/Post-Norm + 独立 AttnRes 模块 | 高 | 新增 `ParallelTransformerBlock`、`SandwichLNTransformerBlock`；在 Block 内按层配置跨层 AttnRes 通路 | 均继承 nn.Module 并提供 `TransformerBlock` 级 `block_type=` 构造开关 |
-| MoE 真实 Expert Parallel(all-to-all) + Group GEMM + Gumbel/Z-Loss 路由 + 无辅助损失(noaux_tc) 完整实现 | G.MoE | 已覆盖(文档) | 仅 ExpertParallelMoE 模拟 + TopKRouter + load_balance_loss | 高 | 新增 `DistributedMixtureOfExperts`（含 all-to-all 通信 + group GEMM）；在 Router 中加 Gumbel/Z-Loss/noaux_tc 选项 | `TopKRouter` 新增 `routing_fn=`、`use_z_loss=`、`noaux_tc=` 参数；MoE 类通过 `distributed=` 开关切模拟/真实 EP |
-| Mamba-2 精确选择性扫描 + 并行扫描 + Zamba 混合 Block + 通用混合布局配置 | H.SSM/Hybrid | 已覆盖(文档) | 仅简化固定状态 Mamba2Layer | 高 | 重写 `Mamba2Layer` 为真实离散化 A/B/C/D + 选择性 dt 投影；新增 `ZambaHybridBlock`；扩展 `HybridAttention` 支持 SSM 层类型 | `Mamba2Layer` 保持 `(hidden_state, state=None)` 返回 `(y, state)` 签名；可直接插入 TransformerBlock 配置；HybridAttention 新增 layer_map 支持 SSM |
-| Tied Embeddings 完整文档 + 测试 + MTP 多步训练接口 | I.Embedding/输出头 | 已覆盖(文档) | CausalLMModel 已支持 tie_word_embeddings；仅有 MultiTokenPredictionHead 独立模块 | 中 | 补充 MTP 训练时的多步损失计算与位置偏移 helper；补充 Tied 测试 | 通过 `CausalLMModel(..., num_nextn_predict_layers=N, mtp_loss_weight=)` 接入；不破坏现有 forward 签名 |
-| Encoder-Decoder 架构 + Prefix LM 前缀掩码 + 多模态 CrossAttn 融合骨架 | J.整体架构范式 | 已覆盖(文档) | 仅 CausalLMModel(Decoder-only) | 中-高 | 新增 `EncoderBlock`、`DecoderBlock`（含 Cross Attention）、`EncoderDecoderModel`；在 CausalLMModel 增加 `prefix_mask=` 配置 + `VisionCrossAttentionFuser` | 所有新 Block 复用 Attention/FFN/MoE 的 build_* 工厂；Decoder 复用 Decoder-only 已有代码 |
-| 投机解码温度采样拒绝采样 + bonus token + DSpark/EAGLE 真实调度 | K.推理系统 | 已覆盖(文档) | 仅 SpeculativeDecoder/EagleSpeculator 简化 greedy 验证 | 中 | 在 `SpeculativeDecoder._verify` 中实现完整拒绝采样与 bonus；EAGLE/DSpark 新增 hidden-state draft 调度 | 保持 `SpeculativeDecoder(prefix_ids, draft_model, target_model)` 的构造与 `decode(max_len)` 调用签名不变 |
-| PagedAttention + KV offload 生产级 copy-on-write + 分层调度 | K.推理系统 | 已覆盖(文档) | 仅教学版 PagedAttention + OnDiskKVStore | 高 | 在 `paged_attention.py` 中新增引用计数、HBM/CPU/NVMe 分层驱逐、copy-on-write 逻辑克隆 | 通过 `PagedAttentionCache(memory_levels=, enable_cow=True)` 新参数启用，对外 API 保持不变 |
-| FP8 / INT8 量化统一包装器 | K.系统优化 | 已覆盖(文档) | 未实现 | 中 | 新增 `QATWrapper` 通用类 + `build_quantized(module, qconfig)` 工厂 | 以组合/装饰器方式包裹任意 Attention/FFN，无侵入 |
+| 模型/模块 | 模块类别(A-K) | 文档覆盖 | 代码覆盖 | 优先级 | 建议实现方式 | 与现有接口兼容方案 |
+|-----------|----------------|----------|----------|--------|--------------|---------------------|
+| `attention_review_2026.md` 缺失 | A-L/文档 | 未覆盖 | 不适用 | 高 | 恢复文件，或正式并入本文第四章并修改 prompt | 文档层统一单一事实源 |
+| Ring Attention 多设备通信 | A | 原理已覆盖 | 仅单进程分块版 | 高 | 加入 `torch.distributed` P2P/ring 通信、双缓冲与数值稳定的 online softmax 合并 | `RingAttention(..., process_group=None, backend="torch")` |
+| FlashMLA/CSA/HCA/DSA/MSA 生产 kernel | A | 原理/接口已覆盖 | 教学版/接口版 | 高 | Triton/CUDA 实现 block gather、ragged KV、低秩解码和 backward | 保留 `forward`，增 `backend="reference|triton|cuda"` |
+| LongRoPE preset 与 mRoPE 拼接 | B/J | 已覆盖 | generic LongRoPE + 2D 位置，缺完整 mRoPE | 中 | 加入已核验的 256K/512K/1M preset 与 text/image/video axis 切片 | 扩展 `build_positional_encoding` 与 `CausalLMModel(positional="mrope")` |
+| FP8/INT8 QAT 包装 | A/C/K | 已覆盖 | 未实现 | 高 | 可插拔 fake-quant observer/scale 模块，区分权重、激活、KV 粒度 | `build_quantized(module, qconfig)` 包装任意 Attention/FFN |
+| QK-Norm/LayerScale/DeepNorm 模型级配置 | D/F | 已覆盖 | 模块存在，工厂集成不完整 | 中 | 新增 `norm_type`、`qk_norm`、`layer_scale_init`、`deepnorm_alpha` 配置传递 | 保留 `TransformerBlock` 默认值以兼容旧调用 |
+| 真实 Expert Parallel + Group GEMM + Gumbel | G | 已覆盖 | Z-Loss/noaux/Expert Choice/Dropout 已有，无真 EP/GEMM/Gumbel | 高 | token dispatch/combine all-to-all、capacity 与 grouped matmul；Gumbel 作为可选 router | 保持 `MixtureOfExperts.forward(x)->Tensor`，增 `process_group/backend` |
+| 精确 Mamba-2 selective scan | H | 已覆盖 | 简化对角 SSM + chunked 教学 scan | 高 | 恢复 per-channel `d_state`、选择性 B/C/dt、causal conv 与 fused parallel scan | 保持 `(x,state)->(y,state)` 签名，增 `backend` |
+| MTP 模型级训练返回 | I | 已覆盖 | head/loss 已有，未集成 CausalLM | 中 | 返回主 logits、MTP logits 和加权 loss，明确 label shift | 增 `return_mtp` 或结构化 output，默认仍返回 Tensor |
+| Prefix LM 遮罩回归 | J | 已覆盖 | 已实现，1 个 padding 组合测试失败 | 高 | 修正 mask 组合或放宽数值容差前，先确认失败是语义错误还是浮点差 | 保留 `prefix_len` 入参 |
+| 多模态完整模型 | J | 已覆盖 | Vision adapter + CrossAttn 骨架 | 中 | 接入可替换 vision encoder、patch merge、mRoPE 和 multimodal mask | 新增组合模型，复用 `CrossAttentionFuser` |
+| 严格投机解码/EAGLE/DSpark | K | 已覆盖 | bonus/温度接口已有，验证调度仍简化 | 高 | 按 batch row 独立接受，拒绝时从 `norm(max(0,p-q))` 采样，增自回归 draft/KV 复用 | 保留 `SpeculativeDecoder`/`EagleSpeculator`，增 verifier/scheduler |
+| Paged KV + 分层 offload/COW | K | 已覆盖 | logical block table + on-disk store | 高 | 引用计数、COW、HBM/CPU/NVMe 驱逐、异步 copy 和 stream 同步 | 扩展 `PagedAttentionCache(memory_levels=..., enable_cow=True)` |
 
 ---
 
@@ -833,7 +854,7 @@ Attention 是 2026 年架构差异化的主线，但模型的最终形态同样�
 
 ### 7.1 为什么越来越多模型从 MHA 迁移到 GQA/MQA/MLA
 
-- 解码阶段是服务成本大头：MHA 的 KV Cache 随层数和上下文线性增长，GQA 直接把 KV Head 压缩到 `1/g`，MLA 进一步压缩潜空间。
+- 解码阶段是服务成本大头：MHA 的 KV Cache 随层数和上下文线性增长，GQA 将 KV Head 压缩到 `h_kv/h`，MLA 进一步以低秩潜向量压缩缓存。
 - 模型规模越大，KV Cache 占比越显著：1M 上下文下，MHA 即使有 FlashAttention 也无法解决缓存和服务吞吐问题。
 - MLA 在 DeepSeek-V2/V3 上经过生产验证后，2026 年被 GLM、Kimi、Mistral 等团队跟进，说明“低秩 KV + 解耦 RoPE”已经从论文变成工程共识。
 
@@ -850,17 +871,17 @@ Attention 是 2026 年架构差异化的主线，但模型的最终形态同样�
 
 ### 7.4 非 Attention 模块趋势
 
-- **RMSNorm + Pre-Norm + SwiGLU 成为默认三件套的原因**：RMSNorm 省去均值平移与偏置，训练和 kernel 都更省；Pre-Norm 让深层训练免调 warmup；SwiGLU 在同等参数下质量稳定优于 GELU-FFN。三者组合的胜率来自“无短板”而非单点优势。
-- **QK-Norm 的优势场景**：大 head_dim（192-256）、长训练、高学习率下抑制 attention logits 漂移；它与 GQA/MLA/稀疏注意力正交，可无损叠加，因此在 2026 年配置中快速普及。
+- **RMSNorm + Pre-Norm + SwiGLU 成为常用基线的原因**：RMSNorm 省去均值平移，算子更简洁；Pre-Norm 改善深层梯度传播并降低对 warmup 和初始化的敏感性，但不会消除 warmup 需求；SwiGLU 通常提供较好的质量/参数折中。
+- **QK-Norm 的优势场景**：大 `head_dim`、长训练或注意力 logit 尺度不稳定时，可抑制 Q/K 范数漂移。它可与 GQA/MLA/稀疏注意力结合，但仍可能改变最优温度、学习率与质量，不应称为“无损叠加”。
 - **FFN 中间维度的收缩逻辑**：4x 缩到 8/3x 是参数效率权衡；MoE 化后专家中间维度进一步缩小到 2048-3072，靠专家数量而非单专家宽度换容量——对质量的影响被路由补偿。
-- **MoE 激活数从 2 到 4/6/8/10/16 的爬升**：说明负载均衡（无辅助损失偏置）与专家并行工程已成熟到可以支撑更细粒度路由；稀疏度反而降到 1.6%-3%，容量/计算比持续拉高。
-- **共享专家从无到有**：用极小的常开计算捕获通用模式，降低路由专家的学习负担，1-2 个共享专家已是 2026 年默认。
-- **混合架构整体趋势**：纯 Attention 模型让位于“Linear+Full、SSM+Attention、Sparse+Dense”的层间混合，层类型配比成为新的核心超参。
+- **MoE 激活数从 2 扩展到 4/6/8/10/16**：反映出更细专家粒度与更大总专家数的组合；其收益依赖负载均衡、容量限制与专家并行，不能仅由 Top-k 增大推导“工程已成熟”。
+- **共享专家增多**：常开专家可捕获通用模式并减轻路由专家负担；本文的若干旗舰样本使用 1-2 个，但 Mixtral、MiMo 等路线说明共享专家并非必选项。
+- **混合架构整体趋势**：「Linear+Full、SSM+Attention、Sparse+Dense」的层间混合增多，但纯 Softmax Attention 仍在大量稠密模型中有竞争力；趋势是设计空间扩大，不是单向替代。
 
 ### 7.5 跨模块协同趋势
 
 - **Attention + FFN 从串行走向配比设计**：Qwen3.8 的 3:1、MiMo 的约 6:1、GLM-5.2 的 indexer 共享周期，都是“Attention 层类型 × FFN 形态”的联合设计，而非逐层独立选择。
-- **MoE × Attention 的规律**：MoE 只替换 FFN、注意力层保持完整；首 1-3 层保持稠密；MTP 模块与主模型共享 embedding，作为推理加速的架构内组件存在。
+- **MoE × Attention 的常见模式**：多数 decoder-only MoE 将专家放在 FFN 位置，并常保留首 1-3 层稠密；但这是工程上的主流布局，不是 MoE 的数学必然规则。MTP 是另一条训练/投机解码协同路径。
 - **位置编码走向混合而非统一**：Partial RoPE（0.25-0.5）、NoPE 间隔/分支、mrope 多模态并存，RoPE 没有“完全胜出”，而是退化为按需组合的基底方案。
 - **多模态的新要求**：视觉塔与文本侧共享归一化/残差设计，mrope 把位置编码扩展到图像 patch 维度，Late Fusion projector 趋向轻量（patch merge + 小型 projector）。
 
@@ -871,7 +892,7 @@ Attention 是 2026 年架构差异化的主线，但模型的最终形态同样�
 - Sparse Attention 和 Linear Attention 会在超长上下文中重新崛起，但需要更可靠的 indexer、门控状态和 kernel 生态。
 - Attention、SSM、线性状态、稀疏检索会进一步融合，边界会越来越模糊。
 - **MoE 会继续向中小激活规模渗透**（<10B 激活），主要瓶颈是专家并行通信与路由工程复杂度，而非模型质量。
-- **量化感知训练会成为大模型训练默认**：FP8 已是 2026 年事实标准，FP4/MXFP4 在旗舰模型（K3、Nemotron-3-Super、V4-Pro 专家层）落地后，会向更小模型下沉。
+- **量化感知训练的使用率会上升**：FP8 已在部分旗舰训练中验证，FP4/MXFP4 也开始落地；是否下沉为普遍默认，仍取决于硬件、kernel、标定成本和质量容差。
 - 归一化/残差侧的下一块试验田是 AttnRes 类跨层通路与层类型配比搜索，而非新的逐点激活函数。
 - 闭源模型将继续不披露架构，但开源模型的官方配置和 kernel 会成为 Attention 研究的主要证据来源。
 
@@ -879,7 +900,7 @@ Attention 是 2026 年架构差异化的主线，但模型的最终形态同样�
 
 ## 八、代码实现方案
 
-### 8.1 新增文件
+### 8.1 当前仓库实现盘点
 
 - `llminfra/attention/sliding_window.py`
   - `SlidingWindowAttention`，继承 `BaseAttention`，支持 `window_size`、`num_kv_groups`、`causal`。
@@ -918,21 +939,27 @@ Attention 是 2026 年架构差异化的主线，但模型的最终形态同样�
 - `llminfra/inference/speculative.py`
   - `SpeculativeDecoder` 与 `EagleSpeculator`，draft-target 与 hidden-state drafting 投机解码教学接口。
 - `llminfra/layers/ssm.py`
-  - `Mamba2Layer`，简化固定状态 SSM 层。
+  - `Mamba2Layer`，简化对角 SSM，支持 recurrent/chunked 扫描与状态传递；并非完整 Mamba-2。
 - `llminfra/inference/kv_offload.py`
   - `OnDiskKVStore`，on-disk KV cache 接口模拟。
 - `llminfra/positional/` 扩展
   - `LongRoPEScaledRotaryEmbedding`、`TwoDimensionalPositionEmbedding`。
 - `llminfra/moe/mixture.py` 扩展
-  - `load_balance_loss`，Top-k MoE 辅助负载均衡损失。
+  - `load_balance_loss`、`router_z_loss`、无辅助损失路由偏置、`ExpertChoiceRouter`、expert dropout，以及教学级 `ExpertParallelMoE`。
 - `llminfra/layers/norm.py`
-  - `RMSNorm`，Llama/Qwen/Mistral 等模型使用的归一化层。
+  - `RMSNorm`、`LayerNorm`、`DeepNorm`、`LayerScale`。
 - `llminfra/layers/ffn.py`
   - `SwiGLUFFN` 与 `FeedForward`，覆盖主流 Dense 和 MoE 专家网络。
+- `llminfra/layers/activations.py` 与 `llminfra/layers/ffn_variants.py`
+  - 精确/tanh GELU、Squared ReLU、Clipped SiLU、GeGLU、ReGLU、Clamp-SwiGLU 和 4x/8/3x/custom FFN 工厂。
 - `llminfra/layers/transformer.py`
-  - `TransformerBlock`，组合可插拔 Attention、RMSNorm 和 FFN/MoE。
+  - `TransformerBlock`，支持 Pre/Post/Sandwich-LN、串行/并行 Attention-FFN 与 AttnRes。
+- `llminfra/layers/hybrid_block.py`
+  - `HybridSSMBlock`，按 `ssm:attn` 模式组合简化 Mamba2 与可共享 Attention。
 - `llminfra/model.py`
-  - `CausalLMModel`，组合 Embedding、位置编码、Transformer Block、RMSNorm 与 LM Head；支持 `alibi`、`longrope`、`2d` 位置配置。
+  - `CausalLMModel`，组合 Embedding、位置编码、Transformer Block、RMSNorm 与 LM Head；支持 `alibi`、`longrope`、`2d`、tied embeddings 和 `prefix_len`。
+- `llminfra/encoder_decoder.py` 与 `llminfra/multimodal.py`
+  - `CrossAttention`、`EncoderBlock`、`DecoderBlock`、`EncoderDecoderModel`、`VisionEncoderAdapter`、`CrossAttentionFuser`。
 - `llminfra/registry.py`
   - `build_attention`、`build_positional_encoding`、`list_attentions`，统一模块选择入口。
 - `tests/attention/`（test_base / test_classic / test_sparse / test_linear / test_hybrid）
@@ -948,10 +975,52 @@ Attention 是 2026 年架构差异化的主线，但模型的最终形态同样�
 - `tests/flashattention/`（test_versions / test_api / test_cuda）
   - 覆盖 FA1-FA4 数值正确性、PyTorch 风格 API 与长序列 CUDA 用例。
 - `tests/test_model.py`
-  - 覆盖注册表、CausalLMModel 的 Dense/MoE/Hybrid 组合与梯度。
+  - 覆盖注册表、CausalLMModel 的 Dense/MoE/Hybrid 组合、位置编码、tied embeddings 与 Prefix LM。
+- `tests/test_encoder_decoder.py` 与 `tests/test_multimodal.py`
+  - 覆盖 Encoder-Decoder/Cross Attention 的形状与梯度，以及视觉特征投影/交叉融合。
 - 修改 `llminfra/__init__.py` 导出新模块。
 
-### 8.2 设计说明
+### 8.2 Prompt 清单 1-33 逐项状态与实现方案
+
+> 状态含义：“完成”是指达到本仓库教学级 PyTorch 交付标准，不代表等价于官方 CUDA/Triton/分布式实现；“部分”是指有接口或简化实现，但仍缺 prompt 指定的生产语义或模型级集成。
+
+| # | 类别 | 状态 | 当前证据 | 下一步/验收标准 |
+|---|------|------|----------|------------------|
+| 1 | A | 部分 | `FlashMLA`、`CompressedSparseAttention`、`BlockSparseIndexer` 提供接口/参考实现 | 增 Triton/CUDA 的 MLA decode、block gather、ragged KV 与 backward；对齐官方 kernel 结果 |
+| 2 | A | 部分 | `attention/ring.py` 实现单进程分块 online softmax | 用 `torch.distributed` 完成多 rank K/V ring 通信，验证与稠密 Attention 数值/梯度一致 |
+| 3 | A | 部分 | `AlibiAttention`/`ALiBiBias` 已与模型组合 | 将 additive bias 融入 block kernel，避免显式 `n*n` bias |
+| 4 | B | 部分 | generic `LongRoPEScaledRotaryEmbedding` 已有 | 补充已核验 256K/512K/1M preset、回退到原长度的一致性测试 |
+| 5 | B/J | 部分 | `TwoDimensionalPositionEmbedding`、Vision adapter/CrossAttn 已有 | 实现 text/image/video 位置 ID 拼接、`mrope_section` 分片与端到端多模态 mask |
+| 6 | C | 完成 | `GeGLUFFN`、`ReGLUFFN`（GeGLU/GEGLU 同指 GELU-gated GLU） | 保持形状/梯度测试，补与 Transformers 同参数数值对齐可作加分项 |
+| 7 | C/K | 部分 | `ClampedSwiGLUFFN` 已有 | 补 FP8/INT8 fake-quant observer、per-tensor/per-channel scale 与 QAT 梯度测试 |
+| 8 | C | 完成 | `ffn_factory` 支持 4x、8/3x、custom | 增 rounding multiple 配置后可更贴近 Llama/Qwen 生产尺寸 |
+| 9 | D | 完成 | `LayerNorm`、`DeepNorm` 已有形状/梯度/公式测试 | 将 DeepNorm 作为 Block 工厂可选项 |
+| 10 | D/A | 部分 | `BaseAttention(qk_norm=True)` 与 `_apply_qk_norm` 已有 | 确保 MHA/GQA/MQA/MLA 都调用同一逻辑；修复当前 QK-Norm 单元测试形状错误 |
+| 11 | D/F | 部分 | `LayerScale` 模块已有 | 在 `TransformerBlock` 注入 Attention/FFN 两条残差路径，验证初始值不改变形状与梯度 |
+| 12 | E | 完成 | `gelu_exact`、`gelu_tanh`，PyTorch exact 路径即 erf 定义 | 可增 `gelu_erf` 别名以避免用户误解 |
+| 13 | E | 完成 | `squared_relu`、`clamped_silu` 已注册到 activation factory | 补 FP16/FP8 边界值和极值测试 |
+| 14 | F | 完成 | `TransformerBlock(parallel=True)` | 保持 Pre/Post/Sandwich 三种组合的形状/梯度测试 |
+| 15 | F | 完成 | `norm_style="sandwich"` | 补与串行/并行块的数值回归 |
+| 16 | F | 完成 | `attention_residual=True` 将 `AttentionResidual` 集成 Block | 当前是逐维门控简化版；若追求 Kimi K3 对齐需补跨 block 缓冲与路由 |
+| 17 | G | 部分 | `ExpertParallelMoE` 只模拟本地专家归属 | 实现 token all-to-all dispatch/combine、capacity/drop policy 和 Group GEMM，在 ≥2 rank 上做一致性测试 |
+| 18 | G | 部分 | `router_z_loss` 已有 | 增 Gumbel-Softmax/直通估计可选路由，比较温度与稀疏性 |
+| 19 | G | 完成 | `TopKRouter` 支持无梯度均衡 `router_bias` 更新 | 补多步负载收敛与不传梯度的回归测试 |
+| 20 | G | 完成 | `expert_dropout` 与 `ExpertChoiceRouter` 已有 | 将 router type 统一进入构建工厂 |
+| 21 | H | 部分 | `Mamba2Layer` 有 input-dependent B/C/dt 与 recurrent/chunked scan | 恢复 per-channel `(batch, channels, d_state)` 状态、causal conv、正确离散化与 fused parallel scan |
+| 22 | H | 部分 | `HybridSSMBlock` 支持共享 Attention 与 `ssm:attn` 模式 | 加 norm/残差/FFN、多层状态传递和 Zamba 的共享块配置 |
+| 23 | H/A | 部分 | `HybridAttention` 支持 linear/full，`HybridSSMBlock` 支持 ssm/attn | 用统一 `layer_map` 组合 linear/ssm/full 三类层并传递状态 |
+| 24 | I | 完成 | `CausalLMModel(tie_word_embeddings=True)` 与对应测试 | 在 README/API 文档中保持语义说明 |
+| 25 | I | 部分 | `MultiTokenPredictionHead` 与 `mtp_loss` 已实现 | 集成 `CausalLMModel` 结构化输出，完整覆盖多步 label shift 和损失权重 |
+| 26 | J | 完成 | `EncoderBlock`、`DecoderBlock`、`CrossAttention`、`EncoderDecoderModel` 及测试 | 当前是 T5-style 骨架，未声称复现 T5 relative bias |
+| 27 | J | 部分 | `CausalLMModel.forward(prefix_len=...)` 已实现 | 修复 prefix+padding 组合的失败测试，补可见性矩阵的直接单测 |
+| 28 | J | 部分 | `VisionEncoderAdapter` + `CrossAttentionFuser` 与测试 | 接入真实 ViT 接口、patch merge、mRoPE、early/late fusion 组合模型 |
+| 29 | K | 部分 | speculative decoding 已支持 temperature、接受比与 bonus token | 拒绝时从 `norm(max(0,p_target-p_draft))` 采样，改为每 batch row 独立验证并做自回归 draft rollout |
+| 30 | K | 部分 | `EagleSpeculator` 为 hidden-state draft 接口 | 实现可训练 EAGLE head/KV 复用和 DSpark 的 block/Markov 调度 |
+| 31 | K | 部分 | `PagedAttentionCache`、`PagedKVBlockAllocator`、`OnDiskKVStore` | 增引用计数/COW、HBM-CPU-NVMe 分层驱逐、异步 DMA 和调度策略 |
+| 32 | K | 未实现 | 无统一 FP8/INT8 QAT/推理量化包装器 | 实现 `QATWrapper`/`build_quantized`，覆盖 Attention、FFN、KV 和导出路径 |
+| 33 | L | 完成 | 本文已补 Step、MiMo、Zamba、Snowflake Arctic 系列 | 按官方模型卡/配置持续更新，未披露项保留为未知 |
+
+### 8.3 统一接口与设计说明
 
 - Attention 模块继承现有 `BaseAttention`，保持 `forward(hidden_state, attention_mask, return_attention_weights)` 接口；位置编码和 MoE 模块不继承 `BaseAttention`，因为它们不是 Attention 算子本身。
 - `BlockSparseAttention` 和 `SlidingWindowAttention` 仍物化 score 矩阵，因此定位是“教学/算法接口版”；真实生产版应由 CUDA kernel 直接跳过未选中 block。
@@ -960,14 +1029,14 @@ Attention 是 2026 年架构差异化的主线，但模型的最终形态同样�
 - `MixtureOfExperts` 按专家循环执行，便于阅读和测试；生产版本应使用 group GEMM、expert parallelism 和负载均衡调度。
 - `PartialRotaryPositionEmbedding`、`PositionInterpolation`、`RMSNorm` 和 `SwiGLUFFN` 是可直接组合的基础模块；YaRN 和 Dynamic NTK 的精确数值仍需与 Transformers 官方实现对比。
 
-### 8.3 运行与测试
+### 8.4 运行与测试
 
 ```bash
 python -m pytest tests/ -q
 ruff check llminfra tests
 ```
 
-### 8.4 当前覆盖与待补充清单
+### 8.5 当前覆盖与待补充清单
 
 **已覆盖代码模块**
 

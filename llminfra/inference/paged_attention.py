@@ -3,9 +3,9 @@
 PagedAttention is primarily a *system-level* KV cache optimization used by
 vLLM: the cache is split into fixed-size physical blocks, and a sequence is
 described by a block table instead of a contiguous memory allocation. This
-file provides a small PyTorch-only simulation of that interface. It does not
-implement CUDA memory management, block-level scheduler policies, or the
-copy-on-write behavior of a production serving engine.
+file provides a small PyTorch-only simulation of that interface, including
+reference counts and copy-on-write for shared prefix blocks. It does not
+implement CUDA memory management or asynchronous tiered offload.
 """
 
 from __future__ import annotations
@@ -22,6 +22,7 @@ class PagedKVBlockAllocator:
         self.num_blocks = int(num_blocks)
         self.free_blocks = list(range(self.num_blocks))
         self.allocated: set[int] = set()
+        self.ref_counts = [0] * self.num_blocks
 
     def allocate(self) -> int:
         """Allocate one physical block and return its id."""
@@ -29,14 +30,29 @@ class PagedKVBlockAllocator:
             raise RuntimeError("Paged KV cache is full")
         block_id = self.free_blocks.pop()
         self.allocated.add(block_id)
+        self.ref_counts[block_id] = 1
         return block_id
+
+    def retain(self, block_id: int) -> None:
+        """Add one logical owner for an allocated physical block."""
+        if block_id not in self.allocated:
+            raise ValueError(f"Block {block_id} is not allocated")
+        self.ref_counts[block_id] += 1
 
     def free(self, block_id: int) -> None:
         """Return one physical block to the free list."""
         if block_id not in self.allocated:
             raise ValueError(f"Block {block_id} is not allocated")
-        self.allocated.remove(block_id)
-        self.free_blocks.append(block_id)
+        self.ref_counts[block_id] -= 1
+        if self.ref_counts[block_id] == 0:
+            self.allocated.remove(block_id)
+            self.free_blocks.append(block_id)
+
+    def reference_count(self, block_id: int) -> int:
+        """Return the number of logical sequences owning ``block_id``."""
+        if block_id < 0 or block_id >= self.num_blocks:
+            raise ValueError(f"Block id out of range: {block_id}")
+        return self.ref_counts[block_id]
 
 
 class PagedAttentionCache:
@@ -57,6 +73,8 @@ class PagedAttentionCache:
         device: torch.device | str = "cpu",
         dtype: torch.dtype = torch.float32,
     ) -> None:
+        if block_size < 1 or num_heads < 1 or head_dim < 1:
+            raise ValueError("block_size, num_heads and head_dim must be >= 1")
         self.allocator = PagedKVBlockAllocator(num_blocks)
         self.block_size = int(block_size)
         self.num_heads = int(num_heads)
@@ -100,6 +118,17 @@ class PagedAttentionCache:
             slot_in_block = num_tokens % self.block_size
             if slot_in_block == 0:
                 block_table.append(self.allocator.allocate())
+            elif self.allocator.reference_count(block_table[-1]) > 1:
+                # A cloned sequence shares its prefix blocks. Appending into
+                # a partial shared tail first creates a private copy.
+                shared_block = block_table[-1]
+                private_block = self.allocator.allocate()
+                self.key_cache[private_block].copy_(self.key_cache[shared_block])
+                self.value_cache[private_block].copy_(
+                    self.value_cache[shared_block]
+                )
+                block_table[-1] = private_block
+                self.allocator.free(shared_block)
             physical_block = block_table[-1]
             self.key_cache[physical_block, slot_in_block] = key[token_idx]
             self.value_cache[physical_block, slot_in_block] = value[token_idx]
@@ -128,11 +157,16 @@ class PagedAttentionCache:
         return keys, values
 
     def clone_sequence(self, source_seq_id: int, new_seq_id: int) -> None:
-        """Copy one sequence's KV cache into a new sequence id."""
+        """Clone a sequence by sharing blocks until either clone is mutated."""
         if new_seq_id in self.block_tables:
             raise ValueError(f"Sequence already exists: {new_seq_id}")
-        key, value = self.get(source_seq_id)
-        self.append(new_seq_id, key, value)
+        if source_seq_id not in self.block_tables:
+            raise KeyError(f"Unknown sequence id: {source_seq_id}")
+        blocks = list(self.block_tables[source_seq_id])
+        for block_id in blocks:
+            self.allocator.retain(block_id)
+        self.block_tables[new_seq_id] = blocks
+        self.num_tokens[new_seq_id] = self.num_tokens[source_seq_id]
 
     def reset(self, seq_id: int) -> None:
         """Free all physical blocks owned by ``seq_id`` and clear its table."""

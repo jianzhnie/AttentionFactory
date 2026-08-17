@@ -2,14 +2,29 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
+
 import torch
+import torch.nn.functional as F
 from torch import nn
 
+from .inference.multi_token_prediction import MultiTokenPredictionHead, mtp_loss
 from .layers.ffn import SwiGLUFFN
 from .layers.norm import RMSNorm
 from .layers.transformer import TransformerBlock
 from .moe import DeepSeekMoE
+from .positional.mrope import MultiModalRotaryPositionEmbedding
 from .registry import build_attention, build_positional_encoding
+
+
+@dataclass
+class CausalLMOutput:
+    """Structured causal-LM output for training and auxiliary heads."""
+
+    logits: torch.Tensor
+    loss: torch.Tensor | None = None
+    attention_weights: torch.Tensor | None = None
+    mtp_logits: list[torch.Tensor] | None = None
 
 
 class CausalLMModel(nn.Module):
@@ -41,6 +56,11 @@ class CausalLMModel(nn.Module):
         num_shared_experts: Always-on shared experts when ``use_moe`` is set.
         norm_eps: RMSNorm epsilon.
         tie_word_embeddings: Share the LM head weight with the token embedding.
+        num_mtp_predictions: Number of future-token auxiliary prediction
+            heads. Zero disables MTP.
+        mtp_loss_weight: Weight applied to the MTP loss when labels are given.
+        norm_type: ``"rmsnorm"`` or ``"layernorm"`` inside blocks.
+        norm_style: ``"pre"``, ``"post"``, ``"sandwich"`` or ``"deepnorm"``.
     """
 
     def __init__(
@@ -61,10 +81,22 @@ class CausalLMModel(nn.Module):
         num_shared_experts: int = 1,
         norm_eps: float = 1e-5,
         tie_word_embeddings: bool = False,
+        num_mtp_predictions: int = 0,
+        mtp_loss_weight: float = 0.1,
+        norm_type: str = "rmsnorm",
+        norm_style: str = "pre",
+        parallel_blocks: bool = False,
+        layer_scale_init: float | None = None,
+        attention_residual: bool = False,
+        deepnorm_alpha: float = 1.0,
     ) -> None:
         super().__init__()
         if vocab_size < 1 or hidden_size < 1 or num_layers < 1:
             raise ValueError("vocab_size, hidden_size and num_layers must be >= 1")
+        if num_mtp_predictions < 0:
+            raise ValueError("num_mtp_predictions must be >= 0")
+        if mtp_loss_weight < 0:
+            raise ValueError("mtp_loss_weight must be >= 0")
 
         self.vocab_size = int(vocab_size)
         self.hidden_size = int(hidden_size)
@@ -80,6 +112,8 @@ class CausalLMModel(nn.Module):
         self.attention_name = attention_name
         self.use_moe = bool(use_moe)
         self.tie_word_embeddings = bool(tie_word_embeddings)
+        self.num_mtp_predictions = int(num_mtp_predictions)
+        self.mtp_loss_weight = float(mtp_loss_weight)
 
         self.embed_tokens = nn.Embedding(vocab_size, hidden_size)
         attention_kwargs = dict(attention_kwargs or {})
@@ -122,6 +156,12 @@ class CausalLMModel(nn.Module):
                     else SwiGLUFFN(hidden_size, intermediate_size)
                 ),
                 norm_eps=norm_eps,
+                norm_type=norm_type,
+                norm_style=norm_style,
+                parallel=parallel_blocks,
+                layer_scale_init=layer_scale_init,
+                attention_residual=attention_residual,
+                deepnorm_alpha=deepnorm_alpha,
             )
             for _ in range(num_layers)
         )
@@ -130,18 +170,36 @@ class CausalLMModel(nn.Module):
         self.lm_head = nn.Linear(hidden_size, vocab_size, bias=False)
         if tie_word_embeddings:
             self.lm_head.weight = self.embed_tokens.weight
+        self.mtp_head: MultiTokenPredictionHead | None = None
+        if num_mtp_predictions:
+            self.mtp_head = MultiTokenPredictionHead(
+                hidden_size,
+                vocab_size,
+                num_predictions=num_mtp_predictions,
+            )
+            if tie_word_embeddings:
+                for head in self.mtp_head.heads:
+                    head.weight = self.embed_tokens.weight
 
     def forward(
         self,
-        input_ids: torch.Tensor,
+        input_ids: torch.Tensor | None = None,
         attention_mask: torch.Tensor | None = None,
         return_attention_weights: bool = False,
         prefix_len: int | None = None,
-    ) -> torch.Tensor | tuple[torch.Tensor, torch.Tensor]:
-        """Run the model over ``input_ids``.
+        labels: torch.Tensor | None = None,
+        return_dict: bool = False,
+        return_mtp: bool = False,
+        inputs_embeds: torch.Tensor | None = None,
+        position_ids: torch.Tensor | None = None,
+    ) -> torch.Tensor | tuple[torch.Tensor, torch.Tensor] | CausalLMOutput:
+        """Run the model over token ids or pre-computed embeddings.
 
         Args:
             input_ids: Long tensor of shape ``(batch, seq_len)``.
+            inputs_embeds: Optional embeddings shaped ``(batch, seq_len,
+                hidden_size)``. Exactly one of ``input_ids`` and
+                ``inputs_embeds`` must be supplied.
             attention_mask: Optional padding mask of shape
                 ``(batch, seq_len)``, ``(batch, 1, seq_len)`` or
                 ``(batch, 1, seq_len, seq_len)``.
@@ -151,21 +209,61 @@ class CausalLMModel(nn.Module):
                 ``prefix_len`` positions are bidirectionally visible to every
                 position (including each other); all remaining positions stay
                 causal. ``None`` (the default) keeps the purely causal mask.
+            labels: Optional next-token targets shaped like ``input_ids``.
+                Supplying labels returns :class:`CausalLMOutput` with loss.
+            return_dict: Return :class:`CausalLMOutput` instead of the legacy
+                tensor/tuple result.
+            return_mtp: Include auxiliary MTP logits. Requires the model to
+                have been constructed with ``num_mtp_predictions > 0``.
+            position_ids: Optional multimodal position ids. This is consumed
+                by ``mrope``; other positional modules use implicit indices.
         """
-        if input_ids.dim() != 2:
-            raise ValueError("input_ids must have shape (batch, seq_len)")
-        batch_size, seq_len = input_ids.size()
+        if (input_ids is None) == (inputs_embeds is None):
+            raise ValueError("provide exactly one of input_ids or inputs_embeds")
+        if input_ids is not None:
+            if input_ids.dim() != 2:
+                raise ValueError("input_ids must have shape (batch, seq_len)")
+            batch_size, seq_len = input_ids.size()
+            hidden_state = self.embed_tokens(input_ids)
+            device = input_ids.device
+        else:
+            assert inputs_embeds is not None
+            if inputs_embeds.dim() != 3 or inputs_embeds.size(-1) != self.hidden_size:
+                raise ValueError(
+                    "inputs_embeds must have shape (batch, seq, hidden_size)"
+                )
+            batch_size, seq_len, _ = inputs_embeds.size()
+            hidden_state = inputs_embeds
+            device = inputs_embeds.device
         if seq_len > self.max_seq_len:
             raise ValueError(
                 f"seq_len {seq_len} exceeds max_seq_len {self.max_seq_len}"
             )
 
-        hidden_state = self.embed_tokens(input_ids)
         if self.positional is not None:
-            hidden_state = self.positional(hidden_state)
+            if position_ids is not None and isinstance(
+                self.positional, MultiModalRotaryPositionEmbedding
+            ):
+                hidden_state = self.positional(hidden_state, position_ids)
+            elif position_ids is not None:
+                raise ValueError("position_ids are only supported by mrope")
+            else:
+                hidden_state = self.positional(hidden_state)
+
+        # Padding positions must not leak their token embedding through the
+        # residual stream. Key masking alone prevents other tokens from
+        # attending to padding, but the padded query position would still
+        # retain its own embedding through every residual connection.
+        query_padding_mask: torch.Tensor | None = None
+        if attention_mask is not None and attention_mask.dim() == 2:
+            query_padding_mask = attention_mask[:, :, None].to(
+                device=hidden_state.device,
+                dtype=hidden_state.dtype,
+            )
+            hidden_state = hidden_state * query_padding_mask
 
         combined_mask = self._build_mask(
-            attention_mask, batch_size, seq_len, input_ids.device, prefix_len
+            attention_mask, batch_size, seq_len, device, prefix_len
         )
         last_weights: torch.Tensor | None = None
         for layer_index, block in enumerate(self.blocks):
@@ -182,9 +280,44 @@ class CausalLMModel(nn.Module):
                 hidden_state, last_weights = result
             else:
                 hidden_state = result
+            if query_padding_mask is not None:
+                hidden_state = hidden_state * query_padding_mask
 
         hidden_state = self.norm(hidden_state)
         logits = self.lm_head(hidden_state)
+        if query_padding_mask is not None:
+            logits = logits * query_padding_mask
+        mtp_logits: list[torch.Tensor] | None = None
+        if return_mtp or labels is not None:
+            if self.mtp_head is None and return_mtp:
+                raise ValueError("return_mtp requires num_mtp_predictions > 0")
+            if self.mtp_head is not None:
+                mtp_logits = self.mtp_head(hidden_state)
+
+        loss: torch.Tensor | None = None
+        if labels is not None:
+            if labels.shape != (batch_size, seq_len):
+                raise ValueError("labels must have shape (batch, seq_len)")
+            if seq_len < 2:
+                raise ValueError("labels require a sequence length of at least 2")
+            loss = F.cross_entropy(
+                logits[:, :-1].reshape(-1, self.vocab_size),
+                labels[:, 1:].reshape(-1),
+            )
+            if self.mtp_head is not None and self.mtp_loss_weight:
+                loss = loss + self.mtp_loss_weight * mtp_loss(
+                    self.mtp_head,
+                    hidden_state,
+                    labels,
+                )
+
+        if return_dict or labels is not None or return_mtp:
+            return CausalLMOutput(
+                logits=logits,
+                loss=loss,
+                attention_weights=last_weights,
+                mtp_logits=mtp_logits,
+            )
         if return_attention_weights:
             if last_weights is None:
                 raise ValueError(
@@ -239,5 +372,6 @@ class CausalLMModel(nn.Module):
         return (
             f"vocab_size={self.vocab_size}, hidden_size={self.hidden_size}, "
             f"num_layers={self.num_layers}, num_heads={self.num_heads}, "
-            f"attention_name={self.attention_name}, use_moe={self.use_moe}"
+            f"attention_name={self.attention_name}, use_moe={self.use_moe}, "
+            f"num_mtp_predictions={self.num_mtp_predictions}"
         )

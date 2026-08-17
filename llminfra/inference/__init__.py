@@ -1,7 +1,7 @@
 """Inference-time components: KV cache management, paging and decoding."""
 
 from .kv_offload import OnDiskKVStore
-from .multi_token_prediction import MultiTokenPredictionHead
+from .multi_token_prediction import MultiTokenPredictionHead, mtp_loss
 from .paged_attention import (
     PagedAttentionCache,
     PagedKVBlockAllocator,
@@ -18,5 +18,6 @@ __all__ = [
     "PagedAttentionCache",
     "PagedKVBlockAllocator",
     "SpeculativeDecoder",
+    "mtp_loss",
     "paged_attention",
 ]

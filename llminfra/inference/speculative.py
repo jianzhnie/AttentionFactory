@@ -21,10 +21,10 @@ class SpeculativeDecoder(nn.Module):
         target_model: Callable mapping ``(batch, seq)`` ids to logits.
         num_speculative_tokens: Number of draft tokens generated per block.
         temperature: Sampling temperature; 0 selects argmax. With
-            ``temperature > 0`` a teaching-grade rejection sampler verifies
+            ``temperature > 0`` a rejection sampler verifies
             drafts: a draft token is accepted with probability
             ``min(1, p_target / p_draft)`` and otherwise replaced by a fresh
-            sample from the target distribution.
+            sample from ``norm(max(0, p_target - p_draft))``.
         append_bonus_token: When True, sample one extra "bonus" token from
             the target logits after a fully accepted draft block (the
             standard speculative decoding behavior). Defaults to False to
@@ -55,11 +55,9 @@ class SpeculativeDecoder(nn.Module):
 
         Teaching simplifications: draft tokens are read off the last
         ``num_speculative_tokens`` positions of the draft logits (no
-        autoregressive draft rollout), acceptance is decided batch-wide (one
-        rejecting row stops the whole batch), and on rejection with
-        ``temperature > 0`` the corrective token is sampled from the raw
-        target distribution instead of the proper residual distribution
-        ``norm(max(0, p_target - p_draft))``.
+        autoregressive draft rollout), and acceptance is decided batch-wide
+        (one rejecting row stops the whole batch). The probability correction
+        itself follows standard speculative sampling.
 
         Returns:
             Input ids concatenated with accepted tokens (plus one bonus
@@ -94,7 +92,11 @@ class SpeculativeDecoder(nn.Module):
                 ):
                     accepted.append(draft_token)
                 else:
-                    accepted.append(self._sample(step_logits))
+                    accepted.append(
+                        self._sample_residual(
+                            draft_window[:, step], step_logits[:, 0]
+                        )
+                    )
                     break
         else:
             if self.append_bonus_token:
@@ -129,6 +131,29 @@ class SpeculativeDecoder(nn.Module):
         flat = probabilities.reshape(-1, probabilities.size(-1))
         sampled = torch.multinomial(flat, 1)
         return sampled.reshape(probabilities.shape[:-1])
+
+    def _sample_residual(
+        self,
+        draft_logits: torch.Tensor,
+        target_logits: torch.Tensor,
+    ) -> torch.Tensor:
+        """Sample the correction distribution after rejecting a draft.
+
+        Standard speculative decoding samples from the normalized positive
+        difference ``max(0, p_target - p_draft)``. Numerical or identical-
+        distribution edge cases can leave zero total mass; those rows safely
+        fall back to the target distribution.
+        """
+        p_draft = torch.softmax(draft_logits / self.temperature, dim=-1)
+        p_target = torch.softmax(target_logits / self.temperature, dim=-1)
+        residual = (p_target - p_draft).clamp_min(0.0)
+        total = residual.sum(dim=-1, keepdim=True)
+        probabilities = torch.where(
+            total > 1e-12,
+            residual / total.clamp_min(1e-12),
+            p_target,
+        )
+        return torch.multinomial(probabilities, 1)
 
     def extra_repr(self) -> str:
         return (

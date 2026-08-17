@@ -12,6 +12,7 @@ from llminfra import (
     ALiBiBias,
     DynamicNTKRotaryEmbedding,
     LongRoPEScaledRotaryEmbedding,
+    MultiModalRotaryPositionEmbedding,
     PartialRotaryPositionEmbedding,
     PositionInterpolation,
     RotaryPositionEmbedding,
@@ -121,3 +122,32 @@ def test_positional_factory_new_modes():
         ),
         PositionInterpolation,
     )
+    assert isinstance(
+        get_positional_encoding("mrope", dim=8, mrope_section=(1, 1, 2)),
+        MultiModalRotaryPositionEmbedding,
+    )
+
+
+def test_mrope_preserves_norm_and_uses_independent_axes():
+    mrope = MultiModalRotaryPositionEmbedding(8, mrope_section=(1, 1, 2))
+    x = torch.randn(2, 3, 5, 8)
+    position_ids = torch.stack(
+        [
+            torch.arange(5).expand(2, -1),
+            torch.zeros(2, 5, dtype=torch.long),
+            torch.arange(5).flip(0).expand(2, -1),
+        ]
+    )
+    output = mrope(x, position_ids)
+    assert output.shape == x.shape
+    torch.testing.assert_close(
+        output.norm(dim=-1), x.norm(dim=-1), atol=1e-5, rtol=1e-4
+    )
+
+
+def test_mrope_validates_sections_and_position_shape():
+    with pytest.raises(ValueError, match="sum"):
+        MultiModalRotaryPositionEmbedding(8, mrope_section=(1, 1))
+    mrope = MultiModalRotaryPositionEmbedding(8, mrope_section=(1, 1, 2))
+    with pytest.raises(ValueError, match="position_ids"):
+        mrope(torch.randn(2, 5, 8), torch.zeros(3, 1, 5))

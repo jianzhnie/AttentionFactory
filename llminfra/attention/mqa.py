@@ -35,9 +35,14 @@ class MultiQueryAttention(BaseAttention):
     """
 
     def __init__(
-        self, hidden_size: int, num_heads: int, dropout: float = 0.1, bias: bool = True
+        self,
+        hidden_size: int,
+        num_heads: int,
+        dropout: float = 0.1,
+        bias: bool = True,
+        qk_norm: bool = False,
     ) -> None:
-        super().__init__(hidden_size, num_heads, dropout, bias)
+        super().__init__(hidden_size, num_heads, dropout, bias, qk_norm)
 
         # Projection matrices: multiple heads for queries, single head for
         # keys and values
@@ -82,6 +87,7 @@ class MultiQueryAttention(BaseAttention):
         query = self.split_head(self.q_proj(hidden_state))
         key = self.split_head(self.k_proj(hidden_state), num_heads=1)
         value = self.split_head(self.v_proj(hidden_state), num_heads=1)
+        query, key = self._apply_qk_norm(query, key)
 
         # Scaled dot-product attention; the single key/value head broadcasts
         # over all query heads:

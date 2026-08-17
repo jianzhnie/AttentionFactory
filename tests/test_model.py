@@ -273,3 +273,33 @@ def test_causal_lm_prefix_len_validation():
         model(input_ids, prefix_len=0)
     with pytest.raises(ValueError, match="prefix_len"):
         model(input_ids, prefix_len=9)
+
+
+def test_causal_lm_mtp_training_output_and_tied_weights():
+    model = CausalLMModel(
+        vocab_size=32,
+        hidden_size=16,
+        num_layers=1,
+        num_heads=2,
+        intermediate_size=32,
+        num_mtp_predictions=2,
+        tie_word_embeddings=True,
+    )
+    input_ids = torch.randint(0, 32, (2, 6))
+    output = model(input_ids, labels=input_ids, return_mtp=True)
+
+    assert output.logits.shape == (2, 6, 32)
+    assert output.loss is not None and torch.isfinite(output.loss)
+    assert output.mtp_logits is not None and len(output.mtp_logits) == 2
+    assert model.mtp_head is not None
+    assert all(
+        head.weight is model.embed_tokens.weight for head in model.mtp_head.heads
+    )
+    output.loss.backward()
+    assert model.embed_tokens.weight.grad is not None
+
+
+def test_causal_lm_return_mtp_requires_configured_head():
+    model = _make_prefix_model()
+    with pytest.raises(ValueError, match="num_mtp_predictions"):
+        model(torch.randint(0, 32, (1, 4)), return_mtp=True)

@@ -8,9 +8,13 @@ over expert ids instead of using optimized group GEMM kernels.
 
 from __future__ import annotations
 
+import math
+
 import torch
+import torch.distributed as dist
 import torch.nn.functional as F
 from torch import nn
+from torch.distributed.nn import functional as dist_nn
 
 
 class ExpertFFN(nn.Module):
@@ -85,12 +89,19 @@ class TopKRouter(nn.Module):
         scoring_func: str = "softmax",
         aux_free_balance: bool = False,
         balance_update_rate: float = 1e-3,
+        routing_strategy: str = "topk",
+        gumbel_temperature: float = 1.0,
+        gumbel_hard: bool = True,
     ) -> None:
         super().__init__()
         if top_k < 1 or top_k > num_experts:
             raise ValueError("top_k must satisfy 1 <= top_k <= num_experts")
         if scoring_func not in {"softmax", "sigmoid"}:
             raise ValueError(f"Unknown scoring_func: {scoring_func}")
+        if routing_strategy not in {"topk", "gumbel"}:
+            raise ValueError("routing_strategy must be 'topk' or 'gumbel'")
+        if gumbel_temperature <= 0:
+            raise ValueError("gumbel_temperature must be > 0")
         self.hidden_size = int(hidden_size)
         self.num_experts = int(num_experts)
         self.top_k = int(top_k)
@@ -99,6 +110,9 @@ class TopKRouter(nn.Module):
         self.scoring_func = scoring_func
         self.aux_free_balance = bool(aux_free_balance)
         self.balance_update_rate = float(balance_update_rate)
+        self.routing_strategy = routing_strategy
+        self.gumbel_temperature = float(gumbel_temperature)
+        self.gumbel_hard = bool(gumbel_hard)
         self.router = nn.Linear(hidden_size, num_experts, bias=False)
         self.noise_proj = (
             nn.Linear(hidden_size, num_experts, bias=False) if add_noise else None
@@ -135,9 +149,24 @@ class TopKRouter(nn.Module):
         selection_logits = logits
         if self.router_bias is not None:
             selection_logits = logits + self.router_bias
-        _, indices = torch.topk(selection_logits, self.top_k, dim=-1)
-        weights = logits.gather(-1, indices)
-        weights = self._score(weights)
+        if self.training and self.routing_strategy == "gumbel":
+            probabilities = F.gumbel_softmax(
+                selection_logits,
+                tau=self.gumbel_temperature,
+                hard=False,
+                dim=-1,
+            )
+            _, indices = torch.topk(probabilities, self.top_k, dim=-1)
+            if self.gumbel_hard:
+                hard_mask = torch.zeros_like(probabilities).scatter_(
+                    -1, indices, 1.0
+                )
+                probabilities = hard_mask + probabilities - probabilities.detach()
+            weights = probabilities.gather(-1, indices)
+            weights = weights / weights.sum(dim=-1, keepdim=True).clamp_min(1e-12)
+        else:
+            _, indices = torch.topk(selection_logits, self.top_k, dim=-1)
+            weights = self._score(logits.gather(-1, indices))
         weights = self.dropout(weights)
 
         if self.training and self.router_bias is not None:
@@ -170,7 +199,8 @@ class TopKRouter(nn.Module):
             f"hidden_size={self.hidden_size}, num_experts={self.num_experts}, "
             f"top_k={self.top_k}, add_noise={self.add_noise}, "
             f"scoring_func={self.scoring_func}, "
-            f"aux_free_balance={self.aux_free_balance}"
+            f"aux_free_balance={self.aux_free_balance}, "
+            f"routing_strategy={self.routing_strategy}"
         )
 
 
@@ -359,11 +389,18 @@ class DeepSeekMoE(nn.Module):
 
 
 class ExpertParallelMoE(nn.Module):
-    """Simulated expert-parallel MoE with local expert ownership.
+    """Expert-parallel MoE with a pure-PyTorch all-to-all reference path.
 
-    Each rank owns ``num_experts // world_size`` experts. The router still
-    sees the full expert set, but this rank only computes its local experts.
-    No real all-reduce or communication is implemented.
+    In a distributed process group, token/expert assignments are sent to the
+    owning rank with an autograd-aware ``all_to_all_single`` collective,
+    evaluated by local experts, and sent back to the source rank for combine.
+    Without an initialized process group the module retains a local-owner
+    simulation mode, which is useful for inspecting one rank in unit tests.
+
+    This implementation deliberately executes experts in Python loops. It
+    demonstrates the communication contract and capacity policy, but a
+    production implementation should pack tokens with fused kernels and use
+    grouped GEMM for expert execution.
     """
 
     def __init__(
@@ -376,16 +413,36 @@ class ExpertParallelMoE(nn.Module):
         rank: int = 0,
         activation: str = "silu",
         bias: bool = True,
+        capacity_factor: float | None = None,
+        process_group: dist.ProcessGroup | None = None,
+        use_distributed: bool | None = None,
     ) -> None:
         super().__init__()
-        if world_size < 1 or rank >= world_size:
+        if world_size < 1 or rank < 0 or rank >= world_size:
             raise ValueError("world_size must be >= 1 and rank < world_size")
+        if capacity_factor is not None and capacity_factor <= 0:
+            raise ValueError("capacity_factor must be > 0")
+        distributed_ready = dist.is_available() and dist.is_initialized()
+        if use_distributed is True and not distributed_ready:
+            raise RuntimeError("use_distributed=True requires an initialized group")
+        self.use_distributed = (
+            distributed_ready if use_distributed is None else use_distributed
+        )
+        self.process_group = process_group
+        if self.use_distributed:
+            actual_world_size = dist.get_world_size(process_group)
+            actual_rank = dist.get_rank(process_group)
+            if (world_size, rank) != (actual_world_size, actual_rank):
+                raise ValueError(
+                    "world_size/rank must match the initialized process group"
+                )
         self.hidden_size = int(hidden_size)
         self.num_experts = int(num_experts)
         self.intermediate_size = int(intermediate_size)
         self.top_k = int(top_k)
         self.world_size = int(world_size)
         self.rank = int(rank)
+        self.capacity_factor = capacity_factor
         self.local_expert_ids = list(
             range(self.rank, self.num_experts, self.world_size)
         )
@@ -400,9 +457,22 @@ class ExpertParallelMoE(nn.Module):
         )
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        """Compute outputs for experts owned by this rank."""
+        """Route, execute local experts, and combine token outputs."""
         flat = x.reshape(-1, self.hidden_size)
         weights, indices = self.router(flat)
+        if self.use_distributed and self.world_size > 1:
+            output = self._distributed_dispatch(flat, weights, indices)
+        else:
+            output = self._local_dispatch(flat, weights, indices)
+        return output.view_as(x)
+
+    def _local_dispatch(
+        self,
+        flat: torch.Tensor,
+        weights: torch.Tensor,
+        indices: torch.Tensor,
+    ) -> torch.Tensor:
+        """Execute only the experts owned by this rank."""
         output = torch.zeros_like(flat)
         for local_index, expert_id in enumerate(self.local_expert_ids):
             token_weights = torch.zeros(
@@ -415,17 +485,115 @@ class ExpertParallelMoE(nn.Module):
                     torch.zeros_like(weights[:, k]),
                 )
             mask = token_weights > 0
+            if self.capacity_factor is not None and mask.any():
+                capacity = max(
+                    1,
+                    math.ceil(
+                        self.capacity_factor
+                        * flat.size(0)
+                        * self.top_k
+                        / self.num_experts
+                    ),
+                )
+                selected = mask.nonzero(as_tuple=False).flatten()
+                mask[selected[capacity:]] = False
             if mask.any():
                 output[mask] += token_weights[mask].unsqueeze(-1) * self.experts[
                     local_index
                 ](flat[mask])
-        return output.view_as(x)
+        return output
+
+    def _distributed_dispatch(
+        self,
+        flat: torch.Tensor,
+        weights: torch.Tensor,
+        indices: torch.Tensor,
+    ) -> torch.Tensor:
+        """Dispatch assignments to expert owners and return them to sources."""
+        token_ids = torch.arange(flat.size(0), device=flat.device)
+        assignment_tokens = token_ids.repeat_interleave(self.top_k)
+        expert_ids = indices.reshape(-1)
+        assignment_weights = weights.reshape(-1)
+        destinations = expert_ids.remainder(self.world_size)
+        order = torch.argsort(destinations, stable=True)
+        send_counts = torch.bincount(
+            destinations, minlength=self.world_size
+        ).to(dtype=torch.int64)
+        recv_counts = torch.empty_like(send_counts)
+        dist.all_to_all_single(
+            recv_counts,
+            send_counts,
+            group=self.process_group,
+        )
+        send_splits = send_counts.tolist()
+        recv_splits = recv_counts.tolist()
+        total_received = int(recv_counts.sum().item())
+
+        send_features = flat[assignment_tokens[order]].contiguous()
+        received_features = flat.new_empty(total_received, self.hidden_size)
+        received_features = dist_nn.all_to_all_single(
+            received_features,
+            send_features,
+            output_split_sizes=recv_splits,
+            input_split_sizes=send_splits,
+            group=self.process_group,
+        )
+        received_weights = dist_nn.all_to_all_single(
+            assignment_weights.new_empty(total_received),
+            assignment_weights[order].contiguous(),
+            output_split_sizes=recv_splits,
+            input_split_sizes=send_splits,
+            group=self.process_group,
+        )
+        received_expert_ids = expert_ids.new_empty(total_received)
+        dist.all_to_all_single(
+            received_expert_ids,
+            expert_ids[order].contiguous(),
+            output_split_sizes=recv_splits,
+            input_split_sizes=send_splits,
+            group=self.process_group,
+        )
+
+        received_output = torch.zeros_like(received_features)
+        for local_index, expert_id in enumerate(self.local_expert_ids):
+            selected = (received_expert_ids == expert_id).nonzero(
+                as_tuple=False
+            ).flatten()
+            if self.capacity_factor is not None:
+                capacity = max(
+                    1,
+                    math.ceil(
+                        self.capacity_factor
+                        * max(1, total_received)
+                        / max(1, len(self.local_expert_ids))
+                    ),
+                )
+                selected = selected[:capacity]
+            if selected.numel() == 0:
+                continue
+            expert_output = self.experts[local_index](received_features[selected])
+            received_output = received_output.index_add(
+                0,
+                selected,
+                expert_output * received_weights[selected, None],
+            )
+
+        returned = dist_nn.all_to_all_single(
+            flat.new_empty(order.numel(), self.hidden_size),
+            received_output,
+            output_split_sizes=send_splits,
+            input_split_sizes=recv_splits,
+            group=self.process_group,
+        )
+        output = torch.zeros_like(flat)
+        return output.index_add(0, assignment_tokens[order], returned)
 
     def extra_repr(self) -> str:
         return (
             f"hidden_size={self.hidden_size}, num_experts={self.num_experts}, "
             f"world_size={self.world_size}, rank={self.rank}, "
-            f"local_expert_ids={self.local_expert_ids}"
+            f"local_expert_ids={self.local_expert_ids}, "
+            f"use_distributed={self.use_distributed}"
         )
 
 

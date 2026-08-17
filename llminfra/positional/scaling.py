@@ -32,6 +32,71 @@ class YaRNParameters:
     beta_slow: float = 1.0
 
 
+@dataclass(frozen=True)
+class LongRoPEPreset:
+    """Named LongRoPE coefficient set with provenance metadata.
+
+    Scalar factors are expanded over all rotary frequencies. Tuples preserve
+    frequency-specific coefficients copied from a verified model config.
+    """
+
+    original_max_position_embeddings: int
+    max_position_embeddings: int
+    long_factor: float | tuple[float, ...]
+    short_factor: float | tuple[float, ...]
+    source: str
+
+
+LONGROPE_PRESETS: dict[str, LongRoPEPreset] = {
+    "reference_uniform_256k": LongRoPEPreset(
+        4096,
+        262144,
+        4096 / 262144,
+        1.0,
+        "Uniform position interpolation reference; not official coefficients",
+    ),
+    "reference_uniform_512k": LongRoPEPreset(
+        4096,
+        524288,
+        4096 / 524288,
+        1.0,
+        "Uniform position interpolation reference; not official coefficients",
+    ),
+    "reference_uniform_1m": LongRoPEPreset(
+        4096,
+        1048576,
+        4096 / 1048576,
+        1.0,
+        "Uniform position interpolation reference; not official coefficients",
+    ),
+}
+
+
+def register_longrope_preset(
+    name: str,
+    preset: LongRoPEPreset,
+    *,
+    overwrite: bool = False,
+) -> None:
+    """Register a verified LongRoPE config for reuse by name."""
+    if not name:
+        raise ValueError("preset name must not be empty")
+    if name in LONGROPE_PRESETS and not overwrite:
+        raise ValueError(f"LongRoPE preset already exists: {name}")
+    LONGROPE_PRESETS[name] = preset
+
+
+def get_longrope_preset(name: str) -> LongRoPEPreset:
+    """Return a named LongRoPE preset or raise a descriptive error."""
+    try:
+        return LONGROPE_PRESETS[name]
+    except KeyError as error:
+        available = ", ".join(sorted(LONGROPE_PRESETS))
+        raise ValueError(
+            f"Unknown LongRoPE preset {name!r}; available: {available}"
+        ) from error
+
+
 def _yarn_find_correction_dim(
     num_rotations: float,
     dim: int,
@@ -258,6 +323,33 @@ class LongRoPEScaledRotaryEmbedding(RotaryPositionEmbedding):
             "long_factor",
             torch.tensor(long_factor, dtype=dtype),
             persistent=False,
+        )
+
+    @classmethod
+    def from_preset(
+        cls,
+        name: str,
+        *,
+        dim: int,
+        base: float = 10000.0,
+        dtype: torch.dtype = torch.float32,
+    ) -> LongRoPEScaledRotaryEmbedding:
+        """Construct an embedding from a registered coefficient set."""
+        preset = get_longrope_preset(name)
+
+        def expand_factor(factor: float | tuple[float, ...]) -> tuple[float, ...]:
+            if isinstance(factor, float):
+                return (factor,) * (dim // 2)
+            return factor
+
+        return cls(
+            dim,
+            preset.original_max_position_embeddings,
+            preset.max_position_embeddings,
+            expand_factor(preset.long_factor),
+            expand_factor(preset.short_factor),
+            base=base,
+            dtype=dtype,
         )
         self.register_buffer(
             "short_factor",

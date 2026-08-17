@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from .alibi import ALiBiBias
 from .base import BasePositionalEncoding
+from .mrope import MultiModalRotaryPositionEmbedding
 from .rope import RotaryPositionEmbedding
 from .scaling import (
     DynamicNTKRotaryEmbedding,
@@ -26,7 +27,7 @@ def get_positional_encoding(
     """Create a positional encoding module by name.
 
     Supported names: ``rope``, ``yarn``, ``ntk``, ``partial_rope``,
-    ``interpolation``, ``longrope``, ``2d`` and ``alibi``.
+    ``interpolation``, ``longrope``, ``mrope``, ``2d`` and ``alibi``.
     """
     if name == "rope":
         return RotaryPositionEmbedding(dim, max_seq_len=max_seq_len, **kwargs)
@@ -53,11 +54,28 @@ def get_positional_encoding(
             **kwargs,
         )
     if name == "longrope":
+        if "preset" in kwargs:
+            preset = kwargs.pop("preset")
+            if not isinstance(preset, str):
+                raise ValueError("longrope preset must be a string")
+            return LongRoPEScaledRotaryEmbedding.from_preset(
+                preset,
+                dim=dim,
+                dtype=kwargs.pop("dtype", torch.float32),
+            )
         if not {"long_factor", "short_factor"} <= set(kwargs):
             raise ValueError("longrope requires long_factor and short_factor")
         if "original_max_position_embeddings" not in kwargs:
             raise ValueError("longrope requires original_max_position_embeddings")
         return LongRoPEScaledRotaryEmbedding(
+            dim,
+            max_seq_len=max_seq_len,
+            **kwargs,
+        )
+    if name == "mrope":
+        if "mrope_section" not in kwargs:
+            raise ValueError("mrope requires mrope_section")
+        return MultiModalRotaryPositionEmbedding(
             dim,
             max_seq_len=max_seq_len,
             **kwargs,

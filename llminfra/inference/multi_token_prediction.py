@@ -100,10 +100,17 @@ def mtp_loss(
     for step in range(num_future):
         logits = logits_list[step][:, : labels.size(1) - step - 1]
         targets = labels[:, step + 1 :]
+        valid = targets.reshape(-1).ne(-100)
+        if not valid.any():
+            continue
         step_loss = F.cross_entropy(
-            logits.reshape(-1, logits.size(-1)), targets.reshape(-1)
+            logits.reshape(-1, logits.size(-1)),
+            targets.reshape(-1),
+            ignore_index=-100,
         )
         weight = weight_decay**step
         total = total + weight * step_loss
         weight_sum += weight
+    if weight_sum == 0:
+        return hidden_state.sum() * 0.0
     return total / weight_sum

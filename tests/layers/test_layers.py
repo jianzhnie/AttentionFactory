@@ -17,7 +17,6 @@ from llminfra import (
     SwiGLUFFN,
     TransformerBlock,
 )
-from llminfra.layers.hybrid_block import HybridSSMBlock
 
 # Batch 1 modules are imported directly from their submodules; the package
 # level exports are wired separately.
@@ -29,6 +28,7 @@ from llminfra.layers.ffn_variants import (
     ReGLUFFN,
     ffn_factory,
 )
+from llminfra.layers.hybrid_block import HybridSSMBlock
 from llminfra.layers.norm import DeepNorm, LayerNorm, LayerScale
 
 HIDDEN = 32
@@ -218,6 +218,38 @@ def test_transformer_block_post_norm_differs_from_pre_norm():
     ).eval()
     x = make_hidden_state(BATCH, SEQ, HIDDEN)
     assert not torch.allclose(pre(x), post(x))
+
+
+def test_transformer_block_supports_layernorm_and_layerscale():
+    block = TransformerBlock(
+        HIDDEN,
+        HEADS,
+        intermediate_size=64,
+        norm_type="layernorm",
+        layer_scale_init=1e-2,
+    )
+    x = make_hidden_state(BATCH, SEQ, HIDDEN).requires_grad_(True)
+    output = block(x)
+    assert output.shape == x.shape
+    assert isinstance(block.norm1, LayerNorm)
+    assert isinstance(block.attention_scale, LayerScale)
+    output.sum().backward()
+    assert block.attention_scale.weight.grad is not None
+
+
+def test_transformer_block_deepnorm_shape_and_gradient():
+    block = TransformerBlock(
+        HIDDEN,
+        HEADS,
+        intermediate_size=64,
+        norm_style="deepnorm",
+        deepnorm_alpha=2.0,
+    )
+    x = make_hidden_state(BATCH, SEQ, HIDDEN).requires_grad_(True)
+    output = block(x)
+    assert output.shape == x.shape
+    output.sum().backward()
+    assert x.grad is not None and torch.isfinite(x.grad).all()
 
 
 def test_mamba2_chunked_scan_matches_recurrent():
@@ -503,8 +535,7 @@ def test_mha_qk_norm_output_finite_and_differs():
 
 def test_mha_qk_norm_gives_unit_rms_heads():
     mha = MultiHeadAttention(HIDDEN, HEADS, dropout=0.0, qk_norm=True)
-    q = make_hidden_state(BATCH, HEADS, HIDDEN).transpose(0, 1).unsqueeze(0)
-    q = q.expand(BATCH, HEADS, SEQ, HIDDEN // HEADS).contiguous()
+    q = torch.randn(BATCH, HEADS, SEQ, HIDDEN // HEADS)
     k = q.clone()
 
     q_normed, k_normed = mha._apply_qk_norm(q, k)

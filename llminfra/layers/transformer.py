@@ -9,9 +9,10 @@ from ..attention.hybrid import HybridAttention
 from ..attention.mha import MultiHeadAttention
 from ..attention.residual import AttentionResidual
 from .ffn import SwiGLUFFN
-from .norm import RMSNorm
+from .norm import DeepNorm, LayerNorm, LayerScale, RMSNorm
 
-_NORM_STYLES = ("pre", "post", "sandwich")
+_NORM_STYLES = ("pre", "post", "sandwich", "deepnorm")
+_NORM_TYPES = ("rmsnorm", "layernorm")
 
 
 class TransformerBlock(nn.Module):
@@ -46,6 +47,10 @@ class TransformerBlock(nn.Module):
         attention_residual: When ``True`` the attention output is added back
             through a learned per-dimension gate (`AttentionResidual`)
             instead of a plain residual add.
+        norm_type: Point-wise normalization used by pre/post/sandwich styles.
+        layer_scale_init: Optional initial value for learned per-channel
+            residual-branch scaling. ``None`` disables LayerScale.
+        deepnorm_alpha: Residual multiplier for ``norm_style="deepnorm"``.
     """
 
     def __init__(
@@ -60,6 +65,9 @@ class TransformerBlock(nn.Module):
         norm_style: str = "pre",
         parallel: bool = False,
         attention_residual: bool = False,
+        norm_type: str = "rmsnorm",
+        layer_scale_init: float | None = None,
+        deepnorm_alpha: float = 1.0,
     ) -> None:
         super().__init__()
         if pre_norm is not None:
@@ -68,10 +76,17 @@ class TransformerBlock(nn.Module):
             raise ValueError(
                 f"Unknown norm_style: {norm_style!r} (expected one of {_NORM_STYLES})"
             )
+        if norm_type not in _NORM_TYPES:
+            raise ValueError(
+                f"Unknown norm_type: {norm_type!r} (expected one of {_NORM_TYPES})"
+            )
+        if norm_style == "deepnorm" and attention_residual:
+            raise ValueError("attention_residual cannot be combined with deepnorm")
         self.hidden_size = int(hidden_size)
         self.num_heads = int(num_heads)
         self.intermediate_size = int(intermediate_size)
         self.norm_style = norm_style
+        self.norm_type = norm_type
         self.parallel = bool(parallel)
         # Legacy attribute kept for backward compatibility; True only for the
         # pure pre-norm layout.
@@ -82,14 +97,27 @@ class TransformerBlock(nn.Module):
             ffn = SwiGLUFFN(hidden_size, intermediate_size)
         self.attention = attention
         self.ffn = ffn
-        self.norm1 = RMSNorm(hidden_size, eps=norm_eps)
-        self.norm2 = RMSNorm(hidden_size, eps=norm_eps)
+        norm_class: type[nn.Module] = RMSNorm if norm_type == "rmsnorm" else LayerNorm
+        self.norm1 = norm_class(hidden_size, eps=norm_eps)
+        self.norm2 = norm_class(hidden_size, eps=norm_eps)
         # Post-sublayer norms, only used by the "sandwich" style.
-        self.norm3: RMSNorm | None = None
-        self.norm4: RMSNorm | None = None
+        self.norm3: nn.Module | None = None
+        self.norm4: nn.Module | None = None
         if norm_style == "sandwich":
-            self.norm3 = RMSNorm(hidden_size, eps=norm_eps)
-            self.norm4 = RMSNorm(hidden_size, eps=norm_eps)
+            self.norm3 = norm_class(hidden_size, eps=norm_eps)
+            self.norm4 = norm_class(hidden_size, eps=norm_eps)
+        self.deepnorm1: DeepNorm | None = None
+        self.deepnorm2: DeepNorm | None = None
+        if norm_style == "deepnorm":
+            self.deepnorm1 = DeepNorm(hidden_size, alpha=deepnorm_alpha, eps=norm_eps)
+            self.deepnorm2 = DeepNorm(hidden_size, alpha=deepnorm_alpha, eps=norm_eps)
+        scale_class = (
+            (lambda: LayerScale(hidden_size, layer_scale_init))
+            if layer_scale_init is not None
+            else nn.Identity
+        )
+        self.attention_scale = scale_class()
+        self.ffn_scale = scale_class()
         self.attn_res: AttentionResidual | None = None
         if attention_residual:
             self.attn_res = AttentionResidual(hidden_size)
@@ -116,7 +144,7 @@ class TransformerBlock(nn.Module):
         """
         # Pre/sandwich feed the normalized input to the attention sublayer;
         # post feeds it the raw input and normalizes after the residual.
-        if self.norm_style == "post":
+        if self.norm_style in {"post", "deepnorm"}:
             attention_input = hidden_state
         else:
             attention_input = self.norm1(hidden_state)
@@ -152,14 +180,24 @@ class TransformerBlock(nn.Module):
         self, hidden_state: torch.Tensor, attention_output: torch.Tensor
     ) -> torch.Tensor:
         """Apply attention then FFN, each wrapped in its own residual."""
+        attention_output = self.attention_scale(attention_output)
+        if self.norm_style == "deepnorm":
+            if self.deepnorm1 is None or self.deepnorm2 is None:
+                raise RuntimeError("deepnorm modules were not initialized")
+            hidden_state = self.deepnorm1(hidden_state, attention_output)
+            return self.deepnorm2(hidden_state, self.ffn_scale(self.ffn(hidden_state)))
         if self.norm_style == "sandwich":
+            if self.norm3 is None or self.norm4 is None:
+                raise RuntimeError("sandwich norms were not initialized")
             attention_output = self.norm3(attention_output)
         hidden_state = self._add_attention_residual(hidden_state, attention_output)
         if self.norm_style == "post":
             hidden_state = self.norm1(hidden_state)
             return self.norm2(hidden_state + self.ffn(hidden_state))
-        ffn_output = self.ffn(self.norm2(hidden_state))
+        ffn_output = self.ffn_scale(self.ffn(self.norm2(hidden_state)))
         if self.norm_style == "sandwich":
+            if self.norm4 is None:
+                raise RuntimeError("sandwich FFN norm was not initialized")
             ffn_output = self.norm4(ffn_output)
         return hidden_state + ffn_output
 
@@ -167,12 +205,20 @@ class TransformerBlock(nn.Module):
         self, hidden_state: torch.Tensor, attention_output: torch.Tensor
     ) -> torch.Tensor:
         """GPT-J style parallel block: FFN reads the same input as attention."""
+        attention_output = self.attention_scale(attention_output)
+        if self.norm_style == "deepnorm":
+            if self.deepnorm1 is None:
+                raise RuntimeError("deepnorm module was not initialized")
+            combined = attention_output + self.ffn_scale(self.ffn(hidden_state))
+            return self.deepnorm1(hidden_state, combined)
         if self.norm_style == "post":
-            ffn_output = self.ffn(hidden_state)
+            ffn_output = self.ffn_scale(self.ffn(hidden_state))
             hidden_state = self._add_attention_residual(hidden_state, attention_output)
             return self.norm1(hidden_state + ffn_output)
-        ffn_output = self.ffn(self.norm2(hidden_state))
+        ffn_output = self.ffn_scale(self.ffn(self.norm2(hidden_state)))
         if self.norm_style == "sandwich":
+            if self.norm3 is None or self.norm4 is None:
+                raise RuntimeError("sandwich norms were not initialized")
             attention_output = self.norm3(attention_output)
             ffn_output = self.norm4(ffn_output)
         hidden_state = self._add_attention_residual(hidden_state, attention_output)
@@ -182,6 +228,7 @@ class TransformerBlock(nn.Module):
         return (
             f"hidden_size={self.hidden_size}, num_heads={self.num_heads}, "
             f"intermediate_size={self.intermediate_size}, "
-            f"norm_style={self.norm_style!r}, parallel={self.parallel}, "
+            f"norm_style={self.norm_style!r}, norm_type={self.norm_type!r}, "
+            f"parallel={self.parallel}, "
             f"attention_residual={self.attn_res is not None}"
         )

@@ -97,9 +97,59 @@ def test_paged_cache_clone_sequence():
     value = torch.randn(5, 2, 4)
     cache.append(0, key, value)
     cache.clone_sequence(0, 1)
+    assert cache.block_tables[0] == cache.block_tables[1]
+    assert all(
+        cache.allocator.reference_count(block_id) == 2
+        for block_id in cache.block_tables[0]
+    )
     cloned_key, cloned_value = cache.get(1)
     torch.testing.assert_close(cloned_key, key)
     torch.testing.assert_close(cloned_value, value)
+
+
+def test_paged_cache_clone_uses_copy_on_write_for_partial_tail():
+    cache = PagedAttentionCache(
+        num_blocks=8,
+        block_size=4,
+        num_heads=1,
+        head_dim=2,
+    )
+    prefix_key = torch.randn(3, 1, 2)
+    prefix_value = torch.randn(3, 1, 2)
+    cache.append(0, prefix_key, prefix_value)
+    cache.clone_sequence(0, 1)
+    shared_block = cache.block_tables[0][-1]
+
+    new_key = torch.randn(1, 1, 2)
+    new_value = torch.randn(1, 1, 2)
+    cache.append(1, new_key, new_value)
+
+    assert cache.block_tables[0][-1] == shared_block
+    assert cache.block_tables[1][-1] != shared_block
+    assert cache.allocator.reference_count(shared_block) == 1
+    original_key, _ = cache.get(0)
+    cloned_key, cloned_value = cache.get(1)
+    torch.testing.assert_close(original_key, prefix_key)
+    torch.testing.assert_close(cloned_key, torch.cat([prefix_key, new_key]))
+    torch.testing.assert_close(cloned_value, torch.cat([prefix_value, new_value]))
+
+
+def test_paged_cache_reset_preserves_blocks_owned_by_clone():
+    cache = PagedAttentionCache(
+        num_blocks=4,
+        block_size=4,
+        num_heads=1,
+        head_dim=2,
+    )
+    key = torch.randn(2, 1, 2)
+    value = torch.randn(2, 1, 2)
+    cache.append(0, key, value)
+    cache.clone_sequence(0, 1)
+    block_id = cache.block_tables[0][0]
+
+    cache.reset(0)
+    assert block_id in cache.allocator.allocated
+    torch.testing.assert_close(cache.get(1)[0], key)
 
 
 def test_on_disk_kv_store(tmp_path):
@@ -226,6 +276,18 @@ def test_speculative_decoder_rejects_short_input():
     decoder = SpeculativeDecoder(model, model, num_speculative_tokens=4)
     with pytest.raises(ValueError, match="at least num_speculative_tokens"):
         decoder(torch.zeros(1, 2, dtype=torch.long))
+
+
+def test_speculative_decoder_residual_sampling_uses_probability_difference():
+    model = _constant_model(vocab_size=4)
+    decoder = SpeculativeDecoder(model, model, temperature=1.0)
+    draft_logits = torch.tensor([[20.0, 0.0, 0.0, 0.0]])
+    target_logits = torch.tensor([[0.0, 0.0, 20.0, 0.0]])
+
+    samples = torch.cat(
+        [decoder._sample_residual(draft_logits, target_logits) for _ in range(20)]
+    )
+    assert (samples == 2).all()
 
 
 def test_eagle_speculator_validates_arguments():

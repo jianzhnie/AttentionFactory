@@ -40,6 +40,7 @@ from .inference import (
     PagedAttentionCache,
     PagedKVBlockAllocator,
     SpeculativeDecoder,
+    mtp_loss,
     paged_attention,
 )
 from .layers import (
@@ -49,7 +50,7 @@ from .layers import (
     SwiGLUFFN,
     TransformerBlock,
 )
-from .model import CausalLMModel
+from .model import CausalLMModel, CausalLMOutput
 from .moe import (
     DeepSeekMoE,
     ExpertFFN,
@@ -63,6 +64,7 @@ from .positional import (
     ALiBiBias,
     DynamicNTKRotaryEmbedding,
     LongRoPEScaledRotaryEmbedding,
+    MultiModalRotaryPositionEmbedding,
     PartialRotaryPositionEmbedding,
     PositionInterpolation,
     RotaryPositionEmbedding,
@@ -71,6 +73,12 @@ from .positional import (
     YaRNScaledRotaryEmbedding,
     apply_rotary_pos_emb,
     get_positional_encoding,
+)
+from .quantization import (
+    FakeQuantizer,
+    QATWrapper,
+    QuantizationConfig,
+    build_quantized,
 )
 from .registry import build_attention, build_positional_encoding, list_attentions
 
@@ -82,12 +90,14 @@ __all__ = [
     "BlockSparseAttention",
     "BlockSparseIndexer",
     "CausalLMModel",
+    "CausalLMOutput",
     "CompressedSparseAttention",
     "DeepSeekMoE",
     "DynamicNTKRotaryEmbedding",
     "EagleSpeculator",
     "ExpertFFN",
     "ExpertParallelMoE",
+    "FakeQuantizer",
     "FeedForward",
     "FlashAttention",
     "FlashMLA",
@@ -102,6 +112,7 @@ __all__ = [
     "MixtureOfExperts",
     "MultiHeadAttention",
     "MultiHeadLatentAttention",
+    "MultiModalRotaryPositionEmbedding",
     "MultiQueryAttention",
     "MultiTokenPredictionHead",
     "OnDiskKVStore",
@@ -109,6 +120,8 @@ __all__ = [
     "PagedKVBlockAllocator",
     "PartialRotaryPositionEmbedding",
     "PositionInterpolation",
+    "QATWrapper",
+    "QuantizationConfig",
     "RMSNorm",
     "RingAttention",
     "RotaryPositionEmbedding",
@@ -123,10 +136,12 @@ __all__ = [
     "apply_rotary_pos_emb",
     "build_attention",
     "build_positional_encoding",
+    "build_quantized",
     "flash_attention",
     "get_positional_encoding",
     "list_attentions",
     "load_balance_loss",
+    "mtp_loss",
     "paged_attention",
     "ring_attention",
 ]
