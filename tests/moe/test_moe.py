@@ -16,7 +16,7 @@ from llminfra import (
     TopKRouter,
     load_balance_loss,
 )
-from llminfra.moe.mixture import ExpertChoiceRouter, router_z_loss
+from llminfra.moe.mixture_of_experts import ExpertChoiceRouter, router_z_loss
 
 HIDDEN = 32
 HEADS = 4
@@ -167,10 +167,13 @@ def test_aux_free_balance_reduces_expert_count_variance():
     # Skewed logits: every token strongly favors expert 0.
     logits = torch.randn(256, num_experts) * 0.1
     logits[:, 0] += 2.0
-    x = torch.linalg.solve(
-        router.router.weight @ router.router.weight.T + torch.eye(num_experts),
-        logits.T,
-    ).T @ router.router.weight
+    x = (
+        torch.linalg.solve(
+            router.router.weight @ router.router.weight.T + torch.eye(num_experts),
+            logits.T,
+        ).T
+        @ router.router.weight
+    )
 
     def counts():
         _, indices = router(x)
@@ -186,7 +189,10 @@ def test_aux_free_balance_reduces_expert_count_variance():
 
 def test_aux_free_balance_updates_only_in_training():
     router = TopKRouter(
-        HIDDEN, num_experts=4, top_k=1, aux_free_balance=True,
+        HIDDEN,
+        num_experts=4,
+        top_k=1,
+        aux_free_balance=True,
         balance_update_rate=0.1,
     )
     x = torch.randn(8, HIDDEN)

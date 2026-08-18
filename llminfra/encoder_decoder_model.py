@@ -20,8 +20,8 @@ from __future__ import annotations
 import torch
 from torch import nn
 
-from .attention.base import BaseAttention
-from .attention.mha import MultiHeadAttention
+from .attention.base_attention import BaseAttention
+from .attention.multi_head_attention import MultiHeadAttention
 from .layers.feed_forward import SwiGLUFFN
 from .layers.normalization import RMSNorm
 
@@ -195,9 +195,7 @@ class DecoderBlock(nn.Module):
         self.self_attention = MultiHeadAttention(
             hidden_size, num_heads, dropout=dropout
         )
-        self.cross_attention = CrossAttention(
-            hidden_size, num_heads, dropout=dropout
-        )
+        self.cross_attention = CrossAttention(hidden_size, num_heads, dropout=dropout)
         self.ffn = SwiGLUFFN(hidden_size, intermediate_size)
         self.norm1 = RMSNorm(hidden_size, eps=norm_eps)
         self.norm2 = RMSNorm(hidden_size, eps=norm_eps)
@@ -347,9 +345,7 @@ class EncoderDecoderModel(nn.Module):
         if tgt_ids.size(0) != batch_size:
             raise ValueError("src_ids and tgt_ids batch sizes must match")
         if src_len > self.max_seq_len or tgt_len > self.max_seq_len:
-            raise ValueError(
-                f"sequence length exceeds max_seq_len {self.max_seq_len}"
-            )
+            raise ValueError(f"sequence length exceeds max_seq_len {self.max_seq_len}")
 
         # (batch, 1, 1, src_len) key padding mask for the (bidirectional)
         # encoder self-attention and for the decoder cross-attention.

@@ -1,17 +1,17 @@
-"""Tests for the PyTorch-style flashattention API (functional + nn.Module)."""
+"""Tests for the PyTorch-style FlashAttention API."""
 
 import pytest
 import torch
 from helpers import make_key_padding_mask, make_qkv, with_grad
 
 from llminfra import FlashAttention, flash_attention
-from llminfra.flashattention import (
+from llminfra.flash_attention import (
     ATTENTION_FN_REGISTRY,
     get_version_module,
     list_versions,
 )
-from llminfra.flashattention.common import FlashAttentionConfig
-from llminfra.flashattention.script_utils import validate_fp8_support
+from llminfra.flash_attention.common import FlashAttentionConfig
+from llminfra.flash_attention.script_utils import validate_fp8_support
 
 CONFIG = FlashAttentionConfig(block_size_q=8, block_size_kv=8)
 VERSIONS = list_versions()

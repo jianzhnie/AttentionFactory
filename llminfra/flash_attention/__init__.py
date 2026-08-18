@@ -30,12 +30,15 @@ from types import ModuleType
 import torch
 from torch import nn
 
-from . import fa1, fa2, fa3, fa4
+from . import flash_attention_v1 as fa1
+from . import flash_attention_v2 as fa2
+from . import flash_attention_v3 as fa3
+from . import flash_attention_v4 as fa4
 from .common import FlashAttentionConfig, reference_attention
-from .fa1 import flash_attention_v1
-from .fa2 import flash_attention_v2
-from .fa3 import flash_attention_v3
-from .fa4 import flash_attention_v4
+from .flash_attention_v1 import flash_attention_v1
+from .flash_attention_v2 import flash_attention_v2
+from .flash_attention_v3 import flash_attention_v3
+from .flash_attention_v4 import flash_attention_v4
 
 __all__ = [
     "VERSION_REGISTRY",

@@ -71,8 +71,7 @@ class MultiModalRotaryPositionEmbedding(BasePositionalEncoding):
         """
         if x.dim() not in {3, 4}:
             raise ValueError(
-                "x must have shape (batch, seq, dim) or "
-                "(batch, heads, seq, dim)"
+                "x must have shape (batch, seq, dim) or (batch, heads, seq, dim)"
             )
         if x.size(-1) != self.dim:
             raise ValueError(f"x last dimension must be {self.dim}")

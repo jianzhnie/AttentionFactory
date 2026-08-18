@@ -133,9 +133,7 @@ class TieredKVCache:
 
     def _evict_hbm(self) -> None:
         while len(self.hbm) > self.max_hbm_entries:
-            seq_id, record = min(
-                self.hbm.items(), key=lambda item: item[1].last_access
-            )
+            seq_id, record = min(self.hbm.items(), key=lambda item: item[1].last_access)
             del self.hbm[seq_id]
             self.cpu[seq_id] = _KVRecord(
                 record.key.detach().to("cpu"),
@@ -143,9 +141,7 @@ class TieredKVCache:
                 record.last_access,
             )
         while len(self.cpu) > self.max_cpu_entries:
-            seq_id, record = min(
-                self.cpu.items(), key=lambda item: item[1].last_access
-            )
+            seq_id, record = min(self.cpu.items(), key=lambda item: item[1].last_access)
             del self.cpu[seq_id]
             self.store.save(seq_id, record.key, record.value)
             self.nvme.add(seq_id)

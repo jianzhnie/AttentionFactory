@@ -16,7 +16,7 @@ import torch.distributed as dist
 from torch import nn
 from torch.distributed.nn import functional as dist_nn
 
-from .base import BaseAttention, validate_attention_inputs
+from .base_attention import BaseAttention, validate_attention_inputs
 
 
 def ring_attention(
@@ -175,9 +175,7 @@ def distributed_ring_attention(
             torch.zeros_like(scores),
         )
         old_scale = torch.exp(row_max - new_max)
-        normalizer = old_scale * normalizer + probabilities.sum(
-            dim=-1, keepdim=True
-        )
+        normalizer = old_scale * normalizer + probabilities.sum(dim=-1, keepdim=True)
         output = old_scale * output + probabilities @ current_v
         row_max = new_max
 

@@ -158,9 +158,7 @@ class TopKRouter(nn.Module):
             )
             _, indices = torch.topk(probabilities, self.top_k, dim=-1)
             if self.gumbel_hard:
-                hard_mask = torch.zeros_like(probabilities).scatter_(
-                    -1, indices, 1.0
-                )
+                hard_mask = torch.zeros_like(probabilities).scatter_(-1, indices, 1.0)
                 probabilities = hard_mask + probabilities - probabilities.detach()
             weights = probabilities.gather(-1, indices)
             weights = weights / weights.sum(dim=-1, keepdim=True).clamp_min(1e-12)
@@ -183,9 +181,9 @@ class TopKRouter(nn.Module):
     @torch.no_grad()
     def _update_router_bias(self, indices: torch.Tensor) -> None:
         """Step the bias by ``u * sign(target_load - load)`` per expert."""
-        counts = torch.bincount(
-            indices.reshape(-1), minlength=self.num_experts
-        ).to(torch.float32)
+        counts = torch.bincount(indices.reshape(-1), minlength=self.num_experts).to(
+            torch.float32
+        )
         target = indices.numel() / self.num_experts
         violation = target - counts
         self.router_bias.add_(self.balance_update_rate * torch.sign(violation))
@@ -516,9 +514,9 @@ class ExpertParallelMoE(nn.Module):
         assignment_weights = weights.reshape(-1)
         destinations = expert_ids.remainder(self.world_size)
         order = torch.argsort(destinations, stable=True)
-        send_counts = torch.bincount(
-            destinations, minlength=self.world_size
-        ).to(dtype=torch.int64)
+        send_counts = torch.bincount(destinations, minlength=self.world_size).to(
+            dtype=torch.int64
+        )
         recv_counts = torch.empty_like(send_counts)
         dist.all_to_all_single(
             recv_counts,
@@ -556,9 +554,9 @@ class ExpertParallelMoE(nn.Module):
 
         received_output = torch.zeros_like(received_features)
         for local_index, expert_id in enumerate(self.local_expert_ids):
-            selected = (received_expert_ids == expert_id).nonzero(
-                as_tuple=False
-            ).flatten()
+            selected = (
+                (received_expert_ids == expert_id).nonzero(as_tuple=False).flatten()
+            )
             if self.capacity_factor is not None:
                 capacity = max(
                     1,

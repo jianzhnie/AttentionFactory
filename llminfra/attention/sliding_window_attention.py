@@ -12,7 +12,7 @@ from __future__ import annotations
 import torch
 from torch import nn
 
-from .base import BaseAttention, validate_attention_inputs
+from .base_attention import BaseAttention, validate_attention_inputs
 
 
 class SlidingWindowAttention(BaseAttention):

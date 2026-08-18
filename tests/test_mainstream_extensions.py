@@ -32,7 +32,7 @@ def test_mainstream_modules_are_available_from_package_root():
         "LayerNorm",
         "LayerScale",
         "ReGLUFFN",
-        "ffn_factory",
+        "build_feed_forward",
         "router_z_loss",
     }
     assert public_names <= set(llminfra.__all__)

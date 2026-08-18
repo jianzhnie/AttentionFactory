@@ -10,9 +10,9 @@ from __future__ import annotations
 
 import torch
 
-from .base import BaseAttention, validate_attention_inputs
-from .gqa import GroupQueryAttention
-from .linear import LinearAttention
+from .base_attention import BaseAttention, validate_attention_inputs
+from .grouped_query_attention import GroupQueryAttention
+from .linear_attention import LinearAttention
 
 
 class HybridAttention(BaseAttention):

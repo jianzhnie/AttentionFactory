@@ -14,8 +14,8 @@ from __future__ import annotations
 import torch
 from torch import nn
 
-from ..attention.linear import LinearAttention
-from ..attention.mha import MultiHeadAttention
+from ..attention.linear_attention import LinearAttention
+from ..attention.multi_head_attention import MultiHeadAttention
 from .feed_forward import SwiGLUFFN
 from .normalization import RMSNorm
 from .state_space import Mamba2Layer, Mamba2State

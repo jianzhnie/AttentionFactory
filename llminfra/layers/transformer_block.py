@@ -5,9 +5,9 @@ from __future__ import annotations
 import torch
 from torch import nn
 
-from ..attention.hybrid import HybridAttention
-from ..attention.mha import MultiHeadAttention
-from ..attention.residual import AttentionResidual
+from ..attention.attention_residual import AttentionResidual
+from ..attention.hybrid_attention import HybridAttention
+from ..attention.multi_head_attention import MultiHeadAttention
 from .feed_forward import SwiGLUFFN
 from .hyper_connection import ManifoldConstrainedHyperConnection
 from .normalization import DeepNorm, LayerNorm, LayerScale, RMSNorm
@@ -99,9 +99,7 @@ class TransformerBlock(nn.Module):
                 "manifold_hyper_connection cannot be combined with deepnorm"
             )
         if manifold_hyper_connection and parallel:
-            raise ValueError(
-                "manifold_hyper_connection requires sequential sublayers"
-            )
+            raise ValueError("manifold_hyper_connection requires sequential sublayers")
         self.hidden_size = int(hidden_size)
         self.num_heads = int(num_heads)
         self.intermediate_size = int(intermediate_size)

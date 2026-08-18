@@ -20,13 +20,13 @@ from llminfra import (
 
 # Batch 1 modules are imported directly from their submodules; the package
 # level exports are wired separately.
-from llminfra.attention.mha import MultiHeadAttention
+from llminfra.attention.multi_head_attention import MultiHeadAttention
 from llminfra.layers.activations import ACTIVATIONS, get_activation
 from llminfra.layers.gated_feed_forward import (
     ClampedSwiGLUFFN,
     GeGLUFFN,
     ReGLUFFN,
-    ffn_factory,
+    build_feed_forward,
 )
 from llminfra.layers.hybrid_layers import HybridSSMBlock
 from llminfra.layers.normalization import DeepNorm, LayerNorm, LayerScale
@@ -35,6 +35,7 @@ HIDDEN = 32
 HEADS = 4
 SEQ = 7
 BATCH = 2
+
 
 def test_rms_norm_normalizes_last_dimension():
     norm = RMSNorm(HIDDEN)
@@ -418,31 +419,31 @@ def test_clamped_swiglu_ffn_clamp_takes_effect():
     assert not torch.allclose(tight(x), loose(x))
 
 
-def test_ffn_factory_sizing_rules():
-    ffn_4x = ffn_factory("4x", HIDDEN)
+def test_build_feed_forward_sizing_rules():
+    ffn_4x = build_feed_forward("4x", HIDDEN)
     assert isinstance(ffn_4x, FeedForward)
     assert ffn_4x.intermediate_size == 4 * HIDDEN
 
-    ffn_llama = ffn_factory("8/3x", HIDDEN)
+    ffn_llama = build_feed_forward("8/3x", HIDDEN)
     assert isinstance(ffn_llama, SwiGLUFFN)
     assert ffn_llama.intermediate_size == round(8 * HIDDEN / 3)
 
-    ffn_custom = ffn_factory("custom", HIDDEN, ratio=2.5)
+    ffn_custom = build_feed_forward("custom", HIDDEN, ratio=2.5)
     assert isinstance(ffn_custom, SwiGLUFFN)
     assert ffn_custom.intermediate_size == round(2.5 * HIDDEN)
 
-    ffn_override = ffn_factory("4x", HIDDEN, intermediate_size=17)
+    ffn_override = build_feed_forward("4x", HIDDEN, intermediate_size=17)
     assert ffn_override.intermediate_size == 17
 
     out = ffn_llama(make_hidden_state(BATCH, SEQ, HIDDEN))
     assert out.shape == (BATCH, SEQ, HIDDEN)
 
 
-def test_ffn_factory_invalid_args_raise():
+def test_build_feed_forward_invalid_args_raise():
     with pytest.raises(ValueError, match="Unknown ffn kind"):
-        ffn_factory("5x", HIDDEN)
+        build_feed_forward("5x", HIDDEN)
     with pytest.raises(ValueError, match="ratio"):
-        ffn_factory("custom", HIDDEN)
+        build_feed_forward("custom", HIDDEN)
 
 
 def test_layer_norm_normalizes_last_dimension():
@@ -496,9 +497,7 @@ def test_deepnorm_residual_scaling_formula():
 def test_deepnorm_shape_and_gradient():
     deepnorm = DeepNorm(HIDDEN, alpha=2.0)
     residual = make_hidden_state(BATCH, SEQ, HIDDEN, seed=0)
-    sublayer_output = make_hidden_state(BATCH, SEQ, HIDDEN, seed=1).requires_grad_(
-        True
-    )
+    sublayer_output = make_hidden_state(BATCH, SEQ, HIDDEN, seed=1).requires_grad_(True)
     out = deepnorm(residual, sublayer_output)
     assert out.shape == residual.shape
     assert torch.isfinite(out).all()

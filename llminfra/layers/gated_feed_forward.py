@@ -4,7 +4,7 @@ GeGLU/ReGLU share the gate/up/down structure of
 :class:`~llminfra.layers.feed_forward.SwiGLUFFN` but swap the gating activation, as
 studied in "GLU Variants Improve Transformer" (Shazeer, 2020).
 :class:`ClampedSwiGLUFFN` is a teaching-grade simplification of the GPT-OSS
-FFN, and :func:`ffn_factory` builds an FFN from a sizing rule.
+FFN, and :func:`build_feed_forward` builds an FFN from a sizing rule.
 """
 
 from __future__ import annotations
@@ -138,7 +138,7 @@ class ClampedSwiGLUFFN(_GatedFFN):
         )
 
 
-def ffn_factory(
+def build_feed_forward(
     kind: str,
     hidden_size: int,
     intermediate_size: int | None = None,
@@ -184,7 +184,7 @@ def ffn_factory(
     elif kind == "custom":
         if ratio is None or ratio <= 0:
             raise ValueError(
-                "ffn_factory(kind='custom') requires a positive ratio"
+                "build_feed_forward(kind='custom') requires a positive ratio"
             )
         derived = round(ratio * hidden_size)
         module_cls = SwiGLUFFN

@@ -7,7 +7,7 @@ from collections.abc import Callable, Sequence
 import torch
 from torch import nn
 
-from .speculative import SpeculativeDecoder
+from .speculative_decoder import SpeculativeDecoder
 
 
 class DSparkScheduler:

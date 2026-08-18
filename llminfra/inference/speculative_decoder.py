@@ -125,9 +125,7 @@ class SpeculativeDecoder(nn.Module):
                 num_accepted += 1
             else:
                 accepted.append(
-                    self._sample_residual(
-                        draft_step_logits[step], target_step_logits
-                    )
+                    self._sample_residual(draft_step_logits[step], target_step_logits)
                 )
                 break
         else:

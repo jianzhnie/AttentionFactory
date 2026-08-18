@@ -73,9 +73,7 @@ class FakeQuantizer(nn.Module):
         axis = self.config.channel_axis % tensor.dim()
         return tuple(dim for dim in range(tensor.dim()) if dim != axis)
 
-    def _fake_symmetric_integer(
-        self, tensor: torch.Tensor, bits: int
-    ) -> torch.Tensor:
+    def _fake_symmetric_integer(self, tensor: torch.Tensor, bits: int) -> torch.Tensor:
         qmax = 2 ** (bits - 1) - 1
         reduce_dims = self._reduction_dims(tensor)
         if reduce_dims:

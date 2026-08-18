@@ -5,7 +5,7 @@ from __future__ import annotations
 import torch
 from torch import nn
 
-from .mixture import MixtureOfExperts
+from .mixture_of_experts import MixtureOfExperts
 
 
 class LatentMoE(nn.Module):

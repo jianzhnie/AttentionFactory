@@ -2,22 +2,22 @@
 
 from __future__ import annotations
 
-from .attention.alibi import ALiBiAttention
-from .attention.base import BaseAttention
-from .attention.block_sparse import BlockSparseAttention
-from .attention.compressed_sparse import CompressedSparseAttention
+from .attention.alibi_attention import ALiBiAttention
+from .attention.base_attention import BaseAttention
+from .attention.block_sparse_attention import BlockSparseAttention
+from .attention.compressed_sparse_attention import CompressedSparseAttention
 from .attention.gated_delta_net import GatedDeltaNet
-from .attention.gqa import GroupQueryAttention
-from .attention.hybrid import HybridAttention
-from .attention.kda import KimiDeltaAttention
-from .attention.lightning import LightningAttention
-from .attention.linear import LinearAttention
-from .attention.mha import MultiHeadAttention
-from .attention.mla import MultiHeadLatentAttention
-from .attention.mqa import MultiQueryAttention
-from .attention.ring import RingAttention
-from .attention.sliding_window import SlidingWindowAttention
-from .attention.sparse_variants import (
+from .attention.grouped_query_attention import GroupQueryAttention
+from .attention.hybrid_attention import HybridAttention
+from .attention.kimi_delta_attention import KimiDeltaAttention
+from .attention.lightning_attention import LightningAttention
+from .attention.linear_attention import LinearAttention
+from .attention.multi_head_attention import MultiHeadAttention
+from .attention.multi_head_latent_attention import MultiHeadLatentAttention
+from .attention.multi_query_attention import MultiQueryAttention
+from .attention.ring_attention import RingAttention
+from .attention.sliding_window_attention import SlidingWindowAttention
+from .attention.sparse_attention import (
     DynamicSparseAttention,
     HierarchicalCompressedAttention,
     MiniMaxSparseAttention,

@@ -122,9 +122,7 @@ class BaseAttention(nn.Module, ABC):
         """
         if not self.qk_norm:
             return query, key
-        return F.rms_norm(query, (self.head_dim,)), F.rms_norm(
-            key, (self.head_dim,)
-        )
+        return F.rms_norm(query, (self.head_dim,)), F.rms_norm(key, (self.head_dim,))
 
     def combine_head(self, x: torch.Tensor) -> torch.Tensor:
         """Combine multiple attention heads into single tensor.

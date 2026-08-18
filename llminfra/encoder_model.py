@@ -7,20 +7,20 @@ from dataclasses import dataclass
 import torch
 from torch import nn
 
-from .encoder_decoder import EncoderBlock
-from .heads import (
+from .encoder_decoder_model import EncoderBlock
+from .layers.normalization import LayerNorm, RMSNorm
+from .module_registry import build_positional_encoding
+from .output_heads import (
     EmbeddingHead,
     RewardModelHead,
     SequenceClassificationHead,
     TokenClassificationHead,
     pool_hidden_state,
 )
-from .layers.normalization import LayerNorm, RMSNorm
 from .positional.classic_position import (
     LearnedAbsolutePositionEmbedding,
     SinusoidalPositionEmbedding,
 )
-from .registry import build_positional_encoding
 
 
 @dataclass
@@ -162,8 +162,7 @@ class EncoderOnlyModel(nn.Module):
             if token_type_ids.shape != input_ids.shape:
                 raise ValueError("token_type_ids must have the same shape as input_ids")
             if token_type_ids.numel() and (
-                token_type_ids.min() < 0
-                or token_type_ids.max() >= self.type_vocab_size
+                token_type_ids.min() < 0 or token_type_ids.max() >= self.type_vocab_size
             ):
                 raise ValueError("token_type_ids contain an out-of-range id")
             hidden_state = hidden_state + self.token_type_embeddings(token_type_ids)

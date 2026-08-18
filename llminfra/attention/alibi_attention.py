@@ -6,7 +6,7 @@ import torch
 from torch import nn
 
 from ..positional import ALiBiBias
-from .base import BaseAttention, validate_attention_inputs
+from .base_attention import BaseAttention, validate_attention_inputs
 
 
 class ALiBiAttention(BaseAttention):

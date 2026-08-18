@@ -14,9 +14,9 @@ import torch
 import torch.nn.functional as F
 from torch import nn
 
-from .base import BaseAttention, validate_attention_inputs
-from .block_sparse import BlockSparseAttention
-from .compressed_sparse import CompressedSparseAttention
+from .base_attention import BaseAttention, validate_attention_inputs
+from .block_sparse_attention import BlockSparseAttention
+from .compressed_sparse_attention import CompressedSparseAttention
 
 
 class QueryKeyBlockIndexer(nn.Module):
@@ -306,9 +306,7 @@ class HierarchicalCompressedAttention(BaseAttention):
     ) -> None:
         super().__init__(hidden_size, num_heads, dropout, bias)
         if fine_compress_ratio < 1 or coarse_compress_ratio <= fine_compress_ratio:
-            raise ValueError(
-                "compression ratios must satisfy 1 <= fine < coarse"
-            )
+            raise ValueError("compression ratios must satisfy 1 <= fine < coarse")
         if max_seq_len < coarse_compress_ratio:
             raise ValueError("max_seq_len must cover at least one coarse block")
         self.fine_compress_ratio = int(fine_compress_ratio)

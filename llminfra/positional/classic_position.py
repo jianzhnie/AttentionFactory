@@ -58,8 +58,7 @@ class SinusoidalPositionEmbedding(BasePositionalEncoding):
 
         position = torch.arange(max_seq_len, dtype=torch.float32)[:, None]
         frequencies = torch.exp(
-            torch.arange(0, dim, 2, dtype=torch.float32)
-            * (-math.log(base) / dim)
+            torch.arange(0, dim, 2, dtype=torch.float32) * (-math.log(base) / dim)
         )
         angles = position * frequencies[None]
         encoding = torch.zeros(max_seq_len, dim, dtype=torch.float32)
@@ -191,9 +190,7 @@ class T5RelativePositionBias(BasePositionalEncoding):
             resolved_key_length = query_length if key_length is None else key_length
         elif x is None:
             query_length = self.max_seq_len
-            resolved_key_length = (
-                self.max_seq_len if key_length is None else key_length
-            )
+            resolved_key_length = self.max_seq_len if key_length is None else key_length
         else:
             raise TypeError("x must be a tensor, int, length tuple, or None")
         if min(query_length, resolved_key_length) < 1:

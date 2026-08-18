@@ -8,7 +8,7 @@ on the vision input).
 import pytest
 import torch
 
-from llminfra.multimodal import CrossAttentionFuser, VisionEncoderAdapter
+from llminfra.multimodal_model import CrossAttentionFuser, VisionEncoderAdapter
 
 
 def test_vision_encoder_adapter_shape():
@@ -30,9 +30,7 @@ def test_cross_attention_fuser_shape_and_weights():
     fuser = CrossAttentionFuser(hidden_size=16, num_heads=2)
     text_state = torch.randn(2, 5, 16)
     vision_state = torch.randn(2, 12, 16)
-    fused, weights = fuser(
-        text_state, vision_state, return_attention_weights=True
-    )
+    fused, weights = fuser(text_state, vision_state, return_attention_weights=True)
     assert fused.shape == (2, 5, 16)
     assert weights.shape == (2, 2, 5, 12)
     # Attention weights over the vision tokens are normalized per text token.

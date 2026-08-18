@@ -10,14 +10,14 @@ for public APIs and use subpackages when working on an implementation.
 | `layers/` | Feed-forward, normalization, SSM, residual and Transformer blocks |
 | `moe/` | Routers, experts, latent MoE and expert-parallel references |
 | `inference/` | KV paging/offload, MTP and speculative decoding |
-| `flashattention/` | Educational FlashAttention v1-v4 implementations |
-| `model.py` | Decoder-only and prefix language-model composition |
-| `encoder.py` | Encoder-only model composition |
-| `encoder_decoder.py` | Encoder-decoder and cross-attention composition |
-| `multimodal.py` | Vision adapters and multimodal fusion |
-| `heads.py` | Classification, reward and embedding output heads |
+| `flash_attention/` | Educational FlashAttention v1-v4 implementations |
+| `language_model.py` | Decoder-only and prefix language-model composition |
+| `encoder_model.py` | Encoder-only model composition |
+| `encoder_decoder_model.py` | Encoder-decoder and cross-attention composition |
+| `multimodal_model.py` | Vision adapters and multimodal fusion |
+| `output_heads.py` | Classification, reward and embedding output heads |
 | `quantization.py` | Fake quantization and QAT wrappers |
-| `registry.py` | Public factories and implementation registries |
+| `module_registry.py` | Public factories and implementation registries |
 
 ## Naming conventions
 

@@ -84,7 +84,6 @@ def get_activation(name: str) -> Callable[[torch.Tensor], torch.Tensor]:
     """
     if name not in ACTIVATIONS:
         raise ValueError(
-            f"Unknown activation: {name!r}. "
-            f"Available: {sorted(ACTIVATIONS)}"
+            f"Unknown activation: {name!r}. Available: {sorted(ACTIVATIONS)}"
         )
     return ACTIVATIONS[name]

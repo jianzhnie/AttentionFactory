@@ -124,9 +124,7 @@ class PagedAttentionCache:
                 shared_block = block_table[-1]
                 private_block = self.allocator.allocate()
                 self.key_cache[private_block].copy_(self.key_cache[shared_block])
-                self.value_cache[private_block].copy_(
-                    self.value_cache[shared_block]
-                )
+                self.value_cache[private_block].copy_(self.value_cache[shared_block])
                 block_table[-1] = private_block
                 self.allocator.free(shared_block)
             physical_block = block_table[-1]

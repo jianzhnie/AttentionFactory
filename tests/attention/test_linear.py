@@ -128,9 +128,7 @@ def test_gated_delta_net_accepts_combined_causal_mask():
     """A dense causal mask must reduce to its key-padding component."""
     layer = GatedDeltaNet(HIDDEN, HEADS, feature_dim=8).eval()
     x = make_hidden_state(BATCH, SEQ, HIDDEN)
-    causal_mask = torch.tril(
-        torch.ones(BATCH, 1, SEQ, SEQ, dtype=torch.bool)
-    )
+    causal_mask = torch.tril(torch.ones(BATCH, 1, SEQ, SEQ, dtype=torch.bool))
     torch.testing.assert_close(layer(x, attention_mask=causal_mask), layer(x))
 
 

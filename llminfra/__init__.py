@@ -3,7 +3,7 @@
 The package is organized into subpackages by role:
 
 - `attention`: classic, sparse, linear and hybrid attention variants
-- `flashattention`: educational FlashAttention v1-v4 implementations
+- `flash_attention`: educational FlashAttention v1-v4 implementations
 - `layers`: FFN / norm / SSM / transformer block layers
 - `moe`: Mixture-of-Experts components
 - `inference`: KV cache, paging and decoding utilities
@@ -40,21 +40,14 @@ from .attention import (
     distributed_ring_attention,
     ring_attention,
 )
-from .encoder import EncoderOnlyModel, EncoderOutput
-from .encoder_decoder import (
+from .encoder_decoder_model import (
     CrossAttention,
     DecoderBlock,
     EncoderBlock,
     EncoderDecoderModel,
 )
-from .flashattention import FlashAttention, flash_attention
-from .heads import (
-    EmbeddingHead,
-    RewardModelHead,
-    SequenceClassificationHead,
-    TokenClassificationHead,
-    pool_hidden_state,
-)
+from .encoder_model import EncoderOnlyModel, EncoderOutput
+from .flash_attention import FlashAttention, flash_attention
 from .inference import (
     BlockSparseIndexer,
     DSparkDecoder,
@@ -71,6 +64,7 @@ from .inference import (
     mtp_loss,
     paged_attention,
 )
+from .language_model import CausalLMModel, CausalLMOutput, PrefixLMModel
 from .layers import (
     ACTIVATIONS,
     ClampedSwiGLUFFN,
@@ -88,10 +82,10 @@ from .layers import (
     RMSNorm,
     SwiGLUFFN,
     TransformerBlock,
-    ffn_factory,
+    build_feed_forward,
     get_activation,
 )
-from .model import CausalLMModel, CausalLMOutput, PrefixLMModel
+from .module_registry import build_attention, build_positional_encoding, list_attentions
 from .moe import (
     DeepSeekMoE,
     ExpertChoiceRouter,
@@ -103,12 +97,19 @@ from .moe import (
     load_balance_loss,
     router_z_loss,
 )
-from .multimodal import (
+from .multimodal_model import (
     CrossAttentionFuser,
     MultimodalCausalLM,
     MultimodalCausalLMOutput,
     VisionEncoderAdapter,
     build_multimodal_position_ids,
+)
+from .output_heads import (
+    EmbeddingHead,
+    RewardModelHead,
+    SequenceClassificationHead,
+    TokenClassificationHead,
+    pool_hidden_state,
 )
 from .positional import (
     LONGROPE_PRESETS,
@@ -139,7 +140,6 @@ from .quantization import (
     QuantizationConfig,
     build_quantized,
 )
-from .registry import build_attention, build_positional_encoding, list_attentions
 
 __all__ = [
     "ACTIVATIONS",
@@ -239,11 +239,11 @@ __all__ = [
     "YaRNScaledRotaryEmbedding",
     "apply_rotary_pos_emb",
     "build_attention",
+    "build_feed_forward",
     "build_multimodal_position_ids",
     "build_positional_encoding",
     "build_quantized",
     "distributed_ring_attention",
-    "ffn_factory",
     "flash_attention",
     "get_activation",
     "get_longrope_preset",

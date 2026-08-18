@@ -228,9 +228,7 @@ class Mamba2Layer(nn.Module):
             chunk_size: Positive chunk width for ``scan="chunked"``.
         """
         if x.dim() != 3 or x.size(-1) != self.hidden_size:
-            raise ValueError(
-                f"x must have shape (batch, seq, {self.hidden_size})"
-            )
+            raise ValueError(f"x must have shape (batch, seq, {self.hidden_size})")
         if scan not in {"recurrent", "chunked"}:
             raise ValueError(f"scan must be 'recurrent' or 'chunked', got {scan!r}")
         if chunk_size < 1:
@@ -253,9 +251,7 @@ class Mamba2Layer(nn.Module):
         dt = F.softplus(self.dt_proj(x)).clamp(self.dt_min, self.dt_max)
 
         if scan == "chunked":
-            y, ssm_state = self._chunked_scan(
-                u, b, c, dt, state.ssm, chunk_size
-            )
+            y, ssm_state = self._chunked_scan(u, b, c, dt, state.ssm, chunk_size)
         else:
             y, ssm_state = self._recurrent_scan(u, b, c, dt, state.ssm)
         output = self.out_proj(y * F.silu(gate))

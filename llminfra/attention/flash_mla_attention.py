@@ -11,7 +11,7 @@ from __future__ import annotations
 import torch
 from torch import nn
 
-from .mla import MultiHeadLatentAttention
+from .multi_head_latent_attention import MultiHeadLatentAttention
 
 
 class FlashMLA(nn.Module):

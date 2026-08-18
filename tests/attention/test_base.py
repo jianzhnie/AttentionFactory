@@ -4,7 +4,7 @@ import pytest
 import torch
 
 from llminfra import MultiHeadAttention
-from llminfra.attention.base import validate_attention_inputs
+from llminfra.attention.base_attention import validate_attention_inputs
 
 
 @pytest.fixture()

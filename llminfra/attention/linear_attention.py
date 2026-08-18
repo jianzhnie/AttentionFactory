@@ -13,7 +13,7 @@ import torch
 import torch.nn.functional as F
 from torch import nn
 
-from .base import BaseAttention, validate_attention_inputs
+from .base_attention import BaseAttention, validate_attention_inputs
 
 
 class LinearAttention(BaseAttention):

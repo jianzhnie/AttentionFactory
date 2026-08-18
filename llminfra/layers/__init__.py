@@ -2,7 +2,7 @@
 
 from .activations import ACTIVATIONS, get_activation
 from .feed_forward import FeedForward, SwiGLUFFN
-from .gated_feed_forward import ClampedSwiGLUFFN, GeGLUFFN, ReGLUFFN, ffn_factory
+from .gated_feed_forward import ClampedSwiGLUFFN, GeGLUFFN, ReGLUFFN, build_feed_forward
 from .hybrid_layers import HybridLayerStack, HybridSSMBlock
 from .hyper_connection import ManifoldConstrainedHyperConnection
 from .normalization import DeepNorm, LayerNorm, LayerScale, RMSNorm
@@ -26,6 +26,6 @@ __all__ = [
     "ReGLUFFN",
     "SwiGLUFFN",
     "TransformerBlock",
-    "ffn_factory",
+    "build_feed_forward",
     "get_activation",
 ]

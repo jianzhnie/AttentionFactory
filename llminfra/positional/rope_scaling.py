@@ -356,6 +356,7 @@ class LongRoPEScaledRotaryEmbedding(RotaryPositionEmbedding):
             base=base,
             dtype=dtype,
         )
+
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         """Apply LongRoPE with the appropriate frequency factor."""
         seq_len = x.size(-2)
