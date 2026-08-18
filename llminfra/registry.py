@@ -9,6 +9,7 @@ from .attention.compressed_sparse import CompressedSparseAttention
 from .attention.gated_delta_net import GatedDeltaNet
 from .attention.gqa import GroupQueryAttention
 from .attention.hybrid import HybridAttention
+from .attention.kda import KimiDeltaAttention
 from .attention.lightning import LightningAttention
 from .attention.linear import LinearAttention
 from .attention.mha import MultiHeadAttention
@@ -16,6 +17,11 @@ from .attention.mla import MultiHeadLatentAttention
 from .attention.mqa import MultiQueryAttention
 from .attention.ring import RingAttention
 from .attention.sliding_window import SlidingWindowAttention
+from .attention.sparse_variants import (
+    DynamicSparseAttention,
+    HierarchicalCompressedAttention,
+    MiniMaxSparseAttention,
+)
 from .positional import (
     BasePositionalEncoding,
     get_positional_encoding,
@@ -30,11 +36,19 @@ ATTENTION_REGISTRY: dict[str, type[BaseAttention]] = {
     "swa": SlidingWindowAttention,
     "block_sparse": BlockSparseAttention,
     "compressed_sparse": CompressedSparseAttention,
+    "dsa": DynamicSparseAttention,
+    "dynamic_sparse": DynamicSparseAttention,
+    "msa": MiniMaxSparseAttention,
+    "minimax_sparse": MiniMaxSparseAttention,
+    "hca": HierarchicalCompressedAttention,
+    "hierarchical_compressed": HierarchicalCompressedAttention,
     "ring": RingAttention,
     "linear": LinearAttention,
     "lightning": LightningAttention,
     "gated_delta": GatedDeltaNet,
     "hybrid": HybridAttention,
+    "kda": KimiDeltaAttention,
+    "kimi_delta": KimiDeltaAttention,
 }
 
 

@@ -21,6 +21,11 @@ def gelu_exact(x: torch.Tensor) -> torch.Tensor:
     return F.gelu(x)
 
 
+def gelu_erf(x: torch.Tensor) -> torch.Tensor:
+    """Explicit alias for exact GELU's error-function formulation."""
+    return gelu_exact(x)
+
+
 def gelu_tanh(x: torch.Tensor) -> torch.Tensor:
     """GELU with the tanh approximation used by GPT-2/BERT-style models."""
     return F.gelu(x, approximate="tanh")
@@ -53,10 +58,13 @@ def clamped_silu(x: torch.Tensor) -> torch.Tensor:
 #: Registry mapping activation names to their implementations.
 ACTIVATIONS: dict[str, Callable[[torch.Tensor], torch.Tensor]] = {
     "gelu": gelu_exact,
+    "gelu_erf": gelu_erf,
+    "gelu_exact": gelu_exact,
     "gelu_tanh": gelu_tanh,
     "relu": relu,
     "squared_relu": squared_relu,
     "silu": silu,
+    "swish": silu,
     "clamped_silu": clamped_silu,
 }
 
@@ -65,8 +73,8 @@ def get_activation(name: str) -> Callable[[torch.Tensor], torch.Tensor]:
     """Resolve an activation name to its function.
 
     Args:
-        name: One of ``gelu``, ``gelu_tanh``, ``relu``, ``squared_relu``,
-            ``silu`` or ``clamped_silu``.
+        name: A key in :data:`ACTIVATIONS`, including exact/erf/tanh GELU,
+            ReLU, squared ReLU, SiLU/Swish, and clamped SiLU.
 
     Returns:
         The activation function.

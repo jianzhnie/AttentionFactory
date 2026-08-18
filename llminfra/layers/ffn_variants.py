@@ -9,6 +9,7 @@ FFN, and :func:`ffn_factory` builds an FFN from a sizing rule.
 
 from __future__ import annotations
 
+import math
 from collections.abc import Callable
 
 import torch
@@ -143,6 +144,7 @@ def ffn_factory(
     intermediate_size: int | None = None,
     ratio: float | None = None,
     bias: bool = True,
+    multiple_of: int = 1,
 ) -> nn.Module:
     """Build a feed-forward network from a sizing rule.
 
@@ -160,6 +162,9 @@ def ffn_factory(
             value derived from ``kind``/``ratio`` when given.
         ratio: Intermediate-to-hidden ratio for ``kind="custom"``.
         bias: Whether the linear projections use biases.
+        multiple_of: Round a derived intermediate size up to this hardware-
+            friendly multiple. Explicit ``intermediate_size`` values are kept
+            unchanged.
 
     Returns:
         The constructed feed-forward module.
@@ -168,6 +173,8 @@ def ffn_factory(
         ValueError: If ``kind`` is unknown, or ``kind="custom"`` is used
             without a ``ratio``.
     """
+    if hidden_size < 1 or multiple_of < 1:
+        raise ValueError("hidden_size and multiple_of must be >= 1")
     if kind == "4x":
         derived = 4 * hidden_size
         module_cls: type[nn.Module] = FeedForward
@@ -175,8 +182,10 @@ def ffn_factory(
         derived = round(8 * hidden_size / 3)
         module_cls = SwiGLUFFN
     elif kind == "custom":
-        if ratio is None:
-            raise ValueError("ffn_factory(kind='custom') requires a ratio")
+        if ratio is None or ratio <= 0:
+            raise ValueError(
+                "ffn_factory(kind='custom') requires a positive ratio"
+            )
         derived = round(ratio * hidden_size)
         module_cls = SwiGLUFFN
     else:
@@ -184,5 +193,7 @@ def ffn_factory(
             f"Unknown ffn kind: {kind!r}. Available: ['4x', '8/3x', 'custom']"
         )
     if intermediate_size is None:
-        intermediate_size = derived
+        intermediate_size = math.ceil(derived / multiple_of) * multiple_of
+    elif intermediate_size < 1:
+        raise ValueError("intermediate_size must be >= 1")
     return module_cls(hidden_size, intermediate_size, bias=bias)

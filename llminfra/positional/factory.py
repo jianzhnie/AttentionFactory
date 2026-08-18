@@ -6,6 +6,12 @@ import torch
 
 from .alibi import ALiBiBias
 from .base import BasePositionalEncoding
+from .classic import (
+    LearnedAbsolutePositionEmbedding,
+    NoPositionEncoding,
+    SinusoidalPositionEmbedding,
+    T5RelativePositionBias,
+)
 from .mrope import MultiModalRotaryPositionEmbedding
 from .rope import RotaryPositionEmbedding
 from .scaling import (
@@ -28,9 +34,22 @@ def get_positional_encoding(
 ) -> BasePositionalEncoding:
     """Create a positional encoding module by name.
 
-    Supported names: ``rope``, ``yarn``, ``ntk``, ``partial_rope``,
-    ``interpolation``, ``longrope``, ``mrope``, ``2d`` and ``alibi``.
+    Supported names are returned by :func:`list_positional_encodings`.
     """
+    if name in {"none", "nope"}:
+        return NoPositionEncoding(dim, max_seq_len=max_seq_len)
+    if name in {"learned", "absolute"}:
+        return LearnedAbsolutePositionEmbedding(
+            dim,
+            max_seq_len=max_seq_len,
+            **kwargs,
+        )
+    if name in {"sinusoidal", "sinusoid"}:
+        return SinusoidalPositionEmbedding(
+            dim,
+            max_seq_len=max_seq_len,
+            **kwargs,
+        )
     if name == "rope":
         return RotaryPositionEmbedding(dim, max_seq_len=max_seq_len, **kwargs)
     if name == "yarn":
@@ -103,4 +122,31 @@ def get_positional_encoding(
         if num_heads is None:
             raise ValueError("alibi requires num_heads")
         return ALiBiBias(num_heads, max_seq_len, **kwargs)
+    if name in {"t5_bias", "t5_relative_bias"}:
+        if num_heads is None:
+            raise ValueError("t5_bias requires num_heads")
+        return T5RelativePositionBias(
+            num_heads,
+            max_seq_len=max_seq_len,
+            **kwargs,
+        )
     raise ValueError(f"Unknown positional encoding: {name}")
+
+
+def list_positional_encodings() -> list[str]:
+    """Return canonical names accepted by :func:`get_positional_encoding`."""
+    return [
+        "none",
+        "learned",
+        "sinusoidal",
+        "rope",
+        "yarn",
+        "ntk",
+        "partial_rope",
+        "interpolation",
+        "longrope",
+        "mrope",
+        "2d",
+        "alibi",
+        "t5_bias",
+    ]

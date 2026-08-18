@@ -186,7 +186,7 @@ class CausalLMModel(nn.Module):
         input_ids: torch.Tensor | None = None,
         attention_mask: torch.Tensor | None = None,
         return_attention_weights: bool = False,
-        prefix_len: int | None = None,
+        prefix_len: int | torch.Tensor | None = None,
         labels: torch.Tensor | None = None,
         return_dict: bool = False,
         return_mtp: bool = False,
@@ -205,10 +205,10 @@ class CausalLMModel(nn.Module):
                 ``(batch, 1, seq_len, seq_len)``.
             return_attention_weights: Return weights from the final block when
                 the attention module supports them.
-            prefix_len: Optional prefix-LM length. When set, the first
-                ``prefix_len`` positions are bidirectionally visible to every
-                position (including each other); all remaining positions stay
-                causal. ``None`` (the default) keeps the purely causal mask.
+            prefix_len: Optional prefix-LM length, either one integer shared by
+                the batch or a ``(batch,)`` tensor for per-example lengths.
+                Prefix positions are bidirectionally visible; all remaining
+                positions stay causal. ``None`` keeps the purely causal mask.
             labels: Optional next-token targets shaped like ``input_ids``.
                 Supplying labels returns :class:`CausalLMOutput` with loss.
             return_dict: Return :class:`CausalLMOutput` instead of the legacy
@@ -332,27 +332,34 @@ class CausalLMModel(nn.Module):
         batch_size: int,
         seq_len: int,
         device: torch.device,
-        prefix_len: int | None = None,
+        prefix_len: int | torch.Tensor | None = None,
     ) -> torch.Tensor:
         """Combine a user padding mask with a causal (or prefix-LM) mask.
 
-        With ``prefix_len`` set, key positions before ``prefix_len`` are
-        visible to every query position (bidirectional prefix), while key
-        positions at or after ``prefix_len`` follow the causal lower
-        triangle. The result is combined with ``attention_mask`` (1 = keep)
-        via logical AND.
+        With ``prefix_len`` set, key positions before each example's prefix
+        length are visible to every query position (bidirectional prefix),
+        while later key positions follow the causal lower triangle. The
+        result is combined with ``attention_mask`` (1 = keep) via logical AND.
         """
         causal = torch.tril(
             torch.ones(seq_len, seq_len, dtype=torch.bool, device=device)
         ).expand(batch_size, 1, seq_len, seq_len)
         if prefix_len is not None:
-            if prefix_len < 1 or prefix_len > seq_len:
-                raise ValueError(
-                    f"prefix_len must be in [1, {seq_len}], got {prefix_len}"
+            if isinstance(prefix_len, int):
+                prefix_lengths = torch.full(
+                    (batch_size,), prefix_len, dtype=torch.long, device=device
                 )
+            elif isinstance(prefix_len, torch.Tensor):
+                if prefix_len.shape != (batch_size,):
+                    raise ValueError("prefix_len tensor must have shape (batch,)")
+                prefix_lengths = prefix_len.to(device=device, dtype=torch.long)
+            else:
+                raise TypeError("prefix_len must be an int, tensor, or None")
+            if not ((prefix_lengths >= 1) & (prefix_lengths <= seq_len)).all():
+                raise ValueError(f"prefix_len values must be in [1, {seq_len}]")
             prefix_keys = (
-                torch.arange(seq_len, device=device) < prefix_len
-            ).view(1, 1, 1, seq_len)
+                torch.arange(seq_len, device=device)[None, :] < prefix_lengths[:, None]
+            ).view(batch_size, 1, 1, seq_len)
             causal = causal | prefix_keys
         if attention_mask is None:
             return causal
@@ -375,3 +382,41 @@ class CausalLMModel(nn.Module):
             f"attention_name={self.attention_name}, use_moe={self.use_moe}, "
             f"num_mtp_predictions={self.num_mtp_predictions}"
         )
+
+
+class PrefixLMModel(CausalLMModel):
+    """Causal language model with an explicit bidirectional prefix contract.
+
+    ``prefix_lengths`` is required on every forward call and may vary across
+    batch rows. The implementation otherwise shares all architecture options,
+    output types, and training semantics with :class:`CausalLMModel`.
+    """
+
+    def forward(
+        self,
+        input_ids: torch.Tensor | None = None,
+        *,
+        prefix_lengths: int | torch.Tensor,
+        attention_mask: torch.Tensor | None = None,
+        return_attention_weights: bool = False,
+        labels: torch.Tensor | None = None,
+        return_dict: bool = False,
+        return_mtp: bool = False,
+        inputs_embeds: torch.Tensor | None = None,
+        position_ids: torch.Tensor | None = None,
+    ) -> torch.Tensor | tuple[torch.Tensor, torch.Tensor] | CausalLMOutput:
+        """Run prefix-LM masking with scalar or per-example prefix lengths."""
+        return super().forward(
+            input_ids=input_ids,
+            attention_mask=attention_mask,
+            return_attention_weights=return_attention_weights,
+            prefix_len=prefix_lengths,
+            labels=labels,
+            return_dict=return_dict,
+            return_mtp=return_mtp,
+            inputs_embeds=inputs_embeds,
+            position_ids=position_ids,
+        )
+
+
+__all__ = ["CausalLMModel", "CausalLMOutput", "PrefixLMModel"]

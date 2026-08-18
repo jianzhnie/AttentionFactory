@@ -145,9 +145,13 @@ class GatedDeltaNet(BaseAttention):
         if attention_mask is None:
             return None
         if attention_mask.dim() == 4:
-            attention_mask = attention_mask[..., 0, :]
+            # Causal structure is already enforced by the recurrence. Reduce
+            # over query positions to retain only key-padding visibility.
+            attention_mask = attention_mask.any(dim=-2)
         elif attention_mask.dim() != 3:
             raise ValueError("attention_mask must be 3D or 4D")
+        elif attention_mask.size(1) != 1:
+            attention_mask = attention_mask.any(dim=1, keepdim=True)
         if attention_mask.size(0) != batch_size:
             raise ValueError("attention_mask batch size must match hidden_state")
         return attention_mask.bool()

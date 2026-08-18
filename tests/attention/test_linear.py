@@ -124,6 +124,16 @@ def test_gated_delta_net_masked_input_is_finite():
     assert torch.isfinite(out).all()
 
 
+def test_gated_delta_net_accepts_combined_causal_mask():
+    """A dense causal mask must reduce to its key-padding component."""
+    layer = GatedDeltaNet(HIDDEN, HEADS, feature_dim=8).eval()
+    x = make_hidden_state(BATCH, SEQ, HIDDEN)
+    causal_mask = torch.tril(
+        torch.ones(BATCH, 1, SEQ, SEQ, dtype=torch.bool)
+    )
+    torch.testing.assert_close(layer(x, attention_mask=causal_mask), layer(x))
+
+
 def test_linear_attention_non_causal_runs():
     """The non-causal path must work (it previously crashed on an einsum)."""
     module = LinearAttention(HIDDEN, HEADS, causal=False).eval()

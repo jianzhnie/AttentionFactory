@@ -14,6 +14,7 @@ from .flash_mla import FlashMLA
 from .gated_delta_net import GatedDeltaNet
 from .gqa import GroupQueryAttention
 from .hybrid import HybridAttention
+from .kda import KDAAttention, KimiDeltaAttention
 from .lightning import LightningAttention
 from .linear import LinearAttention
 from .mha import MultiHeadAttention
@@ -22,6 +23,13 @@ from .mqa import MultiQueryAttention
 from .residual import AttentionResidual
 from .ring import RingAttention, distributed_ring_attention, ring_attention
 from .sliding_window import SlidingWindowAttention
+from .sparse_variants import (
+    DeepSeekSparseAttention,
+    DynamicSparseAttention,
+    HierarchicalCompressedAttention,
+    MiniMaxSparseAttention,
+    QueryKeyBlockIndexer,
+)
 
 __all__ = [
     "AlibiAttention",
@@ -29,15 +37,22 @@ __all__ = [
     "BaseAttention",
     "BlockSparseAttention",
     "CompressedSparseAttention",
+    "DeepSeekSparseAttention",
+    "DynamicSparseAttention",
     "FlashMLA",
     "GatedDeltaNet",
     "GroupQueryAttention",
+    "HierarchicalCompressedAttention",
     "HybridAttention",
+    "KDAAttention",
+    "KimiDeltaAttention",
     "LightningAttention",
     "LinearAttention",
+    "MiniMaxSparseAttention",
     "MultiHeadAttention",
     "MultiHeadLatentAttention",
     "MultiQueryAttention",
+    "QueryKeyBlockIndexer",
     "RingAttention",
     "SlidingWindowAttention",
     "distributed_ring_attention",
