@@ -131,6 +131,47 @@ MiniMax 的路线从“线性注意力 + 全量注意力混合”转向“GQA �
 | MiniMax-M2.5 / M2.7 | 2026 | 是 | MoE | GQA 48Q/8KV | 204,800 | 256 专家 Top-8，RoPE theta 5M |
 | MiniMax-M3 | 2026-06 | 是 | MoE 428B/23B Active | GQA + MiniMax Sparse Attention | 1,048,576 | 稀疏选择 + 专用 GPU kernel |
 
+### 2.24 Xiaomi MiMo 系列（小米）
+
+MiMo 是 SWA + Global Attention 混合的 1M 上下文 MoE 系列。
+
+| 版本          | 时间    | 开源 | 基础架构             | Attention 核心             | 上下文         | 关键优化                                       |
+| ------------- | ------- | ---- | -------------------- | -------------------------- | -------------- | ---------------------------------------------- |
+| MiMo-Audio-7B | 2025-09 | 是   | 基于 Qwen2           | GQA                        | 官方未完整披露 | 任意模态语音模型                               |
+| MiMo-V2-Flash | 2025-12 | 是   | MoE                  | SWA + Global Attention     | 1M             | 混合注意力 + MTP                               |
+| MiMo-V2.5-Pro | 2026-04 | 是   | MoE 1.02T/42B Active | SWA + GA 6:1，GQA 128Q/8KV | 1M             | KV Cache 减少约 7×，3 层 MTP，27T Token 预训练 |
+
+### 2.27 Hunyuan 系列（腾讯）
+
+Hunyuan 的公开路线是：Dense/MoE 商用模型 -> Hunyuan-A13B 开源 MoE -> Hy3 大规模 MoE。
+
+| 版本                  | 时间      | 开源 | 基础架构            | Attention 核心 | 上下文             | 关键优化                      |
+| --------------------- | --------- | ---- | ------------------- | -------------- | ------------------ | ----------------------------- |
+| Hunyuan 商用 API      | 2023-2025 | 否   | 官方未完全披露      | 官方未完全披露 | 产品档位           | 闭源                          |
+| Hunyuan-A13B-Instruct | 2025-06   | 是   | MoE 80B/13B Active  | GQA 32Q/8KV    | 256K，默认配置 32K | 64 专家，动态 RoPE，量化部署  |
+| Hy3                   | 2026-07   | 是   | MoE 295B/21B Active | GQA 64Q/8KV    | 256K               | 192 专家 Top-8，MTP 3.8B 参数 |
+| Hy-MT2-30B-A3B        | 2026-05   | 是   | MoE 30B/3B Active   | GQA 32Q/4KV    | 256K               | 128 专家 Top-8，33 语言翻译   |
+
+### 2.23 Step 系列（阶跃星辰）
+
+Step 系列早期闭源，2026 年起开始公开 MoE 权重。
+
+| 版本                         | 时间      | 开源 | 基础架构            | Attention 核心                 | 上下文   | 关键优化                                      |
+| ---------------------------- | --------- | ---- | ------------------- | ------------------------------ | -------- | --------------------------------------------- |
+| Step-1 / Step-2 / Step-3 API | 2024-2025 | 否   | 官方未完全披露      | 官方未完全披露                 | 产品档位 | 闭源商业模型                                  |
+| Step-3.5-Flash               | 2026-02   | 是   | MoE                 | GQA 类 + SWA                   | 256K     | 开源 MoE 推理档位                             |
+| Step-3.7-Flash               | 2026-05   | 是   | MoE 198B/11B Active | 12 Full GQA + 33 SWA，周期 1:3 | 256K     | 1.8B Vision Encoder，288 专家 Top-8，3 层 MTP |
+
+### 2.20 Nemotron 系列（NVIDIA）
+
+Nemotron 3 是“Mamba-2 + MoE + 少量 GQA”的代表性混合架构。
+
+| 版本             | 时间    | 开源 | 基础架构                  | Attention 核心                   | 上下文               | 关键优化               |
+| ---------------- | ------- | ---- | ------------------------- | -------------------------------- | -------------------- | ---------------------- |
+| Nemotron-3-Nano  | 2025-12 | 是   | MoE 30B/3.5B Active       | 23 Mamba-2 + 23 MoE + 6 GQA      | 256K 默认，可扩展 1M | 128+1 专家，6 专家激活 |
+| Nemotron-3-Super | 2026-03 | 是   | LatentMoE 120B/12B Active | Mamba-2 + MoE + select Attention | 256K 默认，可扩展 1M | MTP，NVFP4 预训练      |
+
+
 
 ### 2.6 Llama 系列（Meta）
 
@@ -269,15 +310,6 @@ DBRX 是 2024 年少数公开 GQA + MoE 配置的开源大模型之一。
 | DBRX-Base / Instruct | 2024-03 | 是 | MoE 132B/36B Active | GQA 48Q/8KV | 32K | 40 层，16 专家 Top-4，RoPE theta 500K |
 
 
-### 2.20 Nemotron 系列（NVIDIA）
-
-Nemotron 3 是“Mamba-2 + MoE + 少量 GQA”的代表性混合架构。
-
-| 版本 | 时间 | 开源 | 基础架构 | Attention 核心 | 上下文 | 关键优化 |
-|------|------|------|----------|----------------|--------|----------|
-| Nemotron-3-Nano | 2025-12 | 是 | MoE 30B/3.5B Active | 23 Mamba-2 + 23 MoE + 6 GQA | 256K 默认，可扩展 1M | 128+1 专家，6 专家激活 |
-| Nemotron-3-Super | 2026-03 | 是 | LatentMoE 120B/12B Active | Mamba-2 + MoE + select Attention | 256K 默认，可扩展 1M | MTP，NVFP4 预训练 |
-
 
 ### 2.21 InternLM 系列（上海 AI Lab）
 
@@ -298,26 +330,6 @@ Baichuan 早期使用独立 MHA 架构，2025 年后的 M 系列直接基于 Qwe
 | Baichuan-M2-32B | 2025 | 是 | 基于 Qwen2.5-32B | GQA 40Q/8KV | 131,072 | 领域强化 |
 | Baichuan-M3-235B | 2026-01 | 是 | 基于 Qwen3-235B-A22B | GQA 64Q/4KV | 40,960 | 128 专家 Top-8 |
 
-
-### 2.23 Step 系列（阶跃星辰）
-
-Step 系列早期闭源，2026 年起开始公开 MoE 权重。
-
-| 版本 | 时间 | 开源 | 基础架构 | Attention 核心 | 上下文 | 关键优化 |
-|------|------|------|----------|----------------|--------|----------|
-| Step-1 / Step-2 / Step-3 API | 2024-2025 | 否 | 官方未完全披露 | 官方未完全披露 | 产品档位 | 闭源商业模型 |
-| Step-3.5-Flash | 2026-02 | 是 | MoE | GQA 类 + SWA | 256K | 开源 MoE 推理档位 |
-| Step-3.7-Flash | 2026-05 | 是 | MoE 198B/11B Active | 12 Full GQA + 33 SWA，周期 1:3 | 256K | 1.8B Vision Encoder，288 专家 Top-8，3 层 MTP |
-
-### 2.24 Xiaomi MiMo 系列（小米）
-
-MiMo 是 SWA + Global Attention 混合的 1M 上下文 MoE 系列。
-
-| 版本 | 时间 | 开源 | 基础架构 | Attention 核心 | 上下文 | 关键优化 |
-|------|------|------|----------|----------------|--------|----------|
-| MiMo-Audio-7B | 2025-09 | 是 | 基于 Qwen2 | GQA | 官方未完整披露 | 任意模态语音模型 |
-| MiMo-V2-Flash | 2025-12 | 是 | MoE | SWA + Global Attention | 1M | 混合注意力 + MTP |
-| MiMo-V2.5-Pro | 2026-04 | 是 | MoE 1.02T/42B Active | SWA + GA 6:1，GQA 128Q/8KV | 1M | KV Cache 减少约 7×，3 层 MTP，27T Token 预训练 |
 
 
 ### 2.25 Zamba 系列（Zyphra）
@@ -340,16 +352,8 @@ Arctic 是“Dense 主干 + 大规模 MoE 残差”的代表。
 
 
 
-### 2.27 Hunyuan 系列（腾讯）
 
-Hunyuan 的公开路线是：Dense/MoE 商用模型 -> Hunyuan-A13B 开源 MoE -> Hy3 大规模 MoE。
 
-| 版本 | 时间 | 开源 | 基础架构 | Attention 核心 | 上下文 | 关键优化 |
-|------|------|------|----------|----------------|--------|----------|
-| Hunyuan 商用 API | 2023-2025 | 否 | 官方未完全披露 | 官方未完全披露 | 产品档位 | 闭源 |
-| Hunyuan-A13B-Instruct | 2025-06 | 是 | MoE 80B/13B Active | GQA 32Q/8KV | 256K，默认配置 32K | 64 专家，动态 RoPE，量化部署 |
-| Hy3 | 2026-07 | 是 | MoE 295B/21B Active | GQA 64Q/8KV | 256K | 192 专家 Top-8，MTP 3.8B 参数 |
-| Hy-MT2-30B-A3B | 2026-05 | 是 | MoE 30B/3B Active | GQA 32Q/4KV | 256K | 128 专家 Top-8，33 语言翻译 |
 
 
 ### 2.28 遗漏分析：已覆盖 / 未覆盖 / 待补充
