@@ -4,6 +4,7 @@ from .activations import ACTIVATIONS, get_activation
 from .ffn import FeedForward, SwiGLUFFN
 from .ffn_variants import ClampedSwiGLUFFN, GeGLUFFN, ReGLUFFN, ffn_factory
 from .hybrid_block import HybridLayerStack, HybridSSMBlock
+from .hyperconnection import ManifoldConstrainedHyperConnection
 from .norm import DeepNorm, LayerNorm, LayerScale, RMSNorm
 from .ssm import Mamba2Layer, Mamba2State
 from .transformer import TransformerBlock
@@ -20,6 +21,7 @@ __all__ = [
     "LayerScale",
     "Mamba2Layer",
     "Mamba2State",
+    "ManifoldConstrainedHyperConnection",
     "RMSNorm",
     "ReGLUFFN",
     "SwiGLUFFN",

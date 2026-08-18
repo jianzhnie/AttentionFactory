@@ -171,8 +171,6 @@ Nemotron 3 是“Mamba-2 + MoE + 少量 GQA”的代表性混合架构。
 | Nemotron-3-Nano  | 2025-12 | 是   | MoE 30B/3.5B Active       | 23 Mamba-2 + 23 MoE + 6 GQA      | 256K 默认，可扩展 1M | 128+1 专家，6 专家激活 |
 | Nemotron-3-Super | 2026-03 | 是   | LatentMoE 120B/12B Active | Mamba-2 + MoE + select Attention | 256K 默认，可扩展 1M | MTP，NVFP4 预训练      |
 
-
-
 ### 2.10 Llama 系列（Meta）
 
 Llama 系列是开源模型从 MHA 走向 GQA，并进一步走向 MoE + 局部注意力的代表性路径。
@@ -309,8 +307,6 @@ DBRX 是 2024 年少数公开 GQA + MoE 配置的开源大模型之一。
 |------|------|------|----------|----------------|--------|----------|
 | DBRX-Base / Instruct | 2024-03 | 是 | MoE 132B/36B Active | GQA 48Q/8KV | 32K | 40 层，16 专家 Top-4，RoPE theta 500K |
 
-
-
 ### 2.24 InternLM 系列（上海 AI Lab）
 
 InternLM 的公开路线是 GQA + Dynamic RoPE 长上下文。
@@ -329,8 +325,6 @@ Baichuan 早期使用独立 MHA 架构，2025 年后的 M 系列直接基于 Qwe
 | Baichuan2-7B-Base | 2023 | 是 | Dense 7B | MHA 32Q | 4K | 原生中文预训练 |
 | Baichuan-M2-32B | 2025 | 是 | 基于 Qwen2.5-32B | GQA 40Q/8KV | 131,072 | 领域强化 |
 | Baichuan-M3-235B | 2026-01 | 是 | 基于 Qwen3-235B-A22B | GQA 64Q/4KV | 40,960 | 128 专家 Top-8 |
-
-
 
 ### 2.26 Zamba 系列（Zyphra）
 
@@ -351,11 +345,6 @@ Arctic 是“Dense 主干 + 大规模 MoE 残差”的代表。
 | Snowflake Arctic-Instruct | 2024-04 | 是 | Dense-MoE Hybrid 480B | GQA 56Q/8KV | 4K | 10B Dense + 128x3.66B MoE，Top-2 |
 
 
-
-
-
-
-
 ### 2.28 遗漏分析：已覆盖 / 未覆盖 / 待补充
 
 | 类别 | 文档状态 | 当前代码状态 | 主要缺口 | 优先级 |
@@ -365,7 +354,7 @@ Arctic 是“Dense 主干 + 大规模 MoE 残差”的代表。
 | C. FFN/MLP | 已覆盖 | FeedForward/SwiGLU/GeGLU/ReGLU/Clamp-SwiGLU/FFN factory/QATWrapper 已实现 | QAT observer/calibration、KV 专用量化与生产低精度 kernel 仍待补 | 中 |
 | D. 归一化 | 已覆盖 | RMSNorm/LayerNorm/DeepNorm/LayerScale/QK-Norm 已实现并接入 MHA/MQA/GQA/MLA 与 TransformerBlock | 生产 fused norm 和大深度数值验证仍待补 | 中 |
 | E. 激活函数 | 已覆盖 | 精确 GELU/erf GELU/tanh GELU/ReLU/Squared ReLU/SiLU/Swish/Clipped SiLU 已实现 | 量化数值边界测试仍可补充 | 低 |
-| F. 残差/层序 | 已覆盖 | Pre/Post/Sandwich/DeepNorm、Parallel Block、LayerScale、AttnRes 已集成 `TransformerBlock` | AttnRes 仍是逐维门控参考版，未复现跨 block 缓冲/路由 | 中 |
+| F. 残差/层序 | 已覆盖 | Pre/Post/Sandwich/DeepNorm、Parallel Block、LayerScale、AttnRes 已集成 `TransformerBlock`；mHC 提供 Sinkhorn 约束的 PyTorch 参考层 | AttnRes 仍是逐维门控参考版；mHC 尚未完成多副本流水线状态、fused kernel 与官方 checkpoint 对齐 | 中-高 |
 | G. MoE | 已覆盖 | Top-k/共享专家/LatentMoE/Z-Loss/无辅助偏置/Expert Choice/Expert Dropout/Gumbel/EP all-to-all reference 已实现 | Group GEMM、全局 capacity/drop 和真实多节点吞吐仍待补 | 高 |
 | H. SSM/Hybrid | 已覆盖 | `Mamba2Layer`、`HybridSSMBlock`、`HybridLayerStack` 已实现 per-channel state、causal conv、norm/residual/FFN 和 layer map | 官方 SSD/fused selective-scan kernel、checkpoint-compatible Zamba 配置仍待补 | 高 |
 | I. Embedding/输出头 | 已覆盖 | tied embeddings、`MultiTokenPredictionHead`、`mtp_loss`、序列/Token 分类、奖励、Embedding 头和结构化 `CausalLMOutput` 已实现 | chained MTP 与大规模参数/质量对齐仍待补 | 中 |
