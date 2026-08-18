@@ -131,7 +131,7 @@ MiniMax 的路线从“线性注意力 + 全量注意力混合”转向“GQA �
 | MiniMax-M2.5 / M2.7 | 2026 | 是 | MoE | GQA 48Q/8KV | 204,800 | 256 专家 Top-8，RoPE theta 5M |
 | MiniMax-M3 | 2026-06 | 是 | MoE 428B/23B Active | GQA + MiniMax Sparse Attention | 1,048,576 | 稀疏选择 + 专用 GPU kernel |
 
-### 2.24 Xiaomi MiMo 系列（小米）
+### 2.6 Xiaomi MiMo 系列（小米）
 
 MiMo 是 SWA + Global Attention 混合的 1M 上下文 MoE 系列。
 
@@ -141,7 +141,7 @@ MiMo 是 SWA + Global Attention 混合的 1M 上下文 MoE 系列。
 | MiMo-V2-Flash | 2025-12 | 是   | MoE                  | SWA + Global Attention     | 1M             | 混合注意力 + MTP                               |
 | MiMo-V2.5-Pro | 2026-04 | 是   | MoE 1.02T/42B Active | SWA + GA 6:1，GQA 128Q/8KV | 1M             | KV Cache 减少约 7×，3 层 MTP，27T Token 预训练 |
 
-### 2.27 Hunyuan 系列（腾讯）
+### 2.7 Hunyuan 系列（腾讯）
 
 Hunyuan 的公开路线是：Dense/MoE 商用模型 -> Hunyuan-A13B 开源 MoE -> Hy3 大规模 MoE。
 
@@ -152,7 +152,7 @@ Hunyuan 的公开路线是：Dense/MoE 商用模型 -> Hunyuan-A13B 开源 MoE -
 | Hy3                   | 2026-07   | 是   | MoE 295B/21B Active | GQA 64Q/8KV    | 256K               | 192 专家 Top-8，MTP 3.8B 参数 |
 | Hy-MT2-30B-A3B        | 2026-05   | 是   | MoE 30B/3B Active   | GQA 32Q/4KV    | 256K               | 128 专家 Top-8，33 语言翻译   |
 
-### 2.23 Step 系列（阶跃星辰）
+### 2.8 Step 系列（阶跃星辰）
 
 Step 系列早期闭源，2026 年起开始公开 MoE 权重。
 
@@ -162,7 +162,7 @@ Step 系列早期闭源，2026 年起开始公开 MoE 权重。
 | Step-3.5-Flash               | 2026-02   | 是   | MoE                 | GQA 类 + SWA                   | 256K     | 开源 MoE 推理档位                             |
 | Step-3.7-Flash               | 2026-05   | 是   | MoE 198B/11B Active | 12 Full GQA + 33 SWA，周期 1:3 | 256K     | 1.8B Vision Encoder，288 专家 Top-8，3 层 MTP |
 
-### 2.20 Nemotron 系列（NVIDIA）
+### 2.9 Nemotron 系列（NVIDIA）
 
 Nemotron 3 是“Mamba-2 + MoE + 少量 GQA”的代表性混合架构。
 
@@ -173,7 +173,7 @@ Nemotron 3 是“Mamba-2 + MoE + 少量 GQA”的代表性混合架构。
 
 
 
-### 2.6 Llama 系列（Meta）
+### 2.10 Llama 系列（Meta）
 
 Llama 系列是开源模型从 MHA 走向 GQA，并进一步走向 MoE + 局部注意力的代表性路径。
 
@@ -184,7 +184,7 @@ Llama 系列是开源模型从 MHA 走向 GQA，并进一步走向 MoE + 局部�
 | Llama 3 / 3.1 / 3.2 / 3.3 | 2024 | 是 | Dense 8B-405B | 全尺寸 GQA | 8K-128K | RoPE base 500K，128K 训练 |
 | Llama 4 Scout / Maverick | 2025-04 | 是 | MoE | GQA + chunked local attention + NoPE 间隔层 | Scout 10M，Maverick 1M | MoE，QK-Norm，scaled RoPE，attention temperature tuning |
 
-### 2.7 GPT 系列（OpenAI）
+### 2.11 GPT 系列（OpenAI）
 
 GPT 系列早期有公开架构，2023 年后闭源。
 
@@ -196,7 +196,7 @@ GPT 系列早期有公开架构，2023 年后闭源。
 | GPT-3.5 / GPT-4 / GPT-4o / o1 | 2022-2024 | 否 | 官方未完全披露 | 官方未完全披露 | 4K-128K 产品档位 | 产品级长上下文，架构细节未公开 |
 | GPT-5.5 / GPT-5.6 Sol | 2025-2026 | 否 | 官方未完全披露 | 官方未完全披露 | 官方未完全披露 | 从多家官方基准看是 2026 年主力模型，但未披露 Attention |
 
-### 2.8 Gemini 系列（Google）
+### 2.12 Gemini 系列（Google）
 
 Gemini 是闭源多模态系列，公开细节远少于 Gemma。
 
@@ -207,7 +207,7 @@ Gemini 是闭源多模态系列，公开细节远少于 Gemma。
 | Gemini 2.0 / 3.x | 2024-2026 | 否 | 官方未完全披露 | 官方未完全披露 | 产品档位持续扩大 | Gemini 3.1 Pro 等名称出现在多个官方基准中 |
 
 
-### 2.9 Claude 系列（Anthropic）
+### 2.13 Claude 系列（Anthropic）
 
 Claude 全程闭源，Anthropic 未公开 MHA/GQA/MLA 等实现。
 
@@ -218,7 +218,7 @@ Claude 全程闭源，Anthropic 未公开 MHA/GQA/MLA 等实现。
 | Claude Opus 4.8 / Fable 5 / Mythos 5 | 2026 | 否 | 官方未完全披露 | 官方未完全披露 | 官方未完全披露 | Anthropic 官方页面确认 Fable 5 与 Mythos 5 于 2026-06 发布 |
 
 
-### 2.10 Mistral 系列（Mistral AI）
+### 2.14 Mistral 系列（Mistral AI）
 
 Mistral 的演进路线是：GQA + SWA -> GQA 全注意力 -> 2026 年 MLA 类小模型。
 
@@ -234,7 +234,7 @@ Mistral 的演进路线是：GQA + SWA -> GQA 全注意力 -> 2026 年 MLA 类�
 | Mistral-Medium-3.5 | 2026-03 | 是 | Dense 128B | GQA 96Q/8KV | 256K | 长上下文 Dense 档位 |
 
 
-### 2.11 Mixtral 系列
+### 2.15 Mixtral 系列
 
 Mixtral 可作为“MoE 化 GQA”的早期验证。
 
@@ -243,7 +243,7 @@ Mixtral 可作为“MoE 化 GQA”的早期验证。
 | Mixtral 8x7B | 2023-12 | 是 | MoE 46.7B/12.9B Active | GQA | 32K | 8 专家 Top-2 |
 | Mixtral 8x22B | 2024-04 | 是 | MoE 141B/39B Active | GQA | 64K 级 | 更大 MoE，长上下文 |
 
-### 2.12 Yi 系列（01.AI）
+### 2.16 Yi 系列（01.AI）
 
 | 版本 | 时间 | 开源 | 基础架构 | Attention 核心 | 上下文 | 关键优化 |
 |------|------|------|----------|----------------|--------|----------|
@@ -251,7 +251,7 @@ Mixtral 可作为“MoE 化 GQA”的早期验证。
 | Yi-34B-200K | 2023-12 | 是 | Dense | GQA + RoPE 外推 | 200K | Dynamic NTK / LongLoRA 类扩展 |
 | Yi-1.5 | 2024-06 | 是 | Dense | GQA | 16K 级 | 指令微调升级 |
 
-### 2.13 Gemma 系列（Google）
+### 2.17 Gemma 系列（Google）
 
 Gemma 是 Google 提供公开 Attention 细节的开放系列。
 
@@ -262,7 +262,7 @@ Gemma 是 Google 提供公开 Attention 细节的开放系列。
 | Gemma 3 | 2025-03 | 是 | Dense/MoE | GQA + 窗口注意力 | 128K | 小窗口 + QK-Norm |
 | Gemma 4 | 2026-05 | 是 | Dense/MoE | GQA + local sliding + global attention | E2B/E4B 128K，12B/26B-A4B/31B 256K | p-RoPE，global 层 Unified K/V，1024 滑动窗口 |
 
-### 2.14 Falcon 系列（TII）
+### 2.18 Falcon 系列（TII）
 
 | 版本 | 时间 | 开源 | 基础架构 | Attention 核心 | 上下文 | 关键优化 |
 |------|------|------|----------|----------------|--------|----------|
@@ -270,27 +270,27 @@ Gemma 是 Google 提供公开 Attention 细节的开放系列。
 | Falcon-180B | 2023-09 | 是 | Dense | MQA 系 | 2K 级 | 大规模 MQA 验证 |
 | Falcon-Mamba | 2024-10 | 是 | SSM | Mamba-2 固定状态 | 32K | 无传统 KV Cache |
 
-### 2.15 PaLM 系列（Google）
+### 2.19 PaLM 系列（Google）
 
 | 版本 | 时间 | 开源 | 基础架构 | Attention 核心 | 上下文 | 关键优化 |
 |------|------|------|----------|----------------|--------|----------|
 | PaLM 540B | 2022 | 否 | Dense | MQA | 2,048 | 并行层 + SwiGLU |
 | PaLM 2 | 2023 | 否 | 官方未完全披露 | 官方未完全披露 | 官方未完全披露 | 闭源 |
 
-### 2.16 MiniCPM（面壁智能）
+### 2.20 MiniCPM（面壁智能）
 
 | 版本 | 时间 | 开源 | 基础架构 | Attention 核心 | 上下文 | 关键优化 |
 |------|------|------|----------|----------------|--------|----------|
 | MiniCPM3-4B | 2024-09 | 是 | Dense 4B | MLA | 32K | 小模型 MLA 验证 |
 
-### 2.17 Grok 系列（xAI）
+### 2.21 Grok 系列（xAI）
 
 | 版本 | 时间 | 开源 | 基础架构 | Attention 核心 | 上下文 | 关键优化 |
 |------|------|------|----------|----------------|--------|----------|
 | Grok-1 | 2024-03 | 是 | MoE 314B | 25% 层 Attention + 8 KV Head | 8K | 层间稀疏 + 8 专家 Top-2 |
 | Grok-2 / Grok-3 / Grok-4.x | 2024-2026 | 否 | 官方未完全披露 | 官方未完全披露 | 官方未完全披露 | 闭源 |
 
-### 2.18 Phi 系列（Microsoft）
+### 2.22 Phi 系列（Microsoft）
 
 Phi 系列的公开配置显示：早期小模型使用 MHA，Phi-4 起明确转向 GQA。
 
@@ -301,7 +301,7 @@ Phi 系列的公开配置显示：早期小模型使用 MHA，Phi-4 起明确转
 | Phi-4-mini | 2025-02 | 是 | Dense 3.8B | GQA 24Q/8KV | 128K | LongRope，共享输入/输出 embedding |
 
 
-### 2.19 DBRX（Databricks）
+### 2.23 DBRX（Databricks）
 
 DBRX 是 2024 年少数公开 GQA + MoE 配置的开源大模型之一。
 
@@ -311,7 +311,7 @@ DBRX 是 2024 年少数公开 GQA + MoE 配置的开源大模型之一。
 
 
 
-### 2.21 InternLM 系列（上海 AI Lab）
+### 2.24 InternLM 系列（上海 AI Lab）
 
 InternLM 的公开路线是 GQA + Dynamic RoPE 长上下文。
 
@@ -320,7 +320,7 @@ InternLM 的公开路线是 GQA + Dynamic RoPE 长上下文。
 | InternLM2.5-7B | 2024 | 是 | Dense 7B | GQA 32Q/8KV | 262,144 | Dynamic RoPE factor 2 |
 | InternLM3-8B-Instruct | 2025 | 是 | Dense 8B | GQA 32Q/2KV | 32K | Dynamic RoPE factor 6，RoPE theta 50M |
 
-### 2.22 Baichuan 系列（百川智能）
+### 2.25 Baichuan 系列（百川智能）
 
 Baichuan 早期使用独立 MHA 架构，2025 年后的 M 系列直接基于 Qwen 基座。
 
@@ -332,7 +332,7 @@ Baichuan 早期使用独立 MHA 架构，2025 年后的 M 系列直接基于 Qwe
 
 
 
-### 2.25 Zamba 系列（Zyphra）
+### 2.26 Zamba 系列（Zyphra）
 
 Zamba 是 Mamba2 与共享 Attention 混合的代表性开源系列。
 
@@ -342,7 +342,7 @@ Zamba 是 Mamba2 与共享 Attention 混合的代表性开源系列。
 | Zamba2-7B-Instruct-v2 | 2025 | 是 | Mamba2 + Attention Hybrid | Mamba2 + Shared Attention | 4K，可扩展 16K | LoRA 投影差异化共享块 |
 
 
-### 2.26 Snowflake Arctic 系列
+### 2.27 Snowflake Arctic 系列
 
 Arctic 是“Dense 主干 + 大规模 MoE 残差”的代表。
 
@@ -531,7 +531,7 @@ Attention 是 2026 年架构差异化的主线，但模型的最终形态同样�
 - Partial / p-RoPE：只旋转部分维度，Gemma 4 和 DeepSeek-V4 用于长上下文稳定。
 
 
-## 六、结构化汇总表
+## 五、结构化汇总表
 
 ### 表 1a：模型系列/版本级汇总表
 
@@ -663,96 +663,96 @@ Attention 是 2026 年架构差异化的主线，但模型的最终形态同样�
 | SWA + 全局 | 窗口层 + 间隔全局层 | 近线性 | MiMo-V2.5（约 6:1）、Gemma 4 | 实现简单 | 窗口外依赖弱 | 长上下文 Dense/MoE | 按比例间隔 |
 | GQA/MLA + 学习式稀疏 | indexer 选择 KV block | 二次但稀疏 | DeepSeek-V4、GLM-5.2、MiniMax M3 | 召回损失小 | indexer 质量关键 | 1M 上下文生产 | 逐层或共享 indexer |
 
-## 九、参考资料
+## 六、参考资料
 
 ### Qwen
 
-- [QWEN2] Qwen2 Technical Report: https://arxiv.org/abs/2407.10671
-- [QWEN25] Qwen2.5 Technical Report: https://arxiv.org/abs/2412.15115
-- [QWEN-NEXT] Qwen3-Next 官方模型卡: https://huggingface.co/Qwen/Qwen3-Next-80B-A3B-Instruct
-- [QWEN38-27B] Qwen3.8-27B 官方模型卡: https://huggingface.co/Qwen/Qwen3.8-27B
-- [QWEN38-24T] Qwen3.8-2.4T-A95B 官方模型卡: https://huggingface.co/Qwen/Qwen3.8-2.4T-A95B
+- [QWEN2](https://arxiv.org/abs/2407.10671) — Qwen2 Technical Report
+- [QWEN25](https://arxiv.org/abs/2412.15115) — Qwen2.5 Technical Report
+- [QWEN-NEXT](https://huggingface.co/Qwen/Qwen3-Next-80B-A3B-Instruct) — Qwen3-Next 官方模型卡
+- [QWEN38-27B](https://huggingface.co/Qwen/Qwen3.8-27B) — Qwen3.8-27B 官方模型卡
+- [QWEN38-24T](https://huggingface.co/Qwen/Qwen3.8-2.4T-A95B) — Qwen3.8-2.4T-A95B 官方模型卡
 
 ### DeepSeek
 
-- [DEEPSEEK-V2] DeepSeek-V2: https://arxiv.org/abs/2405.04434
-- [DEEPSEEK-V3] DeepSeek-V3 Technical Report: https://arxiv.org/abs/2412.19437
-- [DEEPSEEK-V4] DeepSeek-V4 Technical Report（pp.5, 9–13, 25；访问 2026-08-18）: https://arxiv.org/abs/2606.19348
-- [DEEPSEEK-V4-CARD] DeepSeek-V4-Pro-0813 官方模型卡与 inference 代码: https://huggingface.co/deepseek-ai/DeepSeek-V4-Pro-0813 ; https://huggingface.co/deepseek-ai/DeepSeek-V4-Pro-0813/tree/main/inference
+- [DEEPSEEK-V2](https://arxiv.org/abs/2405.04434) — DeepSeek-V2
+- [DEEPSEEK-V3](https://arxiv.org/abs/2412.19437) — DeepSeek-V3 Technical Report
+- [DEEPSEEK-V4](https://arxiv.org/abs/2606.19348) — DeepSeek-V4 Technical Report（pp.5, 9–13, 25；访问 2026-08-18）
+- [DEEPSEEK-V4-CARD](https://huggingface.co/deepseek-ai/DeepSeek-V4-Pro-0813) — DeepSeek-V4-Pro-0813 官方模型卡；[inference 代码](https://huggingface.co/deepseek-ai/DeepSeek-V4-Pro-0813/tree/main/inference)
 
 ### GLM
 
-- [GLM130B] GLM-130B: https://arxiv.org/abs/2210.02414
-- [GLM5] GLM-5 官方模型卡: https://huggingface.co/zai-org/GLM-5
-- [GLM52] GLM-5.2 官方模型卡: https://huggingface.co/zai-org/GLM-5.2
-- [INDEXSHARE] GLM-5.2 官方模型卡（IndexShare 声明；访问 2026-08-18）: https://huggingface.co/zai-org/GLM-5.2
-- [INDEXCACHE] IndexCache（pp.7–10；访问 2026-08-18）: https://arxiv.org/abs/2603.12201
+- [GLM130B](https://arxiv.org/abs/2210.02414) — GLM-130B
+- [GLM5](https://huggingface.co/zai-org/GLM-5) — GLM-5 官方模型卡
+- [GLM52](https://huggingface.co/zai-org/GLM-5.2) — GLM-5.2 官方模型卡
+- [INDEXSHARE](https://huggingface.co/zai-org/GLM-5.2) — GLM-5.2 官方模型卡（IndexShare 声明；访问 2026-08-18）
+- [INDEXCACHE](https://arxiv.org/abs/2603.12201) — IndexCache（pp.7–10；访问 2026-08-18）
 
 ### Kimi
 
-- [KIMI-ORIGIN] Kimi 初代技术报告: https://arxiv.org/abs/2310.08588
-- [KIMI-LINEAR] Kimi Linear 论文（arXiv:2510.26692，pp.1, 6, 13, 16；访问 2026-08-18）/官方模型卡: https://arxiv.org/abs/2510.26692 ; https://huggingface.co/moonshotai/Kimi-Linear-48B-A3B-Instruct
-- [KIMI-K3] Kimi K3 官方模型卡: https://huggingface.co/moonshotai/Kimi-K3
+- [KIMI-ORIGIN](https://arxiv.org/abs/2310.08588) — Kimi 初代技术报告
+- [KIMI-LINEAR](https://arxiv.org/abs/2510.26692) — Kimi Linear 论文（pp.1, 6, 13, 16；访问 2026-08-18）；[官方模型卡](https://huggingface.co/moonshotai/Kimi-Linear-48B-A3B-Instruct)
+- [KIMI-K3](https://huggingface.co/moonshotai/Kimi-K3) — Kimi K3 官方模型卡
 
 ### MiniMax
 
-- [MINIMAX-01] MiniMax-01: https://arxiv.org/abs/2501.08313
-- [MSA] MiniMax Sparse Attention（pp.1, 8–12；访问 2026-08-18）: https://arxiv.org/abs/2606.13392
-- [MSA-REPO] MiniMax MSA 仓库: https://github.com/MiniMax-AI/MSA
-- [MINIMAX-M3] MiniMax-M3 官方模型卡: https://huggingface.co/MiniMaxAI/MiniMax-M3
+- [MINIMAX-01](https://arxiv.org/abs/2501.08313) — MiniMax-01
+- [MSA](https://arxiv.org/abs/2606.13392) — MiniMax Sparse Attention（pp.1, 8–12；访问 2026-08-18）
+- [MSA-REPO](https://github.com/MiniMax-AI/MSA) — MiniMax MSA 仓库
+- [MINIMAX-M3](https://huggingface.co/MiniMaxAI/MiniMax-M3) — MiniMax-M3 官方模型卡
 
 ### Llama
 
-- [LLAMA1] Llama 1: https://arxiv.org/abs/2302.13971
-- [LLAMA2] Llama 2: https://arxiv.org/abs/2307.09288
-- [LLAMA3] Llama 3 Herd: https://arxiv.org/abs/2503.24095
-- [LLAMA4] Llama 4 官方模型卡/源码: https://github.com/meta-llama/llama-models/tree/main/models/llama4
+- [LLAMA1](https://arxiv.org/abs/2302.13971) — Llama 1
+- [LLAMA2](https://arxiv.org/abs/2307.09288) — Llama 2
+- [LLAMA3](https://arxiv.org/abs/2503.24095) — Llama 3 Herd
+- [LLAMA4](https://github.com/meta-llama/llama-models/tree/main/models/llama4) — Llama 4 官方模型卡/源码
 
 ### Mistral / Gemma / 其他
 
-- [MISTRAL7B] Mistral 7B: https://arxiv.org/abs/2310.06825
-- [MIXTRAL] Mixtral of Experts: https://arxiv.org/abs/2401.04088
-- [GEMMA2] Gemma 2: https://arxiv.org/abs/2408.00118
-- [GEMMA4] Gemma 4 官方模型卡: https://huggingface.co/google/gemma-4-12B-it
-- [FALCON40B] Falcon 模型卡: https://huggingface.co/tiiuae/falcon-40b
-- [GROK1] Grok-1 仓库: https://github.com/xai-org/grok-1
-- [CLAUDE-2026] Claude Fable 5 / Mythos 5 官方页面: https://www.anthropic.com/news/claude-fable-5-mythos-5
+- [MISTRAL7B](https://arxiv.org/abs/2310.06825) — Mistral 7B
+- [MIXTRAL](https://arxiv.org/abs/2401.04088) — Mixtral of Experts
+- [GEMMA2](https://arxiv.org/abs/2408.00118) — Gemma 2
+- [GEMMA4](https://huggingface.co/google/gemma-4-12B-it) — Gemma 4 官方模型卡
+- [FALCON40B](https://huggingface.co/tiiuae/falcon-40b) — Falcon 模型卡
+- [GROK1](https://github.com/xai-org/grok-1) — Grok-1 仓库
+- [CLAUDE-2026](https://www.anthropic.com/news/claude-fable-5-mythos-5) — Claude Fable 5 / Mythos 5 官方页面
 
 ### Phi / DBRX / Nemotron / InternLM / Baichuan
 
-- [PHI4] Phi-4 官方配置: https://huggingface.co/microsoft/Phi-4
-- [PHI4-MINI] Phi-4-mini 官方模型卡: https://huggingface.co/microsoft/Phi-4-mini-instruct
-- [DBRX] DBRX 官方开源说明: https://www.databricks.com/blog/dbrx-open-source-llm
-- [DBRX-CONFIG] DBRX 公开配置镜像: https://huggingface.co/alpindale/dbrx-instruct
-- [NEMOTRON-NANO] Nemotron-3-Nano 官方模型卡: https://huggingface.co/nvidia/NVIDIA-Nemotron-3-Nano-30B-A3B-BF16
-- [NEMOTRON-SUPER] Nemotron-3-Super 官方模型卡: https://huggingface.co/nvidia/NVIDIA-Nemotron-3-Super-120B-A12B-BF16
-- [INTERNLM25] InternLM2.5-7B 官方配置: https://huggingface.co/internlm/internlm2_5-7b
-- [INTERNLM3] InternLM3-8B-Instruct 官方配置: https://huggingface.co/internlm/internlm3-8b-instruct
-- [BAICHUAN-M2] Baichuan-M2-32B 官方配置: https://huggingface.co/baichuan-inc/Baichuan-M2-32B
-- [BAICHUAN-M3] Baichuan-M3-235B 官方配置: https://huggingface.co/baichuan-inc/Baichuan-M3-235B
+- [PHI4](https://huggingface.co/microsoft/Phi-4) — Phi-4 官方配置
+- [PHI4-MINI](https://huggingface.co/microsoft/Phi-4-mini-instruct) — Phi-4-mini 官方模型卡
+- [DBRX](https://www.databricks.com/blog/dbrx-open-source-llm) — DBRX 官方开源说明
+- [DBRX-CONFIG](https://huggingface.co/alpindale/dbrx-instruct) — DBRX 公开配置镜像
+- [NEMOTRON-NANO](https://huggingface.co/nvidia/NVIDIA-Nemotron-3-Nano-30B-A3B-BF16) — Nemotron-3-Nano 官方模型卡
+- [NEMOTRON-SUPER](https://huggingface.co/nvidia/NVIDIA-Nemotron-3-Super-120B-A12B-BF16) — Nemotron-3-Super 官方模型卡
+- [INTERNLM25](https://huggingface.co/internlm/internlm2_5-7b) — InternLM2.5-7B 官方配置
+- [INTERNLM3](https://huggingface.co/internlm/internlm3-8b-instruct) — InternLM3-8B-Instruct 官方配置
+- [BAICHUAN-M2](https://huggingface.co/baichuan-inc/Baichuan-M2-32B) — Baichuan-M2-32B 官方配置
+- [BAICHUAN-M3](https://huggingface.co/baichuan-inc/Baichuan-M3-235B) — Baichuan-M3-235B 官方配置
 
 ### Step / MiMo / Zamba / Arctic
 
-- [STEP37] Step-3.7-Flash 官方模型卡: https://huggingface.co/stepfun-ai/Step-3.7-Flash
-- [MIMO-V25] Xiaomi MiMo-V2.5-Pro 官方模型卡: https://huggingface.co/XiaomiMiMo/MiMo-V2.5-Pro
-- [ZAMBA2] Zamba2-7B-Instruct-v2 官方模型卡: https://huggingface.co/Zyphra/Zamba2-7B-Instruct-v2
-- [ARCTIC] Snowflake Arctic-Instruct 官方模型卡: https://huggingface.co/Snowflake/snowflake-arctic-instruct
+- [STEP37](https://huggingface.co/stepfun-ai/Step-3.7-Flash) — Step-3.7-Flash 官方模型卡
+- [MIMO-V25](https://huggingface.co/XiaomiMiMo/MiMo-V2.5-Pro) — Xiaomi MiMo-V2.5-Pro 官方模型卡
+- [ZAMBA2](https://huggingface.co/Zyphra/Zamba2-7B-Instruct-v2) — Zamba2-7B-Instruct-v2 官方模型卡
+- [ARCTIC](https://huggingface.co/Snowflake/snowflake-arctic-instruct) — Snowflake Arctic-Instruct 官方模型卡
 
 ### Hunyuan
 
-- [HUNYUAN-A13B] Hunyuan-A13B-Instruct 官方模型卡: https://huggingface.co/tencent/Hunyuan-A13B-Instruct
-- [HY3] Hy3 官方模型卡: https://huggingface.co/tencent/Hy3
-- [HY-MT2] Hy-MT2-30B-A3B 官方模型卡: https://huggingface.co/tencent/Hy-MT2-30B-A3B
+- [HUNYUAN-A13B](https://huggingface.co/tencent/Hunyuan-A13B-Instruct) — Hunyuan-A13B-Instruct 官方模型卡
+- [HY3](https://huggingface.co/tencent/Hy3) — Hy3 官方模型卡
+- [HY-MT2](https://huggingface.co/tencent/Hy-MT2-30B-A3B) — Hy-MT2-30B-A3B 官方模型卡
 
 ### Attention 机制论文
 
-- [TRANSFORMER] Attention Is All You Need: https://arxiv.org/abs/1706.03762
-- [MQA] MQA: https://arxiv.org/abs/1911.02150
-- [GQA] GQA: https://arxiv.org/abs/2305.13245
-- [FA1] FlashAttention: https://arxiv.org/abs/2205.14135
-- [FA2] FlashAttention-2: https://arxiv.org/abs/2307.08691
-- [FA3] FlashAttention-3: https://arxiv.org/abs/2407.08608
-- [PAGEDATTN] PagedAttention: https://arxiv.org/abs/2309.06180
-- [RINGATTN] Ring Attention: https://arxiv.org/abs/2310.01889
-- [YARN] YaRN: https://arxiv.org/abs/2309.00071
-- [GATED-DELTANET] Gated DeltaNet: https://arxiv.org/abs/2412.06464
+- [TRANSFORMER](https://arxiv.org/abs/1706.03762) — Attention Is All You Need
+- [MQA](https://arxiv.org/abs/1911.02150) — MQA
+- [GQA](https://arxiv.org/abs/2305.13245) — GQA
+- [FA1](https://arxiv.org/abs/2205.14135) — FlashAttention
+- [FA2](https://arxiv.org/abs/2307.08691) — FlashAttention-2
+- [FA3](https://arxiv.org/abs/2407.08608) — FlashAttention-3
+- [PAGEDATTN](https://arxiv.org/abs/2309.06180) — PagedAttention
+- [RINGATTN](https://arxiv.org/abs/2310.01889) — Ring Attention
+- [YARN](https://arxiv.org/abs/2309.00071) — YaRN
+- [GATED-DELTANET](https://arxiv.org/abs/2412.06464) — Gated DeltaNet
