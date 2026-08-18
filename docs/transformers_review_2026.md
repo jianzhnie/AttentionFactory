@@ -3,48 +3,40 @@
 > 范围说明：本文以 Attention 机制为主线，但覆盖完整 Transformer 模型架构的演变——归一化、FFN 与激活、MoE 结构、残差与层间设计、Embedding 与输出头、量化感知训练与多模态融合均在讨论范围内（见第三章）。
 
 > 资料口径：本文优先采用官方 Hugging Face 模型卡、官方技术报告、官方仓库和 arXiv 论文。闭源模型若官方未披露实现细节，统一标注“官方未完全披露”，不把社区推测写成事实。
+>
 > 量化口径：不同论文和团队使用不同 GPU、序列长度、批大小与量化方式，所有性能数字只在各自来源口径内成立，不能直接横向比较。
-> 核验记录：文档信息截止 2026-08-17。模型架构数据以本文第九章所列来源为准；代码覆盖与测试状态则以同日本地仓库快照为准。`docs/attention_review_2026.md` 当前不存在，因此无法完成与该文件的逐项差异核对；本文已将这一点列为文档缺口。
 
-### 证据与可信度分级
 
-- **公开确认**：官方模型卡、官方配置、官方仓库或产品文档直接披露。
-- **论文/报告**：技术报告或论文披露，但可能与最终发布权重或服务配置有差异。
-- **合理推断**：由兼容配置、衍生模型或第三方镜像推得；只能用于待验证线索，不作为已确认事实。
-
-> 本文旧表格中的“高/中/低”可信度不再作为独立分级：官方配置与官方模型卡归入“公开确认”，技术论文归入“论文/报告”，社区镜像或间接引用归入“合理推断”。
-
----
 
 ## 一、执行摘要
 
 1. **层内 KV 压缩已成为 Attention 主线**：MHA → MQA → GQA → MLA 的演进清晰；截至 2026 年，DeepSeek、GLM、Kimi K3、MiniMax M3、Mistral Small 4 均采用 MLA 或共享 KV 方案；Phi、DBRX、InternLM、Nemotron、Step、MiMo、Zamba、Arctic、Hunyuan 继续验证 GQA、SWA、SSM 与混合架构。
 2. **长上下文瓶颈从"能不能训练"转向"能不能低成本推理"**：2024 年主流 128K，2025 年 256K–1M 开源，2026 年 DeepSeek-V4、GLM-5.2、Kimi K3、MiniMax M3 将 1M 上下文推向生产。
-3. **稀疏/压缩注意力重新成为主线**：DeepSeek-V4（CSA+HCA）、GLM-5.2（DSA+IndexShare）、MiniMax M3（MSA）从 KV 数量维度压缩或选择，而非仅依赖窗口注意力；IndexShare 在 1M 上下文降低约 2.9x FLOPs。
-4. **线性注意力在超长上下文中重新崛起**：Qwen3-Next/3.8、Kimi Linear/K3 采用 Gated DeltaNet/KDA 与 GQA/MLA 混合，形成"3:1 线性:全量"的主流层间配比；Kimi Linear 报告 KV 减少约 75%、解码吞吐最高约 6x。
+3. **稀疏/压缩注意力在本文样本中重新增多**：DeepSeek-V4（CSA+HCA）、GLM-5.2（DSA+IndexShare）、MiniMax M3（MSA）从 KV 数量维度压缩或选择，而非仅依赖窗口注意力；GLM-5.2 模型卡声明 IndexShare 在 1M 上下文降低约 2.9× FLOPs [INDEXSHARE]，独立 IndexCache 论文则报告其 30B/H100 实验的端到端加速 [INDEXCACHE]。
+4. **线性注意力在超长上下文中重新受到采用**：Qwen3-Next/3.8、Kimi Linear/K3 的来源记录采用 Gated DeltaNet/KDA 与 GQA/MLA 混合；其中 3:1 是两个系列采用的代表配比，尚不能视为行业统一值。Kimi Linear 来源报告 KV Cache 最高减少约 75%；模型卡/报告最高约 6.3×，但论文 Figure 7 的 batch=1 decode 对照约为 2.2–2.3×，不能把 6.3× 迁移为所有服务场景的端到端加速 [KIMI-LINEAR]。
 5. **FlashAttention/PagedAttention 是系统级加速而非新数学形式**：训练默认 FlashAttention 系列，推理服务组合 PagedAttention、FlashMLA、FP4 indexer cache，可与任意架构正交叠加。
 6. **GQA 仍是最稳妥的默认基线**：Qwen2.5、Llama 3/4、MiniMax M2/M2.7、GLM-4.7 继续使用 GQA；MLA 更适合超大 MoE 与 1M 上下文高并发场景。
 7. **闭源模型透明性显著低于开源**：GPT-5.6 Sol、Claude Fable 5/Mythos 5、Gemini 3.x 架构细节未披露；本文仅将闭源模型列为「官方未完全披露」，不做架构推断。
 8. **位置编码与 Attention 强耦合**：RoPE、YaRN、NTK-aware、ALiBi、Partial RoPE（0.25–0.5）、mRope、NoPE 间隔层直接影响长上下文效果，不能把上下文长度单独归因于 Attention 升级。
 9. **归一化与 FFN 形成稳定基线**：在已公开配置的 decoder-only 模型中，「RMSNorm + Pre-Norm + SwiGLU」是最常见组合；但 DeepNorm、Sandwich-LN、并行块和 GELU/GeGLU 仍在特定架构中有价值，不应表述为“完全取代”。
 10. **MoE 进入细粒度与系统协同阶段**：Switch Top-1 → Mixtral Top-2+辅助损失 → DeepSeekMoE 的细粒度路由、共享专家与无辅助损失偏置。本文样本中 2026 年代表模型覆盖 128–896 路由专家、Top-4–Top-16 激活；这是样本分布，不是行业统一标准。
-11. **层间配比成为核心超参**：纯 Attention 时代的固定堆叠已经结束，2026 年主要设计空间是"线性:全量 3:1""SWA:全局 6:1""1 个稀疏 indexer + 3 个共享""首 1–3 层稠密""末 3 层全量"等层类型配比。
+11. **层间配比成为核心超参**：纯 Attention 时代的固定堆叠已经结束，2026 年主要设计空间是"线性:全量 3:1"、"SWA:全局 6:1"、"1 个稀疏 indexer + 3 个共享"、"首 1–3 层稠密"等层类型配比；DeepSeek-V4 主干末三层实际为 `4,128,4`，`compress_ratios` 末三项 `0,0,0` 属于 3 个 DSpark/MTP 层，不能解释为主干末三层全量注意力。
 12. **量化从部署选项前置到训练设计**：FP8 在若干超大模型训练中已常见，FP4/MXFP4 QAT 也开始进入旗舰模型；但 BF16 仍广泛使用，尚不能把 FP8/FP4 称为所有模型的默认。
 13. **多模态从外挂走向原生**：Kimi K3（MoonViT-V2 401M）、MiniMax-M3（CLIP + patch merge）、Qwen3.8-27B（27 层视觉塔 + mrope 交错 `mrope_section=[11,11,10]`）均在 2026 年旗舰中内置多模态塔与专属位置编码。
-14. **残差/层间路径重新成为设计变量**：Kimi K3 的 Attention Residuals（AttnRes，`block_size=12`）显示，除 Pre/Post-Norm 外，跨层信息通路也可成为旗舰模型的试验方向；其可复现性与泛化收益仍需更多公开证据。
-15. **未来 1–2 年主线：混合架构 + 量化前置 + 层配比搜索**：GQA 在中小模型/部分 MoE 继续稳固，MLA + 稀疏/线性/SSM 混合主导 1M 上下文和超大 MoE；归一化/FFN 趋于收敛后，AttnRes 类跨层通路、层配比 NAS、原生多模态将是新的试验田；只看 Attention 会错过至少一半的架构信息量。
+14. **残差/层间路径重新成为设计变量**：DeepSeek-V4 的 Manifold-Constrained Hyper-Connections（mHC，`hc_mult=4`）与 Kimi K3 的 Attention Residuals（AttnRes，`block_size=12`）都显示，除 Pre/Post-Norm 外，跨层信息通路也可成为旗舰模型的试验方向；两者的可复现性与泛化收益仍需更多公开证据。
+15. **未来 1–2 年值得跟踪的方向：混合架构 + 量化前置 + 层配比搜索**：GQA 在中小模型/部分 MoE 继续稳固，MLA + 稀疏/线性/SSM 混合有望继续服务 1M 上下文和超大 MoE；AttnRes 类跨层通路、层配比搜索和原生多模态仍需更多可复现结果验证。
 
----
+
 
 ## 快速总览（截至 2026-08）
 
 | 系列 | 最新代表 | Attention 核心 | 上下文 | 说明 |
 |------|----------|----------------|--------|------|
 | Qwen | Qwen3.8-2.4T-A95B | Gated DeltaNet + Gated Attention | 262K，扩展 1M | 512 专家 Top-10 |
-| DeepSeek | V4-Pro-0813 | MLA + CSA + HCA | 1M | 1M 下 KV 约为 V3.2 的 10% |
-| GLM | GLM-5.2 | MLA + DSA + IndexShare | 1M | IndexShare 降 2.9x FLOPs |
+| DeepSeek | V4-Pro-0813 | MLA + CSA + HCA | 1M | 来源报告：1M 下 KV 约为 V3.2 的 10% [DEEPSEEK-V4] |
+| GLM | GLM-5.2 | MLA + DSA + IndexShare | 1M | 来源报告：IndexShare 降 2.9× FLOPs [INDEXSHARE] |
 | Kimi | Kimi K3 | 69 KDA + 24 Gated MLA | 1M | 2.8T/104B Active |
-| MiniMax | M3 | GQA + MSA | 1M | 相对 M2 的 prefill 9x、decode 15x |
+| MiniMax | M3 | GQA + MSA | 1M | 来源报告：相对 M2 的 prefill 9×、decode 15× [MINIMAX-M3] |
 | Llama | Llama 4 Scout/Maverick | GQA + chunked local + NoPE 间隔 | 10M/1M | MoE |
 | Mistral | Mistral-Small-4 | MLA 类 | 1M | `kv_lora_rank=256` |
 | Gemma | Gemma 4 | GQA + local/global | 128K-256K | p-RoPE，Unified K/V |
@@ -56,8 +48,8 @@
 | Nemotron | Nemotron-3-Super | Mamba-2 + MoE + GQA | 256K，可扩展 1M | 120B/12B Active，LatentMoE |
 | InternLM | InternLM3-8B | GQA 32Q/2KV | 32K | Dynamic RoPE |
 | Baichuan | Baichuan-M3-235B | 继承 Qwen3 的 GQA | 40K | 基于 Qwen3-235B-A22B |
-| Step | Step-3.7-Flash | GQA 类 + SWA + MoE | 256K | 198B/11B Active，多模态 |
-| Xiaomi MiMo | MiMo-V2.5-Pro | SWA + Global Attention 6:1 | 1M | 1.02T/42B Active，KV 减少约 7x |
+| Step | Step-3.7-Flash | Full GQA 64Q/8KV + SWA 96Q/8KV（1:3） | 256K | 198B/11B Active，多模态 |
+| Xiaomi MiMo | MiMo-V2.5-Pro | SWA + Global Attention 6:1 | 1M | 1.02T/42B Active；来源报告 KV 减少约 7× [MIMO-V25] |
 | Zamba | Zamba2-7B | Mamba2 + Shared Attention | 4K，可扩展 16K | SSM/Transformer 混合 |
 | Snowflake Arctic | Arctic-Instruct | GQA + Dense-MoE Hybrid | 4K | 480B，128 专家 Top-2 |
 | Hunyuan | Hy3 | GQA 64Q/8KV | 256K | 295B/21B Active，192 专家 Top-8 |
@@ -65,21 +57,9 @@
 **Attention 演进主线**
 
 - 2023 年：GQA 成为开源模型默认选择。
-- 2024 年：DeepSeek-V2 提出 MLA，KV Cache 相对 MHA 减少约 93.3%。
+- 2024 年：DeepSeek-V2 提出 MLA，报告中相对 MHA 对照的 KV Cache 约减少 93.3% [DEEPSEEK-V2]。
 - 2025 年：Qwen3-Next 和 Kimi Linear 验证 Gated DeltaNet/KDA 线性注意力；Llama 4 和 Gemma 3 验证 MoE + 局部注意力。
 - 2026 年：DeepSeek-V4、GLM-5.2、MiniMax M3 把稀疏/压缩注意力推到 1M 上下文生产场景；Kimi K3 达到 2.8T 参数。
-
-## 信息核验记录
-
-- GLM-5.1 上下文已根据官方配置从 1M 修正为 202,752。
-- Zamba-7B 的 Attention 核心修正为 Mamba + Shared Attention，避免与 Zamba2 的 Mamba2 混淆。
-- Hunyuan-A13B、Hy3、Hy-MT2、Step-3.7、MiMo-V2.5-Pro、Zamba2、Arctic 均以官方 HF 配置或官方模型卡核验。
-- Step-3.7-Flash 的 KV head 数量未在顶层配置完整公开，本文按“GQA 类”表述，不写成确定值。
-- 2026-08 复核：Kimi K3、DeepSeek-V4-Pro-0813、GLM-5.2、Qwen3-Next/Qwen3.8 全系列、MiniMax-M3、MiMo-V2.5-Pro、Hy3 的关键参数已与官方 HF config.json 逐字段核对；Qwen3-Next/Qwen3.8 的位置编码由“RoPE/YaRN”修正为 Partial RoPE（`partial_rotary_factor=0.25`），YaRN 仅为 1M 扩展手段。
-- GPT、Gemini、Claude 等闭源模型的 Attention 细节继续标注“官方未完全披露”，不将推测写成事实。
-- 文中量化数字均来自对应技术报告、官方模型卡或论文；不同测试口径不直接横向比较。
-
----
 
 ## 二、模型系列逐一分析
 
@@ -94,15 +74,7 @@ Qwen 的演进路线可以概括为：GQA 基线 -> Gated DeltaNet + Gated Atten
 | Qwen3-Next-80B-A3B | 2025-09 | 是 | MoE 80B/3B Active | Gated DeltaNet + Gated Attention 3:1 | 256K，YaRN 扩展 1,010,000 | 12 个隐藏块，每块 3 层线性 + 1 层全量 |
 | Qwen3.5 / 3.6 | 2025-2026 | 是 | Dense/MoE | Gated DeltaNet + Gated Attention | 256K，可扩展 1M | 9B、27B、35B-A3B 等尺寸 |
 | Qwen3.8-27B | 2026-08-05 | 是 | 多模态 Dense | Gated DeltaNet + Gated Attention | 262,144 原生，托管 1M | 16 个隐藏块，Gated Attention 24Q/4KV，head_dim 256 |
-| Qwen3.8-2.4T-A95B | 2026-08-12 | 是 | MoE 2.4T/95B Active | Gated DeltaNet + Gated Attention | 262,144 原生，扩展 1M | 512 专家 Top-10，Gated Attention 64Q/4KV |
-
-**关键事实**
-
-- Qwen3-Next 官方模型卡明确给出 Hidden Layout：`12 * (3 * (Gated DeltaNet -> MoE) -> 1 * (Gated Attention -> MoE))`，其中 Gated DeltaNet 使用 32 个 V head、16 个 QK head，head_dim 128；Gated Attention 使用 16Q/2KV，head_dim 256。
-- Qwen3.8-27B 官方模型卡给出：`16 * (3 * (Gated DeltaNet -> FFN) -> 1 * (Gated Attention -> FFN))`；Gated Attention 为 24Q/4KV，Gated DeltaNet 为 48 V head / 16 QK head。
-- Qwen3.8-2.4T 官方模型卡给出 23 个类似隐藏块，512 个专家、每 Token 激活 10 个专家。官方配置进一步确认：92 层（`full_attention_interval=4`）、Gated Attention 64Q/4KV、Gated DeltaNet 128 V head / 16 QK head，并含 1 个共享专家（intermediate 2048）。
-- 位置编码方面，Qwen3-Next 与 Qwen3.8 系列的官方配置均为 Partial RoPE（`partial_rotary_factor=0.25`，theta 1e7），Qwen3.8-27B 另以 mrope 支持多模态；配置中未启用 YaRN，YaRN 仅是官方推荐的 1M 扩展手段。
-- 从 Qwen3-Next 开始，Qwen 系列从“GQA 全量注意力”转向“少量全量注意力 + 线性注意力”的混合路线，目标是在 256K 到 1M 上下文下降低解码成本。
+| Qwen3.8-2.4T-A95B | 2026-08（HF 仓库 08-08，08-12 更新） | 是 | MoE 2.4T/95B Active | Gated DeltaNet + Gated Attention | 262,144 原生，扩展 1M | 512 专家 Top-10，Gated Attention 64Q/4KV |
 
 ### 2.2 DeepSeek 系列（深度求索）
 
@@ -111,20 +83,12 @@ DeepSeek 是 MLA 的提出者和主要推动者，2026 年进一步进入“MLA 
 | 版本 | 时间 | 开源 | 基础架构 | Attention 核心 | 上下文 | 关键优化 |
 |------|------|------|----------|----------------|--------|----------|
 | DeepSeek LLM 7B/67B | 2024-01 | 是 | Dense | MHA | 4K 级 | 标准稠密 Transformer |
-| DeepSeek-V2 / V2.5 | 2024-05 / 2024-09 | 是 | MoE 236B/21B Active | MLA | 128K | KV Cache 相对 MHA 对照减少约 93.3% |
+| DeepSeek-V2 / V2.5 | 2024-05 / 2024-09 | 是 | MoE 236B/21B Active | MLA | 128K | KV Cache 相对 MHA 对照减少约 93.3% [DEEPSEEK-V2] |
 | DeepSeek-V3 | 2024-12 | 是 | MoE 671B/37B Active | MLA | 128K | MLA + DeepSeekMoE + 多 Token 预测 |
 | DeepSeek-R1 | 2025-01 | 是 | MoE 671B/37B Active | MLA | 128K | 基于 V3-Base 的强化学习推理 |
 | DeepSeek-V3.2 | 2025-09 | 是 | MoE | MLA + DSA | 128K | CSA + HCA，长上下文稀疏化 |
-| DeepSeek-V4-Pro | 2026-04 预览，2026-08-13 正式 | 是 | MoE 1.6T/49B Active | MLA 类 + CSA + HCA + SWA 分支 | 1,048,576 | 1M 下约 27% 推理 FLOPs、10% KV Cache（相对 V3.2） |
-| DeepSeek-V4-Flash | 2026-04 预览，2026-07-31 更新 | 是 | MoE 284B/13B Active | MLA 类 + CSA + HCA + SWA 分支 | 1,048,576 | 1M 下约 10% 推理 FLOPs、7% KV Cache（相对 V3.2） |
-
-**DeepSeek-V4 技术要点**
-
-- 官方技术报告标题为《DeepSeek-V4: Towards Highly Efficient Million-Token Context Intelligence》。
-- V4 使用混合注意力：CSA 先把每 `m` 个 Token 的 KV 压缩为一个 entry，再执行 DeepSeek Sparse Attention；HCA 使用更大压缩比例 `m' >> m` 并把压缩后的 KV 保持为稠密注意力。
-- 配置中出现 `q_lora_rank`、`qk_rope_head_dim`、`sliding_window=128` 和 1 个共享 KV head，说明 MLA 的低秩潜向量、解耦 RoPE 和局部窗口分支在 V4 中继续保留。
-- V4-Pro-0813 官方配置（config.json）进一步确认：61 层、384 个路由专家（Top-6）+ 1 个共享专家、`q_lora_rank=1536`、`qk_rope_head_dim=64`、`head_dim=512`；稀疏 indexer 为 64 head、Top-1024 block；`compress_ratios` 按层在 4（CSA）与 128（HCA）之间交替，末 3 层为 0（全量注意力）；长上下文经 YaRN（factor 16，original 64K）扩展到 1,048,576。
-- 推理侧还包含 FP4 indexer cache、DSpark 投机解码、异构 KV cache 与 on-disk KV cache，这些是系统层优化而非模型数学本身。DSpark 在配置中带独立参数块（目标层 58-60、block size 5、Markov rank 512），vLLM/SGLang 均以内建开关支持。
+| DeepSeek-V4-Pro | 2026-04 预览，2026-08-13 正式 | 是 | MoE 1.6T/49B Active | MLA 类 + CSA + HCA + SWA 分支 | 1,048,576 | 来源报告：1M 下约 27% 推理 FLOPs、10% KV Cache（相对 V3.2）[DEEPSEEK-V4] |
+| DeepSeek-V4-Flash | 2026-04 预览，2026-07-31 更新 | 是 | MoE 284B/13B Active | MLA 类 + CSA + HCA + SWA 分支 | 1,048,576 | 来源报告：1M 下约 10% 推理 FLOPs、7% KV Cache（相对 V3.2）[DEEPSEEK-V4] |
 
 ### 2.3 GLM 系列（智谱 AI）
 
@@ -139,13 +103,8 @@ GLM 的公开演进路线是：MHA -> MQA -> GQA -> MLA + DSA。
 | GLM-4.7-Flash | 2026-01 | 是 | MoE Lite | MLA 类 | 202,752 | `kv_lora_rank=512` |
 | GLM-5 | 2026-02 | 是 | MoE 744B/40B Active | MLA + DSA | 202,752 | 引入 DeepSeek Sparse Attention |
 | GLM-5.1 | 2026-04 | 是 | MoE | MLA + DSA | 202,752 | 长时任务能力升级 |
-| GLM-5.2 | 2026-06 | 是 | MoE | MLA + DSA + IndexShare | 1,048,576 | IndexShare 在 1M 上下文降低 2.9x 每 Token FLOPs |
+| GLM-5.2 | 2026-06 | 是 | MoE | MLA + DSA + IndexShare | 1,048,576 | 来源报告：IndexShare 在 1M 上下文降低 2.9× 每 Token FLOPs [INDEXSHARE] |
 
-**关键事实**
-
-- GLM-5 官方模型卡确认从 355B/32B Active 扩展到 744B/40B Active，并集成 DSA 以降低部署成本。
-- GLM-5.2 官方模型卡提出 IndexShare：每 4 个稀疏注意力层共享同一个 indexer，在 1M 上下文降低每 Token FLOPs 约 2.9 倍。官方配置确认：78 层（前 3 层稠密）、256 个路由专家（Top-8）+ 1 个共享专家、`q_lora_rank=2048`、`kv_lora_rank=512`、`qk_rope_head_dim=64`；indexer 为 32 head、Top-2048 block，`indexer_types` 按“1 full + 3 shared”每 4 层循环，即 IndexShare 的配置级证据；上下文 1,048,576。
-- GLM-4.7 的配置仍为纯 GQA（96Q/8KV），GLM-4.7-Flash 已出现 `kv_lora_rank=512`，说明智谱在轻量模型上先验证 MLA，再在 GLM-5 系列大规模启用。
 
 ### 2.4 Kimi 系列（月之暗面）
 
@@ -157,14 +116,8 @@ Kimi 的演进路线是：长上下文系统工程 -> MLA/MoE -> KDA 线性注�
 | Moonlight-16B-A3B | 2025-02 | 是 | MoE 16B/3B Active | DeepSeek-V3 类 MLA | 技术报告口径 | 小 MoE 训练效率 |
 | Kimi K2 | 2025-07 | 是 | MoE 1T/32B Active | MLA | 256K | 1T 级 MoE + MLA |
 | Kimi K2.5 / K2.6 / K2.7 | 2026 | 是 | MoE | MLA | 256K | 多模态扩展，64Q，`kv_lora_rank=512` |
-| Kimi Linear | 2025-10 | 是 | MoE 48B/3B Active | KDA + Gated MLA 3:1 | 1M | KV Cache 最高减少 75%，解码吞吐最高提升约 6x |
+| Kimi Linear | 2025-10 | 是 | MoE 48B/3B Active | KDA + Gated MLA 3:1 | 1M | 来源报告：KV Cache 最高减少 75%，最高约 6.3×；Figure 7 batch=1 decode 约 2.2–2.3× [KIMI-LINEAR] |
 | Kimi K3 | 2026-06 | 是 | MoE 2.8T/104B Active | 69 KDA + 24 Gated MLA | 1,048,576 | Attention Residuals，Stable LatentMoE 16/896 专家 |
-
-**关键事实**
-
-- Kimi Linear 官方模型卡明确：KDA 是 Gated DeltaNet 的精细化版本，使用 3:1 的 KDA 与全局 MLA 混合；在 128K 上下文 RULER 上报告 84.3 分和 3.98x 速度提升，在 1M 上下文中相对 MLA 报告约 6.3x 更快的 TPOT。
-- Kimi K3 官方模型卡明确：2.8T 总参、104B 激活、93 层、1 个 Dense 层、69 KDA + 24 Gated MLA、896 专家、每 Token 激活 16 个专家、2 个共享专家、1M 上下文。
-- K3 使用 Attention Residuals（AttnRes）替代普通残差连接，这是 Kimi 对传统 Pre-Norm/Post-Norm 之外跨层信息路径的尝试。
 
 ### 2.5 MiniMax 系列
 
@@ -178,11 +131,6 @@ MiniMax 的路线从“线性注意力 + 全量注意力混合”转向“GQA �
 | MiniMax-M2.5 / M2.7 | 2026 | 是 | MoE | GQA 48Q/8KV | 204,800 | 256 专家 Top-8，RoPE theta 5M |
 | MiniMax-M3 | 2026-06 | 是 | MoE 428B/23B Active | GQA + MiniMax Sparse Attention | 1,048,576 | 稀疏选择 + 专用 GPU kernel |
 
-**关键事实**
-
-- MSA 论文明确：MSA 是建立在 GQA 上的 blockwise sparse attention，Index Branch 为每个 GQA group 独立选择 Top-k KV block，Main Branch 只对选中 block 做精确 block-sparse attention。
-- MSA 论文在 109B 模型上报告：1M 上下文每 Token 注意力计算降低 28.4x，H800 上 prefill 14.2x、decode 7.6x 墙钟加速。
-- MiniMax-M3 模型卡报告：相对 M2，在 1M 上下文下 prefill 9x、decode 15x 加速，每 Token 计算降至 1/20。两份数字测试口径不同，均保留。官方配置确认：60 层（前 3 层稠密）、GQA 64Q/4KV、128 个路由专家（Top-4）+ 1 个共享专家；MSA 稀疏参数为 16 个 Top block、block 大小 128、4 个 index head；Partial RoPE 0.5、theta 5M；另含 7 个 MTP 模块与 CLIP 视觉塔（原生多模态）。
 
 ### 2.6 Llama 系列（Meta）
 
@@ -194,12 +142,6 @@ Llama 系列是开源模型从 MHA 走向 GQA，并进一步走向 MoE + 局部�
 | Llama 2 | 2023-07 | 是 | Dense 7B/13B/70B | 小模型 MHA，70B GQA | 4K | 70B 使用 8 KV Head |
 | Llama 3 / 3.1 / 3.2 / 3.3 | 2024 | 是 | Dense 8B-405B | 全尺寸 GQA | 8K-128K | RoPE base 500K，128K 训练 |
 | Llama 4 Scout / Maverick | 2025-04 | 是 | MoE | GQA + chunked local attention + NoPE 间隔层 | Scout 10M，Maverick 1M | MoE，QK-Norm，scaled RoPE，attention temperature tuning |
-
-**关键事实**
-
-- Meta 官方 Llama 4 模型卡确认 Scout 为 109B 总参/17B 激活、16 专家、上下文 10M；Maverick 为 400B 总参/17B 激活、128 专家、上下文 1M。
-- 官方源码 `args.py` 和 `model.py` 显示 Llama 4 使用 `n_kv_heads`（GQA）、`nope_layer_interval`（无位置编码间隔层）、`attention_chunk_size`（局部 chunked attention）和 `use_qk_norm`。
-- Llama 4 的“10M 上下文”不等于所有层都执行全量注意力；源码中的 chunked local attention 和 NoPE 层说明长上下文依赖局部窗口、稀疏层间设计和位置编码缩放。
 
 ### 2.7 GPT 系列（OpenAI）
 
@@ -213,8 +155,6 @@ GPT 系列早期有公开架构，2023 年后闭源。
 | GPT-3.5 / GPT-4 / GPT-4o / o1 | 2022-2024 | 否 | 官方未完全披露 | 官方未完全披露 | 4K-128K 产品档位 | 产品级长上下文，架构细节未公开 |
 | GPT-5.5 / GPT-5.6 Sol | 2025-2026 | 否 | 官方未完全披露 | 官方未完全披露 | 官方未完全披露 | 从多家官方基准看是 2026 年主力模型，但未披露 Attention |
 
-**不确定性声明**：OpenAI 官方页面当前无法直接抓取正文，GPT-5.6 Sol 的公开名称来自 Kimi K3、Qwen3.8 等官方模型卡与 DeepSeek-V4 模型卡引用的 OpenAI 页面；其 Attention 架构无公开证据，不应推断为 GQA 或 MLA。
-
 ### 2.8 Gemini 系列（Google）
 
 Gemini 是闭源多模态系列，公开细节远少于 Gemma。
@@ -225,7 +165,6 @@ Gemini 是闭源多模态系列，公开细节远少于 Gemma。
 | Gemini 1.5 Pro / Flash | 2024 | 否 | 官方未完全披露，含 MoE | 官方未完全披露 | 1M，后 2M，研究 10M | 长上下文基础设施 |
 | Gemini 2.0 / 3.x | 2024-2026 | 否 | 官方未完全披露 | 官方未完全披露 | 产品档位持续扩大 | Gemini 3.1 Pro 等名称出现在多个官方基准中 |
 
-**开源对照**：Google 的 Gemma 系列公开了 Attention 细节，是研究 Gemini 架构的重要替代资料。
 
 ### 2.9 Claude 系列（Anthropic）
 
@@ -237,7 +176,6 @@ Claude 全程闭源，Anthropic 未公开 MHA/GQA/MLA 等实现。
 | Claude 3 / 3.5 / 4.x | 2024-2026 | 否 | 官方未完全披露 | 官方未完全披露 | 产品级 200K 到更大档位 | 多模态与 agentic 能力 |
 | Claude Opus 4.8 / Fable 5 / Mythos 5 | 2026 | 否 | 官方未完全披露 | 官方未完全披露 | 官方未完全披露 | Anthropic 官方页面确认 Fable 5 与 Mythos 5 于 2026-06 发布 |
 
-**不确定性声明**：Claude 的“上下文压缩”是系统级能力，不能等同于模型层新 Attention。
 
 ### 2.10 Mistral 系列（Mistral AI）
 
@@ -254,7 +192,6 @@ Mistral 的演进路线是：GQA + SWA -> GQA 全注意力 -> 2026 年 MLA 类�
 | Mistral-Small-4 | 2026-01 | 是 | MoE | MLA 类 | 1M | 32Q/32KV，`kv_lora_rank=256`，`q_lora_rank=1024` |
 | Mistral-Medium-3.5 | 2026-03 | 是 | Dense 128B | GQA 96Q/8KV | 256K | 长上下文 Dense 档位 |
 
-**关键事实**：Mistral-Large-3 的 `params.json` 显示 128 个 Query/KV head，属于 MHA；Mistral-Small-4 的 text config 显示 `kv_lora_rank` 和 `q_lora_rank`，属于 MLA 类实现。
 
 ### 2.11 Mixtral 系列
 
@@ -283,8 +220,6 @@ Gemma 是 Google 提供公开 Attention 细节的开放系列。
 | Gemma 2 | 2024-06 | 是 | Dense 2B/9B/27B | GQA + 局部/全局交替 | 8K | 4096 滑动窗口局部层 |
 | Gemma 3 | 2025-03 | 是 | Dense/MoE | GQA + 窗口注意力 | 128K | 小窗口 + QK-Norm |
 | Gemma 4 | 2026-05 | 是 | Dense/MoE | GQA + local sliding + global attention | E2B/E4B 128K，12B/26B-A4B/31B 256K | p-RoPE，global 层 Unified K/V，1024 滑动窗口 |
-
-**Gemma 4 官方模型卡原文要点**：local sliding window attention 与 full global attention 交错，且最后一层始终是 global；小模型窗口 512，中大型模型窗口 1024。
 
 ### 2.14 Falcon 系列（TII）
 
@@ -324,7 +259,6 @@ Phi 系列的公开配置显示：早期小模型使用 MHA，Phi-4 起明确转
 | Phi-4 | 2024-12 | 是 | Dense 14B | GQA 40Q/10KV | 16K 配置 | RoPE theta 250K |
 | Phi-4-mini | 2025-02 | 是 | Dense 3.8B | GQA 24Q/8KV | 128K | LongRope，共享输入/输出 embedding |
 
-**核验说明**：Phi-4-mini 官方 README 明确写有 grouped-query attention 和 128K context；配置中的 `sliding_window` 字段不应被单独理解为 Mistral 式 SWA，必须以官方 README 为准。
 
 ### 2.19 DBRX（Databricks）
 
@@ -334,7 +268,6 @@ DBRX 是 2024 年少数公开 GQA + MoE 配置的开源大模型之一。
 |------|------|------|----------|----------------|--------|----------|
 | DBRX-Base / Instruct | 2024-03 | 是 | MoE 132B/36B Active | GQA 48Q/8KV | 32K | 40 层，16 专家 Top-4，RoPE theta 500K |
 
-**核验说明**：当前 Databricks 官方 HF 页面无法直接读取配置，本文使用社区镜像中的公开 config 字段进行核验：`n_heads=48`、`attn_config.kv_n_heads=8`、`max_seq_len=32768`。
 
 ### 2.20 Nemotron 系列（NVIDIA）
 
@@ -345,7 +278,6 @@ Nemotron 3 是“Mamba-2 + MoE + 少量 GQA”的代表性混合架构。
 | Nemotron-3-Nano | 2025-12 | 是 | MoE 30B/3.5B Active | 23 Mamba-2 + 23 MoE + 6 GQA | 256K 默认，可扩展 1M | 128+1 专家，6 专家激活 |
 | Nemotron-3-Super | 2026-03 | 是 | LatentMoE 120B/12B Active | Mamba-2 + MoE + select Attention | 256K 默认，可扩展 1M | MTP，NVFP4 预训练 |
 
-**核验说明**：Nano 官方 README 明确 52 层中 6 层使用 GQA，Super 官方 README 明确为 LatentMoE + Mamba-2 + Attention hybrid 且上下文最高 1M。
 
 ### 2.21 InternLM 系列（上海 AI Lab）
 
@@ -366,7 +298,6 @@ Baichuan 早期使用独立 MHA 架构，2025 年后的 M 系列直接基于 Qwe
 | Baichuan-M2-32B | 2025 | 是 | 基于 Qwen2.5-32B | GQA 40Q/8KV | 131,072 | 领域强化 |
 | Baichuan-M3-235B | 2026-01 | 是 | 基于 Qwen3-235B-A22B | GQA 64Q/4KV | 40,960 | 128 专家 Top-8 |
 
-**核验说明**：Baichuan M2/M3 的 HF 配置分别为 `qwen2` 与 `qwen3_moe`，Attention 直接继承 Qwen 架构，不属于全新 Attention 设计。
 
 ### 2.23 Step 系列（阶跃星辰）
 
@@ -376,9 +307,7 @@ Step 系列早期闭源，2026 年起开始公开 MoE 权重。
 |------|------|------|----------|----------------|--------|----------|
 | Step-1 / Step-2 / Step-3 API | 2024-2025 | 否 | 官方未完全披露 | 官方未完全披露 | 产品档位 | 闭源商业模型 |
 | Step-3.5-Flash | 2026-02 | 是 | MoE | GQA 类 + SWA | 256K | 开源 MoE 推理档位 |
-| Step-3.7-Flash | 2026-05 | 是 | MoE 198B/11B Active | GQA 类 + 512 SWA | 256K | 多模态，1.8B Vision Encoder，FP8/FP4 支持 |
-
-**核验说明**：Step-3.7-Flash 官方模型卡确认 198B 总参、约 11B 激活、256K 上下文；官方配置中 text 部分为 64 heads、512 sliding window、45 层、MoE 中间维度 1280。
+| Step-3.7-Flash | 2026-05 | 是 | MoE 198B/11B Active | 12 Full GQA + 33 SWA，周期 1:3 | 256K | 1.8B Vision Encoder，288 专家 Top-8，3 层 MTP |
 
 ### 2.24 Xiaomi MiMo 系列（小米）
 
@@ -388,9 +317,8 @@ MiMo 是 SWA + Global Attention 混合的 1M 上下文 MoE 系列。
 |------|------|------|----------|----------------|--------|----------|
 | MiMo-Audio-7B | 2025-09 | 是 | 基于 Qwen2 | GQA | 官方未完整披露 | 任意模态语音模型 |
 | MiMo-V2-Flash | 2025-12 | 是 | MoE | SWA + Global Attention | 1M | 混合注意力 + MTP |
-| MiMo-V2.5-Pro | 2026-04 | 是 | MoE 1.02T/42B Active | SWA + GA 6:1，GQA 128Q/8KV | 1M | KV Cache 减少约 7x，3 层 MTP，27T Token 预训练 |
+| MiMo-V2.5-Pro | 2026-04 | 是 | MoE 1.02T/42B Active | SWA + GA 6:1，GQA 128Q/8KV | 1M | KV Cache 减少约 7×，3 层 MTP，27T Token 预训练 |
 
-**核验说明**：MiMo-V2.5-Pro 官方模型卡明确给出 70 层、10 个 Full Attention 层、SWA 窗口 128、QK head dim 192、V head dim 128。官方配置进一步确认：`hybrid_layer_pattern` 中 10 个全量层呈约 6:1 间隔、384 个路由专家（Top-8）、`partial_rotary_factor` 约 0.334、RoPE theta 1e7，SWA 与全量层同为 128Q/8KV。
 
 ### 2.25 Zamba 系列（Zyphra）
 
@@ -401,7 +329,6 @@ Zamba 是 Mamba2 与共享 Attention 混合的代表性开源系列。
 | Zamba-7B | 2024 | 是 | Mamba + Attention Hybrid | Mamba + Shared Attention | 4K | 共享 Attention 权重 |
 | Zamba2-7B-Instruct-v2 | 2025 | 是 | Mamba2 + Attention Hybrid | Mamba2 + Shared Attention | 4K，可扩展 16K | LoRA 投影差异化共享块 |
 
-**核验说明**：Zamba2-7B 官方配置为 `zamba2`，81 层，32 heads；模型卡明确是 Mamba2 + transformer blocks 混合，并支持通过 `use_long_context=True` 扩展到 16K。
 
 ### 2.26 Snowflake Arctic 系列
 
@@ -411,7 +338,7 @@ Arctic 是“Dense 主干 + 大规模 MoE 残差”的代表。
 |------|------|------|----------|----------------|--------|----------|
 | Snowflake Arctic-Instruct | 2024-04 | 是 | Dense-MoE Hybrid 480B | GQA 56Q/8KV | 4K | 10B Dense + 128x3.66B MoE，Top-2 |
 
-**核验说明**：官方配置显示 `model_type=arctic`、35 层、56 heads、8 KV heads、128 experts、Top-2。
+
 
 ### 2.27 Hunyuan 系列（腾讯）
 
@@ -424,37 +351,26 @@ Hunyuan 的公开路线是：Dense/MoE 商用模型 -> Hunyuan-A13B 开源 MoE -
 | Hy3 | 2026-07 | 是 | MoE 295B/21B Active | GQA 64Q/8KV | 256K | 192 专家 Top-8，MTP 3.8B 参数 |
 | Hy-MT2-30B-A3B | 2026-05 | 是 | MoE 30B/3B Active | GQA 32Q/4KV | 256K | 128 专家 Top-8，33 语言翻译 |
 
-**核验说明**：Hunyuan-A13B 官方模型卡确认 80B 总参/13B 激活、GQA、256K 上下文；Hy3 官方模型卡确认 295B 总参/21B 激活、GQA 64Q/8KV、256K 上下文、192 专家。Hy3 官方配置进一步确认：80 层（首层稠密）、1 个共享专家、`num_nextn_predict_layers=1`（MTP）、RoPE theta 约 1.1e7。
 
 ### 2.28 遗漏分析：已覆盖 / 未覆盖 / 待补充
 
-**模型范围。** 必选的 Qwen、DeepSeek、GLM、Kimi、MiniMax、Step、Xiaomi MiMo、Hunyuan、Llama 均已覆盖；另补充 GPT、Gemini、Claude、Mistral/Mixtral、Yi、Gemma、Falcon、PaLM、MiniCPM、Grok、Phi、DBRX、Nemotron、InternLM、Baichuan、Zamba 和 Snowflake Arctic，超过“额外 ≥12 个”的要求。
-
-**A-K 文档/代码覆盖快照。** “已覆盖”表示存在可运行的 PyTorch 实现或完整接口；“待补充”表示仅教学级、局部接口或未进入模型级组合；“未覆盖”表示当前仓库无对应实现。
-
 | 类别 | 文档状态 | 当前代码状态 | 主要缺口 | 优先级 |
 |------|----------|------------------|----------|--------|
-| A. Attention | 已覆盖 | 已覆盖 MHA/MQA/GQA/MLA/SWA/BlockSparse/Linear/Hybrid/GDN/Lightning/Ring/CSA/ALiBi/FlashMLA/FA1-4；Ring 有 distributed reference path | FlashMLA/DSA/MSA/CSA 无生产 kernel；FA1-4 与 Ring collective 仍是算法/教学实现 | 高 |
-| B. 位置编码 | 已覆盖 | 已覆盖 RoPE/YaRN/NTK/ALiBi/Partial RoPE/PI/LongRoPE registry/2D/mRoPE | 官方逐频率 LongRoPE preset 与 checkpoint-compatible head-wise mRoPE 仍待核验 | 中 |
+| A. Attention | 已覆盖 | 已覆盖 MHA/MQA/GQA/MLA/SWA/BlockSparse/Linear/Hybrid/GDN/KDA/Lightning/Ring/CSA/DSA/MSA/HCA/ALiBi/FlashMLA/FA1-4；Ring 有 distributed reference path | FlashMLA/DSA/MSA/CSA/HCA/KDA 无生产 kernel；FA1-4 与 Ring collective 仍是算法/教学实现 | 高 |
+| B. 位置编码 | 已覆盖 | 已覆盖 Learned Absolute/Sinusoidal/T5 Bias/NoPE/RoPE/YaRN/NTK/ALiBi/Partial RoPE/PI/LongRoPE registry/2D/mRoPE | 官方逐频率 LongRoPE preset 与 checkpoint-compatible head-wise mRoPE 仍待核验 | 中 |
 | C. FFN/MLP | 已覆盖 | FeedForward/SwiGLU/GeGLU/ReGLU/Clamp-SwiGLU/FFN factory/QATWrapper 已实现 | QAT observer/calibration、KV 专用量化与生产低精度 kernel 仍待补 | 中 |
 | D. 归一化 | 已覆盖 | RMSNorm/LayerNorm/DeepNorm/LayerScale/QK-Norm 已实现并接入 MHA/MQA/GQA/MLA 与 TransformerBlock | 生产 fused norm 和大深度数值验证仍待补 | 中 |
-| E. 激活函数 | 已覆盖 | 精确 GELU/tanh GELU/ReLU/Squared ReLU/SiLU/Clipped SiLU 已实现 | 缺独立 erf 名称别名与量化数值边界测试 | 低 |
+| E. 激活函数 | 已覆盖 | 精确 GELU/erf GELU/tanh GELU/ReLU/Squared ReLU/SiLU/Swish/Clipped SiLU 已实现 | 量化数值边界测试仍可补充 | 低 |
 | F. 残差/层序 | 已覆盖 | Pre/Post/Sandwich/DeepNorm、Parallel Block、LayerScale、AttnRes 已集成 `TransformerBlock` | AttnRes 仍是逐维门控参考版，未复现跨 block 缓冲/路由 | 中 |
 | G. MoE | 已覆盖 | Top-k/共享专家/LatentMoE/Z-Loss/无辅助偏置/Expert Choice/Expert Dropout/Gumbel/EP all-to-all reference 已实现 | Group GEMM、全局 capacity/drop 和真实多节点吞吐仍待补 | 高 |
 | H. SSM/Hybrid | 已覆盖 | `Mamba2Layer`、`HybridSSMBlock`、`HybridLayerStack` 已实现 per-channel state、causal conv、norm/residual/FFN 和 layer map | 官方 SSD/fused selective-scan kernel、checkpoint-compatible Zamba 配置仍待补 | 高 |
-| I. Embedding/输出头 | 已覆盖 | tied embeddings、`MultiTokenPredictionHead`、`mtp_loss`、结构化 `CausalLMOutput` 已实现 | chained MTP 与大规模参数/质量对齐仍待补 | 中 |
-| J. 整体架构 | 已覆盖 | Decoder-only、Encoder-Decoder/CrossAttn、Prefix LM、`MultimodalCausalLM` early/cross fusion 已实现 | 真实 ViT/patch merge、视频变长 batch 和生产多模态 checkpoint 仍待补 | 中-高 |
-| K. 训练/推理系统 | 已覆盖 | Paged KV/COW、Tiered HBM/CPU/NVMe reference、Speculative/EAGLE/DSpark 接口、FA1-4、QAT 已实现 | 生产 allocator、异步 DMA、KV reuse、CUDA graph 和量化导出仍待补 | 高 |
-
-**文档缺口。** `docs/attention_review_2026.md` 未在仓库中出现，所以 prompt 要求的“两份文档逐项对照”当前不可执行。高优先级选项是恢复该文件，或将其明确废弃并把 Attention 专题维护入本文第四章，避免两份文档继续漂移。
-
-**模型资料缺口。** GPT、Gemini、Claude、Grok 的新版本仍属“官方未完全披露”；Step、MiMo、Zamba、Arctic 的部分训练细节只能从官方配置反推。本文对这些系列宁可保留空值，不用其他开源模型的常见设计填充。
-
----
+| I. Embedding/输出头 | 已覆盖 | tied embeddings、`MultiTokenPredictionHead`、`mtp_loss`、序列/Token 分类、奖励、Embedding 头和结构化 `CausalLMOutput` 已实现 | chained MTP 与大规模参数/质量对齐仍待补 | 中 |
+| J. 整体架构 | 已覆盖 | Decoder-only、Encoder-only、Encoder-Decoder/CrossAttn、Prefix LM、`MultimodalCausalLM` early/cross fusion 已实现 | 真实 ViT/patch merge、视频变长 batch 和生产多模态 checkpoint 仍待补 | 中-高 |
+| K. 训练/推理系统 | 已覆盖 | Paged KV/COW、Tiered HBM/CPU/NVMe reference、Speculative/EAGLE/DSpark、Medusa 并行预测头、FA1-4、QAT 已实现 | 生产 allocator、树验证、异步 DMA、KV reuse、CUDA graph 和量化导出仍待补 | 高 |
 
 ## 三、Transformer 整体架构的演变进程与关键组件
 
-Attention 是 2026 年架构差异化的主线，但模型的最终形态同样由非 Attention 组件决定。本章先按时间线梳理整体演变进程（3.1），再按组件逐一分析（3.2-3.9）。官方配置证据来自各模型公开的 `config.json`（2026-08 复核）。
+Attention 是 2026 年架构差异化的主线，但模型的最终形态同样由非 Attention 组件决定。本章先按时间线梳理整体演变进程（3.1），再按组件逐一分析（3.2-3.9）。配置字段来自第九章列出的来源记录；本轮已核验的 2026 条目见顶部联网记录，其他条目仍保留“待联网复核”。
 
 ### 3.1 演变进程：五个阶段（2017-2026）
 
@@ -466,20 +382,20 @@ Attention 是 2026 年架构差异化的主线，但模型的最终形态同样�
 
 **阶段四（2025）：混合架构与线性注意力复兴。** 纯 Softmax 全量注意力在长上下文下的成本迫使架构分化：Qwen3-Next 与 Kimi Linear 用 Gated DeltaNet/KDA + 3:1 全量混合验证线性注意力的生产可用性；MiniMax-01 验证 Lightning Attention；Llama 4（chunked local + NoPE 间隔层）与 Gemma 3（局部/全局交替 + QK-Norm）探索"少量全局层"路线；MTP 从训练信号变成推理配置项；GPT-OSS 把带 clamp 的 SwiGLU 变体带入开源配置。
 
-**阶段五（2026）：稀疏/压缩生产化、量化前置、原生多模态。** MLA 从 DeepSeek 扩散到 GLM、Kimi、Mistral Small 4；DSA/MSA/CSA 三类学习式稀疏注意力把 1M 上下文推入生产（DeepSeek-V4、GLM-5.2、MiniMax M3）；Qwen3.8 全系列转向 Gated DeltaNet 混合，Kimi K3 以 2.8T + AttnRes 探索层间路径；FP8 训练成为默认、FP4/MXFP4 QAT 前置到训练流程；词表进入 130K-250K 区间；旗舰开源模型普遍原生多模态。闭源模型（GPT-5.6、Claude Fable 5、Gemini 3.x）继续不披露架构。
+**阶段五（2026）：稀疏/压缩生产化、量化前置、原生多模态。** MLA 从 DeepSeek 扩散到 GLM、Kimi、Mistral Small 4；DSA/MSA/CSA 三类学习式稀疏注意力把 1M 上下文推入生产（DeepSeek-V4、GLM-5.2、MiniMax M3）；Qwen3.8 全系列转向 Gated DeltaNet 混合，DeepSeek-V4 以 mHC（`hc_mult=4`）改造残差，Kimi K3 以 2.8T + AttnRes 探索层间路径；FP8 训练成为常见选项、FP4/MXFP4 QAT 前置到训练流程；词表进入 130K-250K 区间；旗舰开源模型普遍原生多模态。闭源模型（GPT-5.6、Claude Fable 5、Gemini 3.x）继续不披露架构。
 
 **驱动力总结。** 五个阶段的更替由四股力量交替主导：训练稳定性（Pre-Norm、QK-Norm、clamp SwiGLU）、训练算力效率（MoE、FP8/FP4）、推理 KV 与带宽成本（MQA -> GQA -> MLA -> 稀疏/线性）、上下文长度（位置编码缩放 -> 窗口 -> 稀疏/压缩）。值得注意的是顺序：每一次组件创新几乎都是先解决上一代主导矛盾的副产物——例如 MLA 解决 KV 成本，却催生了 indexer 与低秩 kernel 的新工程复杂度，进而推动 2026 年的 IndexShare 与 FP4 indexer cache。
 
 ### 3.2 归一化：LayerNorm -> RMSNorm -> QK-Norm
 
-- **RMSNorm 全面取代 LayerNorm**：自 Llama 普及后，2026 年主流开源模型几乎全部使用 RMSNorm（Qwen、DeepSeek、GLM、Kimi、MiniMax、MiMo、Hunyuan 的配置无一例外），省去了均值平移，计算更省。
+- **RMSNorm 在公开 decoder-only 样本中占主导**：自 Llama 普及后，Qwen、DeepSeek、GLM、Kimi、MiniMax、MiMo、Hunyuan 等公开配置记录多采用 RMSNorm；这不等于所有模型或所有子模块都已放弃 LayerNorm。RMSNorm 省去了均值平移，算子更简洁。
 - **Pre-Norm 是默认结构**：训练稳定性优于 Post-Norm；GLM-130B 时代曾用 DeepNorm 支撑深层 Post-Norm，2026 年已很少见。
 - **QK-Norm 从技巧变成标配**：对 Q/K 投影做归一化以稳定 logits 尺度，Gemma 3、Llama 4 使用；2026 年配置中 MiniMax-M3（`use_qk_norm`，per-head 粒度）与 Hy3（`qk_norm: true`）均默认开启。
 - **归一化变体仍在分化**：MiniMax-M3 使用 Gemma 风格的 `(1 + weight)` 缩放（`use_gemma_norm`），说明归一化细节仍在被当作调优空间。
 
 ### 3.3 FFN 与激活函数：SwiGLU 一统天下，变体微调
 
-- **SwiGLU 是绝对主流**：继 PaLM/Llama 之后，2026 年所有受访开源模型的 FFN/Expert 均为 SwiGLU 族（SiLU 门控），中间维度约为 hidden 的 2.7-4 倍（Dense 层）或按专家粒度缩小（MoE 层）。
+- **SwiGLU 是公开 decoder-only 样本中的常见基线**：继 PaLM/Llama 之后，本文可核对的多数开源配置记录使用 SwiGLU/GLU 族；Gemma、DBRX、Falcon 等系列仍需按具体版本配置区分，不能外推为“所有模型”。中间维度通常在 hidden 的约 2.7-4 倍范围内，但 MoE 专家会按粒度缩小。
 - **带 clamp 的 SwiGLU 变体出现**：为抑制极端激活值，GPT-OSS 风格的受限 SwiGLU 进入主流配置——MiniMax-M3 使用 `swiglu_limit=7.0, alpha=1.702`（`hidden_act=swigluoai`），DeepSeek-V4 使用 `swiglu_limit=10.0`。
 - **输出门控**：Qwen3.8 系列在注意力输出端加 Swish 门控（`attn_output_gate`），Kimi K3 使用 SiTU-GLU 激活，门控思想正从 FFN 扩散到注意力分支。
 
@@ -493,7 +409,8 @@ Attention 是 2026 年架构差异化的主线，但模型的最终形态同样�
 ### 3.5 残差与层间结构：MTP 层与 Attention Residual
 
 - **多 Token 预测（MTP）从训练技巧变成推理架构组件**：DeepSeek-V3 用于训练信号，2026 年配置中 `num_nextn_predict_layers` 普遍出现（DeepSeek-V4-Pro=1、GLM-5.2=1、Hy3=1），MiMo-V2.5-Pro 为 3 层、MiniMax-M3 达 7 个模块；DeepSeek 的 DSpark 则把草稿模块直接并入主模型（目标层 58-60），投机解码与主架构合流。
-- **Attention Residual（AttnRes）**：Kimi K3 用学习化的注意力残差替代普通残差相加，是 Pre-Norm/Post-Norm 之争后层间路径的首次大改动，值得持续观察。
+- **Attention Residual（AttnRes）**：Kimi K3 用学习化的注意力残差替代普通残差相加（`attn_res_block_size=12`），是 Pre-Norm/Post-Norm 之争后层间路径的实验性改动，值得持续观察。
+- **Manifold-Constrained Hyper-Connections（mHC）**：DeepSeek-V4 用 `hc_mult=4` 的多副本残差流，在每个 Attention/FFN 子层前后进行受约束的混合；与 AttnRes 都属于残差拓扑变化，但 mHC 的多副本/约束矩阵不能用普通逐维 residual gate 代替。
 
 ### 3.6 Embedding 与输出头
 
@@ -522,24 +439,6 @@ Attention 是 2026 年架构差异化的主线，但模型的最终形态同样�
 | Embedding | 32K 词表、共享权重 | 128K 词表 | 130K-250K 词表、不共享、fp32 输出头 |
 | 量化 | 训练后 PTQ | FP8 训练（V3） | BF16/FP8 并存，FP4/MXFP4 QAT 起步 |
 | 多模态 | 无/外挂 CLIP | ViT 投影外挂 | 原生视觉塔 + mrope |
-
-### 3.10 A-K 模块级设计矩阵
-
-| 类别 | 核心数学/结构 | 关键参数 | 主要目标 | 收益与代价 | 典型协同/冲突 |
-|------|---------------|----------|----------|--------------|----------------|
-| A. Attention | `softmax(QK^T/sqrt(d)+M)V`；MQA/GQA 共享 KV，MLA 缓存低秩潜向量，线性注意力维护递推状态 | Q/KV head 数、`head_dim`、低秩维度、窗口/块大小、Top-k | 质量、KV 容量、prefill FLOPs、decode 带宽 | MQA/GQA/MLA 降 KV；SWA/稀疏/线性降长序列成本；代价是表达损失、indexer 误差或 kernel 复杂度 | 与 RoPE/QK-Norm/FlashAttention 正交；RoPE 解耦是 MLA 矩阵吸收的关键约束 |
-| B. 位置编码 | RoPE 以旋转相位编码相对位置；ALiBi 向 score 加线性距离偏置；PI/NTK/YaRN/LongRoPE 调整频率尺度 | `rope_theta`、factor、original max length、rotary fraction、mRoPE section | 长度外推、长训练稳定、多模态位置对齐 | 可低成本扩展上下文；但不替代长语料训练，外推质量受频率缩放影响 | RoPE 影响 Q/K `head_dim`；Linear/SSM 可使用 NoPE 或少量全局 RoPE 层 |
-| C. FFN/MLP | 两层 FFN：`W2 act(W1x)`；GLU：`W_down(act(W_gx) * W_ux)` | intermediate ratio、bias、clamp、初始化、专家宽度 | 非线性容量、参数/计算效率、低精度稳定 | SwiGLU 常以约 `8/3*d_model` 对齐经典 4x FFN 参数；额外门控投影增加 kernel 复杂度 | Parallel Block 可降低串行深度；MoE 以路由专家替换 FFN |
-| D. 归一化 | LayerNorm 去均值并缩放方差；RMSNorm 仅用 RMS；QK-Norm 分别规范化 Q/K | eps、缩放参数、Pre/Post/Sandwich 位置、DeepNorm alpha | 深层稳定、logit 尺度、收敛 | RMSNorm 算子简洁；Pre-Norm 降低深层优化难度；QK-Norm 增加少量计算与参数 | Post-LN 常需残差缩放/更仔细的优化；QK-Norm 对大 `head_dim` 更有价值 |
-| E. 激活 | GELU/SiLU 为平滑激活，Squared ReLU 放大正区间，Clamp 限制离群值 | 近似方式、clamp limit、alpha | 质量、梯度平滑性、FP8/FP4 数值范围 | 平滑激活通常质量好，clamp 利于低精度；过度裁剪会损失容量 | 与 GLU 门控、QAT scale、专家路由数值范围直接耦合 |
-| F. 残差/层序 | 串行：`x+A(N(x))` 后 `+F(N(x))`；并行：`x+A(N1(x))+F(N2(x))` | norm style、残差缩放、LayerScale init、dropout/drop-path | 深层可训练性、通信/串行延迟、跨层信息保留 | Pre-Norm 稳定；Parallel 可提高并行度；Sandwich/AttnRes 增加参数和验证成本 | 与 MoE all-to-all 及 TP 通信排序强相关 |
-| G. MoE | `y=sum_{i in TopK} p_i E_i(x) + E_shared(x)` | 专家数、Top-k、capacity、分组、共享专家、aux/Z-loss/bias | 容量-计算解耦、训练吞吐、服务成本 | 以较小激活参数获得大容量；代价是路由不平衡、all-to-all 与 Group GEMM 复杂度 | 首层稠密、共享专家、EP/TP 是一体化设计；过大 Top-k 会吞噬稀疏收益 |
-| H. SSM/Hybrid | SSM 递推：`s_t=A_t s_{t-1}+B_t x_t`, `y_t=C_t s_t+D x_t`；Hybrid 按层混合 SSM/Linear/Full Attention | `d_state`、`d_inner`、dt、chunk size、层比例 | 线性长序列、流式推理、固定状态 | 无传统 KV 或 KV 更小；代价是内容寻址/精确回忆较弱且 fused scan 难 | 间隔 Full Attention 补长程召回；层比例需与 FFN/MoE 计算预算共同搜索 |
-| I. Embedding/输出头 | `h_0=Embed(ids)`，`logits=h_L W_vocab^T`；MTP 从共享 hidden 预测多个未来 token | vocab size、tie flag、MTP 步数/损失权重、LM-head dtype | 词表覆盖、参数节省、投机解码接受长度 | tied 节省参数但限制输入/输出解耦；MTP 增加训练头与验证逻辑 | MTP 需与 EAGLE/DSpark/服务调度配套；低精度下可保留 LM head 高精度 |
-| J. 整体范式 | Encoder-only、Decoder-only、Encoder-Decoder、Prefix LM；多模态采用 early/cross/late fusion | mask 类型、交叉注意力层、模态 token 比例、共享词表 | 生成、理解、条件生成、多模态对齐 | Decoder-only 生态最强；Encoder-Decoder 对条件任务更自然；多模态融合增加序列长度与对齐成本 | mask、位置编码、CrossAttn 与 KV cache 必须联合设计 |
-| K. 训练/推理系统 | 混合精度/QAT、TP/PP/DP/EP/ZeRO、checkpoint/offload、Paged KV、speculative decoding | dtype/scale granularity、并行拓扑、page size、draft length、分层存储策略 | 吞吐、显存、延迟、集群利用率 | 往往带来最大的墙钟收益，但不改变模型数学；引入调度、数值与故障复杂度 | MoE 需 EP，长上下文需 CP/KV 分层，FP4/FP8 需激活裁剪与 kernel 支持 |
-
----
 
 ## 四、Attention 机制专题解析
 
@@ -581,7 +480,7 @@ Attention 是 2026 年架构差异化的主线，但模型的最终形态同样�
 - 核心原理：把 Key/Value 联合压缩到低维潜向量，推理只缓存潜向量和解耦 RoPE Key。
 - 关键参数：`kv_lora_rank`、`q_lora_rank`、`qk_rope_head_dim`。
 - 代表模型：DeepSeek-V2/V3/V4、GLM-5/5.2、Kimi K2/K3、MiniCPM3、Mistral Small 4。
-- 收益：DeepSeek-V2 报告 KV Cache 相对 MHA 对照减少约 93.3%；V4 在 1M 上下文下相对 V3.2 将 KV Cache 降到约 10%（Pro）。
+- 收益：DeepSeek-V2 报告 KV Cache 相对 MHA 对照减少约 93.3% [DEEPSEEK-V2]；DeepSeek-V4 论文第 5 页称在 1M 上下文下 Pro 变体相对 V3.2 将 KV Cache 降到约 10% [DEEPSEEK-V4]。
 - 代价：实现复杂度高于 GQA，需要矩阵吸收和自定义 kernel；潜空间压缩可能损失极端长距离细节。
 
 ### 4.5 SWA
@@ -595,28 +494,28 @@ Attention 是 2026 年架构差异化的主线，但模型的最终形态同样�
 
 - 核心原理：以 block 为单位选择需要计算的 Key/Value，而不是逐 Token 稀疏。
 - 代表模型：MiniMax M3 的 MSA、DeepSeek-V4 的 CSA/HCA、GLM-5 的 DSA。
-- 收益：MSA 论文在 1M 上下文报告每 Token 注意力计算降低 28.4x。
+- 收益：MSA 论文第 12 页在 1M 上下文报告每 Token 注意力计算降低 28.4×；论文第 8–12 页另给出 H800 prefill 14.2×、decode 7.6×，这些是 109B/6B-active 实验模型的 attention/服务口径 [MSA]。DeepSeek-V4 的 CSA/HCA 数字见论文第 9–13 页，不能与 MSA 的 kernel 实验直接横比 [DEEPSEEK-V4]。
 - 代价：需要 indexer、block table、Top-k 选择与 kernel 协同设计；稀疏模式错误会直接损失召回。
 
 ### 4.7 Linear Attention 与 Hybrid Attention
 
 - 核心原理：用可分解核函数替代 Softmax，使 KV 信息进入固定大小状态。
 - 代表模型：Kimi Linear/K3 的 KDA、Qwen3-Next/3.5/3.6/3.8 的 Gated DeltaNet、MiniMax-01 的 Lightning Attention。
-- 收益：递推状态对序列长度 `n` 为 O(1)（状态本身仍受 head/feature 维度影响）；Kimi Linear 报告 KV Cache 最高减少 75%、解码吞吐最高提升约 6x。
+- 收益：递推状态对序列长度 `n` 为 O(1)（状态本身仍受 head/feature 维度影响）；Kimi Linear 报告 KV Cache 最高减少 75%，模型卡/报告最高约 6.3×，而论文 Figure 7 的 batch=1 decode 对照约为 2.2–2.3× [KIMI-LINEAR]。
 - 代价：纯线性注意力表达力弱，通常需要 3:1 或类似比例混合全量注意力层。
 
 ### 4.8 FlashAttention v1/v2/v3/v4
 
 - 核心原理：IO-aware 分块注意力，在线 Softmax，不物化 n x n 注意力矩阵。
 - 代表用途：所有主流训练框架的基础 kernel。
-- 量化：FA2 论文报告相对 FA1 最高约 2x，相对 PyTorch 注意力在 A100 上最高约 9x；FA3 面向 Hopper 异步与低精度，FA4 在本仓库中是教学化 v4 路径。
+- 量化：FA2 论文报告相对 FA1 最高约 2×、相对 PyTorch 注意力在 A100 上最高约 9× [FA2]；FA3 面向 Hopper 异步与低精度，FA4 在本仓库中是教学化 v4 路径。
 - 澄清：训练或推理使用 FlashAttention 不等于模型架构本身使用新 Attention 类型。
 
 ### 4.9 PagedAttention
 
 - 核心原理：把 KV Cache 切成固定大小物理 block，通过 block table 管理序列。
 - 代表用途：vLLM 推理引擎。
-- 量化：vLLM 论文报告相对 FasterTransformer、Orca 等对照系统吞吐提升约 2-4x，并将 KV 内存浪费控制在 4% 以下；这些数字只在论文的硬件、工作负载与对照设置下成立。
+- 量化：vLLM 论文报告相对 FasterTransformer、Orca 等对照系统吞吐提升约 2–4×，并将 KV 内存浪费控制在 4% 以下 [PAGEDATTN]；这些数字只在论文的硬件、工作负载与对照设置下成立。
 - 澄清：PagedAttention 更多是系统层调度优化，不是模型数学上的新 Attention 变种。
 
 ### 4.10 RoPE、YaRN、NTK、ALiBi 与位置编码扩展
@@ -627,148 +526,80 @@ Attention 是 2026 年架构差异化的主线，但模型的最终形态同样�
 - ALiBi：用线性距离偏置替代位置嵌入，Falcon 使用，适合外推但长距离精度有限。
 - Partial / p-RoPE：只旋转部分维度，Gemma 4 和 DeepSeek-V4 用于长上下文稳定。
 
----
-
-## 五、跨模型横向对比
-
-### 5.1 MHA vs MQA vs GQA
-
-| 维度 | MHA | MQA | GQA |
-|------|-----|-----|-----|
-| KV Head 数 | `h` | 1 | `g` |
-| KV Cache 相对大小 | 1x | `1/h` | `1/g` |
-| 表达力 | 最高 | 最低 | 居中 |
-| 主流代表 | GPT-3、Llama 1 | PaLM、Falcon | Llama、Qwen、GLM |
-| 取舍逻辑 | 训练与质量优先 | 极低解码成本 | 质量和成本平衡 |
-
-### 5.2 GQA 实现差异
-
-- Llama 3/4 和 Qwen 更强调生态统一：全尺寸使用 GQA。
-- Mistral 7B 在 GQA 上叠加 4096 SWA，Gemma 2/4 在 GQA 上叠加局部/全局交替。
-- MiniMax M2/M2.7 在 GQA 上使用 48Q/8KV 与 RoPE theta 5M，重点服务 200K 上下文。
-- GLM-4.7 使用 96Q/8KV，证明大 MoE 也可以继续用 GQA。
-
-### 5.3 MLA 实现差异
-
-- DeepSeek 是 MLA 的“原生产品化”路线，V2/V3/V4 持续复用并加入 DSA/CSA。
-- GLM 在轻量模型先用 `kv_lora_rank` 验证，再在 GLM-5/5.2 大规模启用。
-- Kimi 把 MLA 与 KDA 线性注意力按 3:1 混合，K3 达到 69 KDA + 24 Gated MLA。
-- Mistral Small 4 在 1M 上下文的 MoE 小模型上使用 MLA 类结构，证明该方案不限于超大模型。
-
-### 5.4 FlashAttention 的使用边界
-
-- 训练优化：FlashAttention v1/v2/v3/v4 是主流 kernel，不改变模型权重语义。
-- 推理优化：FlashMLA、FP4 indexer cache 等与 MLA/稀疏注意力协同。
-- 工程加速：PagedAttention 管理 KV Cache 分配，适合并发服务。
-
-### 5.5 长上下文路线对比
-
-| 路线 | 代表 | 优势 | 代价 |
-|------|------|------|------|
-| RoPE 缩放 + 长上下文训练 | Llama 3.1、Qwen2.5 | 实现简单，质量稳 | KV 显存高 |
-| MLA/KV 压缩 | DeepSeek、Kimi K2 | 显存下降明显 | 需要潜空间与 kernel |
-| SWA/局部窗口 | Mistral、Gemma | 计算成本低 | 长距离依赖受限 |
-| Block Sparse / DSA / MSA | DeepSeek-V4、GLM-5.2、MiniMax M3 | 长上下文推理成本低 | 选择器质量影响召回 |
-| Linear/Hybrid | Qwen3-Next、Kimi K3 | 解码状态固定 | 训练与稳定性复杂 |
-| Paged/系统级 | vLLM | 提升吞吐和显存利用率 | 不改变模型数学 |
-
-### 5.6 FFN 与激活实现差异
-
-- **中间维度比例**：Dense 层遵循 8/3x 左右的经验比例并向上取整（GLM-5.2 dense 层 12288/6144，Qwen3.8-27B 为 17408/5120）；MoE 专家层按专家粒度大幅缩小（DeepSeek-V4-Pro、MiMo-V2.5、MiniMax-M3 的专家 intermediate 分别为 3072/2048/3072）。
-- **clamp 变体**：GPT-OSS 风格的受限 SwiGLU 已进入生产配置——MiniMax-M3 为 `swiglu_limit=7.0, alpha=1.702`（`hidden_act=swigluoai`），DeepSeek-V4 为 `swiglu_limit=10.0`，目的是抑制超大模型训练中的极端激活。
-- **门控扩散**：Qwen3.8 在注意力输出端加 Swish 门控（`attn_output_gate`），Kimi K3 的 Gated MLA 同样开启输出门控（`mla_use_output_gate`）并使用 SiTU 激活（`activation_situ_beta=4.0`）。
-- **bias 全面消失**：2026 年主流配置中 `attention_bias=false`、MoE 路由无偏置（仅 DeepSeek 系用可学习均衡偏置替代辅助损失）。
-
-### 5.7 归一化与残差实现差异
-
-- **RMSNorm 全线标配**，仅 eps 取值（1e-5/1e-6）有差异；MiniMax-M3 使用 Gemma 风格 `(1 + weight)` 缩放变体（`use_gemma_norm`）。
-- **QK-Norm 的普及路径**：Gemma 3 / Llama 4 引入后，MiniMax-M3 以 per-head 粒度开启（`use_qk_norm`），Hy3 以布尔开关开启（`qk_norm: true`）；它与大 head_dim（192-256）和长训练组合使用，抑制 logits 漂移。
-- **层间结构**：Pre-Norm 仍是绝对主流；`first_k_dense_replace`（前 1-3 层不用 MoE）成为 MoE 模型通行做法；Kimi K3 的 AttnRes（`attn_res_block_size=12`）是唯一进入旗舰配置的跨层残差新设计。
-- **MTP 层数分化**：DeepSeek-V4-Pro / GLM-5.2 / Hy3 为 1 层，MiMo-V2.5-Pro 为 3 层，MiniMax-M3 达 7 个模块，Kimi K3 则为 0——MTP 的收益与推理栈支持度强相关，尚未收敛。
-
-### 5.8 MoE 实现差异
-
-| 维度 | 主要分歧 | 代表配置 |
-|------|----------|----------|
-| 路由评分 | sigmoid 为主流，`sqrtsoftplus` 出现 | GLM-5.2/MiMo/Hy3/K3 用 sigmoid；DeepSeek-V4-Pro 用 sqrtsoftplus；Qwen3.8 保留 aux loss 0.001 |
-| 负载均衡 | 无辅助损失偏置（`noaux_tc`）普及 | DeepSeek-V3 提出，V4/GLM-5.2/K3/MiMo/Hy3 沿用 |
-| 缩放因子 | `routed_scaling_factor` 1.0-2.83 | V4-Pro/GLM-5.2 为 2.5，Hy3 为 2.826，K3 为 1.0 |
-| 稀疏度 | 激活比例 1.6%-6% | M3 128 选 4（3.1%），V4-Pro 384 选 6（1.6%），K3 896 选 16（1.8%），Qwen3.8-2.4T 512 选 10（2.0%） |
-| 共享专家 | 1-2 个成为默认 | K3 为 2 个，其余多为 1 个；Qwen3.8 共享专家 intermediate 2048 |
-| 结构变体 | 潜空间路由、专家量化 | Nemotron-3-Super LatentMoE、K3 的 Latent MoE 维度 3584、V4-Pro 专家权重 FP4 存储 |
-
-### 5.9 跨模块协同设计
-
-- **层类型配比成为核心超参**：线性:全量 3:1（Qwen3.8、Kimi Linear/K3 的 `full_attn_layers` 每 4 层 1 个）、SWA:全局约 6:1（MiMo `hybrid_layer_pattern`）、GLM-5.2 的 indexer "1 full + 3 shared"、DeepSeek-V4 末 3 层全量——层间配比取代单点结构成为 2026 年的主要设计空间。
-- **MoE 只替换 FFN，不动 Attention**：所有受访 MoE 模型保持注意力层完整，仅把 FFN 换成专家层；首 1-3 层保持完全稠密以保护底层表征。
-- **位置编码 × Attention 正交组合**：Partial RoPE（只旋转 25%-50% 维度）与 GQA/MLA/GDN 均可叠加（Qwen3.8、M3、MiMo）；MLA 另用解耦 RoPE key（`qk_rope_head_dim=64`），K3 的 MLA 分支甚至直接 `mla_use_nope`。
-- **归一化 × Attention 正交叠加**：QK-Norm 不改变 Attention 的数学形式，可与任意 KV 压缩方案共存。
-
----
 
 ## 六、结构化汇总表
 
-### 表 1：模型系列/版本级汇总表
+### 表 1a：模型系列/版本级汇总表
 
-| 系列 | 版本 | 发布时间 | 开源 | 基础架构 | Attention 核心 | 位置编码/长上下文 | 上下文窗口 | KV/内存优化 | 关键优化 | 来源与可信度 |
+| 系列 | 版本 | 发布时间 | 开源 | 基础架构 | Attention 核心 | 位置编码/长上下文 | 上下文窗口 | KV/内存优化 | 关键优化 | 来源、证据等级与复核状态 |
 |------|------|----------|------|----------|----------------|--------------------|------------|--------------|----------|--------------|
-| Qwen | Qwen3.8-2.4T-A95B | 2026-08 | 是 | MoE 2.4T/95B Active | Gated DeltaNet + Gated Attention | Partial RoPE (0.25)，theta 1e7 | 262K，扩展 1M | 线性状态 + GQA 4 KV | 512 专家 Top-10 | 官方 HF 模型卡/配置，高 |
-| Qwen | Qwen3.8-27B | 2026-08 | 是 | Dense 27B | Gated DeltaNet + Gated Attention | Partial RoPE (0.25) + mrope | 262K，托管 1M | 线性状态 + GQA 4 KV | 多模态、Agent | 官方 HF 模型卡/配置，高 |
-| Qwen | Qwen3-Next | 2025-09 | 是 | MoE 80B/3B Active | Gated DeltaNet + Gated Attention | Partial RoPE (0.25)，YaRN 扩展 | 256K，扩展 1,010,000 | KDA 状态 + GQA 2 KV | 3:1 混合 | 官方 HF 模型卡/配置，高 |
-| DeepSeek | V4-Pro-0813 | 2026-08 | 是 | MoE 1.6T/49B Active | MLA + CSA + HCA | Partial RoPE + YaRN | 1M | KV 相对 V3.2 约 10% | DSpark、FP4 indexer | 官方报告/模型卡，高 |
-| DeepSeek | V4-Flash-0731 | 2026-07 | 是 | MoE 284B/13B Active | MLA + CSA + HCA | Partial RoPE + YaRN | 1M | KV 相对 V3.2 约 7% | 1M 推理 FLOPs 约 10% | 官方报告/模型卡，高 |
-| DeepSeek | V3 | 2024-12 | 是 | MoE 671B/37B Active | MLA | RoPE | 128K | 低秩 KV | DeepSeekMoE | 官方技术报告，高 |
-| GLM | GLM-5.2 | 2026-06 | 是 | MoE | MLA + DSA + IndexShare | 位置编码未完整公开 | 1M | `kv_lora_rank=512` | 1M FLOPs 降 2.9x | 官方 HF 模型卡，高 |
-| GLM | GLM-5 | 2026-02 | 是 | MoE 744B/40B Active | MLA + DSA | 位置编码未完整公开 | 202K | `kv_lora_rank=512` | DSA | 官方 HF 模型卡，高 |
-| GLM | GLM-4.7 | 2025-12 | 是 | MoE | GQA 96Q/8KV | RoPE | 202K | GQA | 大 MoE | 官方 HF 配置，高 |
-| Kimi | K3 | 2026-06 | 是 | MoE 2.8T/104B Active | 69 KDA + 24 Gated MLA | 官方技术报告补充 | 1M | KDA 状态 + MLA | AttnRes、Stable LatentMoE | 官方 HF 模型卡，高 |
-| Kimi | Linear | 2025-10 | 是 | MoE 48B/3B Active | KDA + Gated MLA 3:1 | RoPE | 1M | KV Cache 最高减少 75% | 解码吞吐最高约 6x | 官方 HF 模型卡，高 |
-| Kimi | K2 | 2025-07 | 是 | MoE 1T/32B Active | MLA | RoPE | 256K | MLA | 1T MoE | 官方 HF 模型卡，高 |
-| MiniMax | M3 | 2026-06 | 是 | MoE 428B/23B Active | GQA + MSA | RoPE theta 5M | 1M | 稀疏 block 选择 | 1M 下 M2 的 prefill 9x、decode 15x | 官方模型卡 + 论文，高 |
-| MiniMax | M2.7 | 2026-04 | 是 | MoE | GQA 48Q/8KV | RoPE theta 5M | 204,800 | GQA | 256 专家 Top-8 | 官方 HF 配置，高 |
-| MiniMax | M2 | 2025-10 | 是 | MoE | GQA 48Q/8KV | RoPE theta 5M | 196,608 | GQA | 回归全量注意力 | 官方 HF 配置，高 |
-| MiniMax | Text-01 | 2025-01 | 是 | MoE 456B/45.9B Active | Lightning + Softmax Attention | 位置编码随实现 | 1M | 线性状态 | 混合注意力 | 官方技术报告，高 |
-| Llama | Llama 4 Maverick | 2025-04 | 是 | MoE 400B/17B Active | GQA + chunked local + NoPE 间隔 | scaled RoPE | 1M | GQA | 128 专家 | Meta 官方模型卡/源码，高 |
-| Llama | Llama 4 Scout | 2025-04 | 是 | MoE 109B/17B Active | GQA + chunked local + NoPE 间隔 | scaled RoPE | 10M | GQA | 16 专家 | Meta 官方模型卡/源码，高 |
-| Llama | Llama 3.1 | 2024-07 | 是 | Dense 8B-405B | GQA | RoPE base 500K | 128K | GQA | 128K 训练 | 官方模型卡，高 |
-| GPT | GPT-5.6 Sol | 2026 | 否 | 官方未完全披露 | 官方未完全披露 | 官方未完全披露 | 官方未完全披露 | 官方未完全披露 | 官方基准引用 | 第三方官方模型卡引用，低-中 |
-| Gemini | Gemini 3.1 Pro Preview | 2026 | 否 | 官方未完全披露 | 官方未完全披露 | 官方未完全披露 | 官方未完全披露 | 官方未完全披露 | 官方基准引用 | 官方模型卡引用，低-中 |
-| Claude | Fable 5 / Mythos 5 | 2026-06 | 否 | 官方未完全披露 | 官方未完全披露 | 官方未完全披露 | 官方未完全披露 | 官方未完全披露 | 安全护栏 | Anthropic 官方页面，中 |
-| Mistral | Mistral-Small-4 | 2026-01 | 是 | MoE | MLA 类 | RoPE | 1M | `kv_lora_rank=256` | 1M 上下文 | 官方 HF 配置，高 |
-| Mistral | Mistral-Large-3 | 2025-12 | 是 | MoE 673B/39B Active | MHA 128Q/128KV | RoPE | 256K | MHA | 128 专家 Top-4 | 官方 params.json，高 |
-| Mistral | Mixtral 8x7B | 2023-12 | 是 | MoE 46.7B/12.9B Active | GQA | RoPE | 32K | GQA | 8 专家 Top-2 | 官方论文/模型卡，高 |
-| Gemma | Gemma 4 12B | 2026-05 | 是 | Dense 12B | GQA + local/global | p-RoPE | 256K | Unified K/V | 1024 窗口 | 官方 HF 模型卡，高 |
-| Gemma | Gemma 2 | 2024-06 | 是 | Dense 2B/9B/27B | GQA + local/global | RoPE | 8K | GQA | 4096 窗口 | 官方技术报告，高 |
-| Yi | Yi-34B-200K | 2023-12 | 是 | Dense 34B | GQA | Dynamic NTK | 200K | GQA | RoPE 外推 | 官方模型卡，中-高 |
-| Falcon | Falcon 40B | 2023-05 | 是 | Dense 40B | MQA + ALiBi | ALiBi | 2K 级 | MQA | 单 KV Head | 官方模型卡，高 |
-| Grok | Grok-1 | 2024-03 | 是 | MoE 314B | 25% 层 Attention | 官方未完整披露 | 8K | 8 KV Head | 8 专家 Top-2 | 官方仓库，中-高 |
-| Phi | Phi-4-mini | 2025-02 | 是 | Dense 3.8B | GQA 24Q/8KV | LongRope | 128K | GQA | 128K 上下文 | 官方 HF 模型卡/配置，高 |
-| Phi | Phi-4 | 2024-12 | 是 | Dense 14B | GQA 40Q/10KV | RoPE theta 250K | 16K | GQA | 高质量推理数据 | 官方 HF 配置，高 |
-| DBRX | DBRX-Instruct | 2024-03 | 是 | MoE 132B/36B Active | GQA 48Q/8KV | RoPE theta 500K | 32K | GQA | 16 专家 Top-4 | 官方开源+社区镜像配置，中-高 |
-| Nemotron | Nemotron-3-Super | 2026-03 | 是 | LatentMoE 120B/12B Active | Mamba-2 + MoE + GQA | 默认 256K，可扩展 1M | 256K-1M | Mamba-2 状态 + GQA | MTP、NVFP4 | 官方 HF 模型卡/配置，高 |
-| Nemotron | Nemotron-3-Nano | 2025-12 | 是 | MoE 30B/3.5B Active | 23 Mamba-2 + 23 MoE + 6 GQA | 默认 256K，可扩展 1M | 256K-1M | Mamba-2 状态 + GQA | 128+1 专家 | 官方 HF 模型卡/配置，高 |
-| InternLM | InternLM3-8B-Instruct | 2025 | 是 | Dense 8B | GQA 32Q/2KV | Dynamic RoPE | 32K | GQA | Dynamic RoPE factor 6 | 官方 HF 配置，高 |
-| InternLM | InternLM2.5-7B | 2024 | 是 | Dense 7B | GQA 32Q/8KV | Dynamic RoPE | 262K | GQA | Dynamic RoPE factor 2 | 官方 HF 配置，高 |
-| Baichuan | Baichuan-M3-235B | 2026-01 | 是 | 基于 Qwen3-235B-A22B | GQA 64Q/4KV | RoPE theta 5M | 40,960 | GQA | 128 专家 Top-8 | 官方 HF 配置，高 |
-| Baichuan | Baichuan-M2-32B | 2025 | 是 | 基于 Qwen2.5-32B | GQA 40Q/8KV | RoPE theta 1M | 131,072 | GQA | 领域强化 | 官方 HF 配置，高 |
-| Step | Step-3.7-Flash | 2026-05 | 是 | MoE 198B/11B Active | GQA 类 + SWA | Llama3-style RoPE scaling | 262,144 | GQA + SWA | 多模态，FP8/FP4 | 官方 HF 模型卡/配置，高 |
-| Xiaomi MiMo | MiMo-V2.5-Pro | 2026-04 | 是 | MoE 1.02T/42B Active | SWA + GA 6:1 | RoPE theta 10M | 1M | GQA + SWA，KV 减少约 7x | 3 层 MTP | 官方 HF 模型卡/配置，高 |
-| Zamba | Zamba2-7B-Instruct-v2 | 2025 | 是 | Mamba2 + Attention Hybrid | Mamba2 + Shared Attention | RoPE 4K，扩展 16K | 4K-16K | SSM 状态 | 共享 Attention + LoRA | 官方 HF 模型卡/配置，高 |
-| Snowflake Arctic | Arctic-Instruct | 2024-04 | 是 | Dense-MoE Hybrid 480B | GQA 56Q/8KV | RoPE | 4,096 | GQA | 128 专家 Top-2 | 官方 HF 配置/模型卡，高 |
-| Hunyuan | Hy3 | 2026-07 | 是 | MoE 295B/21B Active | GQA 64Q/8KV | RoPE | 262,144 | GQA | 192 专家 Top-8，MTP | 官方 HF 模型卡/配置，高 |
-| Hunyuan | Hunyuan-A13B-Instruct | 2025-06 | 是 | MoE 80B/13B Active | GQA 32Q/8KV | Dynamic RoPE | 256K，默认 32K | GQA | 64 专家 | 官方 HF 模型卡/配置，高 |
+| Qwen | Qwen3.8-2.4T-A95B | 2026-08 | 是 | MoE 2.4T/95B Active | Gated DeltaNet + Gated Attention | Partial RoPE (0.25)，theta 1e7 | 262K，扩展 1M | 线性状态 + GQA 4 KV | 512 专家 Top-10 + 1 shared | [QWEN38-24T]；公开确认；已复核 2026-08-18 |
+| Qwen | Qwen3.8-27B | 2026-08 | 是 | Dense 27B | Gated DeltaNet + Gated Attention | Partial RoPE (0.25) + mRoPE | 262K，托管 1M | 线性状态 + GQA 4 KV | 27 层视觉塔、多模态 | [QWEN38-27B]；公开确认；已复核 2026-08-18 |
+| Qwen | Qwen3-Next | 2025-09 | 是 | MoE 80B/3B Active | Gated DeltaNet + Gated Attention | Partial RoPE (0.25)，YaRN 扩展 | 256K，扩展 1,010,000 | 线性状态 + GQA 2 KV | 3:1 混合 | [QWEN-NEXT]；公开确认 |
+| DeepSeek | V4-Pro-0813 | 2026-08 | 是 | MoE 1.6T/49B Active | MLA + CSA + HCA | Partial RoPE + YaRN | 1M | 来源报告：KV 为 V3.2 约 10% [DEEPSEEK-V4] | mHC、DSpark、FP4 indexer | [DEEPSEEK-V4]；论文/报告 + 公开确认；已复核 2026-08-18 |
+| DeepSeek | V4-Flash-0731 | 2026-07 | 是 | MoE 284B/13B Active | MLA + CSA + HCA | Partial RoPE + YaRN | 1M | 来源报告：KV 为 V3.2 约 7% | 来源报告：推理 FLOPs 约 10% | [DEEPSEEK-V4]；论文/报告；报告已复核，Flash 发布配置未单独复核 |
+| DeepSeek | V3 | 2024-12 | 是 | MoE 671B/37B Active | MLA | RoPE | 128K | 低秩 KV | DeepSeekMoE | [DEEPSEEK-V3]；论文/报告 |
+| GLM | GLM-5.2 | 2026-06 | 是 | MoE（总/激活未披露） | MLA + DSA + IndexShare | RoPE theta 8M；indexer interleave | 1M | `kv_lora_rank=512` | 模型卡：FLOPs 降 2.9×，MTP acceptance +20% [INDEXSHARE] | [GLM52]；公开确认；已复核 2026-08-18 |
+| GLM | GLM-5 | 2026-02 | 是 | MoE 744B/40B Active | MLA + DSA | RoPE theta 1M | 202,752 | `kv_lora_rank=512` | DSA、前 3 层 dense | [GLM5]；公开确认；已复核 2026-08-18 |
+| GLM | GLM-4.7 | 2025-12 | 是 | MoE | GQA 96Q/8KV | RoPE | 202K | GQA | 大 MoE | 官方 HF 配置；公开确认 |
+| Kimi | K3 | 2026-06 | 是 | MoE 2.8T/104B Active | 69 KDA + 24 Gated MLA | KDA + MLA NoPE | 1M | KDA 状态 + MLA | AttnRes、Stable LatentMoE | [KIMI-K3]；公开确认；已复核 2026-08-18 |
+| Kimi | Linear | 2025-10 | 是 | MoE 48B/3B Active | KDA + Gated MLA 3:1 | RoPE | 1M | 来源报告：KV Cache 最高减少 75% | 最高约 6.3×；Figure 7 batch=1 decode 约 2.2–2.3× | [KIMI-LINEAR]；公开确认 + 论文/报告；已复核 2026-08-18 |
+| Kimi | K2 | 2025-07 | 是 | MoE 1T/32B Active | MLA | RoPE | 256K | MLA | 1T MoE | 官方 HF 模型卡；公开确认 |
+| MiniMax | M3 | 2026-06 | 是 | MoE 428B/23B Active | GQA + MSA | Partial RoPE 0.5，theta 5M | 1M | 稀疏 block 选择（Top-16×128） | 模型卡：相对 M2 prefill 9×、decode 15× | [MINIMAX-M3] + [MSA]；公开确认 + 论文/报告；已复核 2026-08-18 |
+| MiniMax | M2.7 | 2026-04 | 是 | MoE | GQA 48Q/8KV | RoPE theta 5M | 204,800 | GQA | 256 专家 Top-8 | 官方 HF 配置；公开确认；待联网复核 |
+| MiniMax | M2 | 2025-10 | 是 | MoE | GQA 48Q/8KV | RoPE theta 5M | 196,608 | GQA | 回归全量注意力 | 官方 HF 配置；公开确认 |
+| MiniMax | Text-01 | 2025-01 | 是 | MoE 456B/45.9B Active | Lightning + Softmax Attention | 位置编码随实现 | 1M | 线性状态 | 混合注意力 | [MINIMAX-01]；论文/报告 |
+| Llama | Llama 4 Maverick | 2025-04 | 是 | MoE 400B/17B Active | GQA + chunked local + NoPE 间隔 | scaled RoPE | 1M | GQA | 128 专家 | [LLAMA4]；公开确认 |
+| Llama | Llama 4 Scout | 2025-04 | 是 | MoE 109B/17B Active | GQA + chunked local + NoPE 间隔 | scaled RoPE | 10M | GQA | 16 专家 | [LLAMA4]；公开确认 |
+| Llama | Llama 3.1 | 2024-07 | 是 | Dense 8B-405B | GQA | RoPE base 500K | 128K | GQA | 128K 训练 | 官方模型卡；公开确认 |
+| GPT | GPT-5.6 Sol | 2026 | 否 | 官方未完全披露 | 官方未完全披露 | 官方未完全披露 | 官方未完全披露 | 官方未完全披露 | 第三方基准引用 | 间接引用；合理推断；待联网复核 |
+| Gemini | Gemini 3.1 Pro Preview | 2026 | 否 | 官方未完全披露 | 官方未完全披露 | 官方未完全披露 | 官方未完全披露 | 官方未完全披露 | 第三方基准引用 | 间接引用；合理推断；待联网复核 |
+| Claude | Fable 5 / Mythos 5 | 2026-06 | 否 | 官方未完全披露 | 官方未完全披露 | 官方未完全披露 | 官方未完全披露 | 官方未完全披露 | 产品层安全能力 | [CLAUDE-2026]；名称公开确认、架构未披露；待联网复核 |
+| Mistral | Mistral-Small-4 | 2026-01 | 是 | MoE | MLA 类 | RoPE | 1M | `kv_lora_rank=256` | 1M 上下文 | 官方 HF 配置；公开确认；待联网复核 |
+| Mistral | Mistral-Large-3 | 2025-12 | 是 | MoE 673B/39B Active | MHA 128Q/128KV | RoPE | 256K | MHA | 128 专家 Top-4 | 官方 `params.json`；公开确认 |
+| Mistral | Mixtral 8x7B | 2023-12 | 是 | MoE 46.7B/12.9B Active | GQA | RoPE | 32K | GQA | 8 专家 Top-2 | [MIXTRAL]；论文/报告 + 公开确认 |
+| Gemma | Gemma 4 12B | 2026-05 | 是 | Dense 12B | GQA + local/global | p-RoPE | 256K | Unified K/V | 1024 窗口 | [GEMMA4]；公开确认；原记录待本轮复核 |
+| Gemma | Gemma 2 | 2024-06 | 是 | Dense 2B/9B/27B | GQA + local/global | RoPE | 8K | GQA | 4096 窗口 | [GEMMA2]；论文/报告 |
+| Yi | Yi-34B-200K | 2023-12 | 是 | Dense 34B | GQA | Dynamic NTK | 200K | GQA | RoPE 外推 | 官方模型卡；公开确认 |
+| Falcon | Falcon 40B | 2023-05 | 是 | Dense 40B | MQA + ALiBi | ALiBi | 2K 级 | MQA | 单 KV Head | [FALCON40B]；公开确认 |
+| Grok | Grok-1 | 2024-03 | 是 | MoE 314B | 25% 层 Attention | 官方未完整披露 | 8K | 8 KV Head | 8 专家 Top-2 | [GROK1]；公开确认 |
+| Phi | Phi-4-mini | 2025-02 | 是 | Dense 3.8B | GQA 24Q/8KV | LongRope | 128K | GQA | 128K 上下文 | [PHI4-MINI]；公开确认 |
+| Phi | Phi-4 | 2024-12 | 是 | Dense 14B | GQA 40Q/10KV | RoPE theta 250K | 16K | GQA | 高质量推理数据 | [PHI4]；公开确认 |
+| DBRX | DBRX-Instruct | 2024-03 | 是 | MoE 132B/36B Active | GQA 48Q/8KV | RoPE theta 500K | 32K | GQA | 16 专家 Top-4 | [DBRX] 公开说明 + [DBRX-CONFIG] 社区镜像；配置细节为合理推断 |
+| Nemotron | Nemotron-3-Super | 2026-03 | 是 | LatentMoE 120B/12B Active | Mamba-2 + MoE + GQA | 默认 256K，可扩展 1M | 256K-1M | Mamba-2 状态 + GQA | MTP、NVFP4 | [NEMOTRON-SUPER]；公开确认；本轮未复核 |
+| Nemotron | Nemotron-3-Nano | 2025-12 | 是 | MoE 30B/3.5B Active | 23 Mamba-2 + 23 MoE + 6 GQA | 默认 256K，可扩展 1M | 256K-1M | Mamba-2 状态 + GQA | 128+1 专家 | [NEMOTRON-NANO]；公开确认 |
+| InternLM | InternLM3-8B-Instruct | 2025 | 是 | Dense 8B | GQA 32Q/2KV | Dynamic RoPE | 32K | GQA | Dynamic RoPE factor 6 | [INTERNLM3]；公开确认 |
+| InternLM | InternLM2.5-7B | 2024 | 是 | Dense 7B | GQA 32Q/8KV | Dynamic RoPE | 262K | GQA | Dynamic RoPE factor 2 | [INTERNLM25]；公开确认 |
+| Baichuan | Baichuan-M3-235B | 2026-01 | 是 | 基于 Qwen3-235B-A22B | GQA 64Q/4KV | RoPE theta 5M | 40,960 | GQA | 128 专家 Top-8 | [BAICHUAN-M3]；公开确认；本轮未复核 |
+| Baichuan | Baichuan-M2-32B | 2025 | 是 | 基于 Qwen2.5-32B | GQA 40Q/8KV | RoPE theta 1M | 131,072 | GQA | 领域强化 | [BAICHUAN-M2]；公开确认 |
+| Step | Step-3.7-Flash | 2026-05 | 是 | MoE 198B/11B Active | Full GQA 64Q/8KV + SWA 96Q/8KV | Llama3-style scaling | 262,144 | GQA + SWA window 512 | 288 专家 Top-8，3 MTP，多模态 | [STEP37]；公开确认；已复核 2026-08-18 |
+| Xiaomi MiMo | MiMo-V2.5-Pro | 2026-04 | 是 | MoE 1.02T/42B Active | SWA + GA 6:1 | Partial RoPE 0.334，theta 10M | 1M | 模型卡：KV 近 7×；128Q/8KV | 3 层 MTP、27T 预训练 | [MIMO-V25]；公开确认；已复核 2026-08-18 |
+| Zamba | Zamba2-7B-Instruct-v2 | 2025 | 是 | Mamba2 + Attention Hybrid | Mamba2 + Shared Attention | RoPE 4K，扩展 16K | 4K-16K | SSM 状态 | 共享 Attention + LoRA | [ZAMBA2]；公开确认 |
+| Snowflake Arctic | Arctic-Instruct | 2024-04 | 是 | Dense-MoE Hybrid 480B | GQA 56Q/8KV | RoPE | 4,096 | GQA | 128 专家 Top-2 | [ARCTIC]；公开确认 |
+| Hunyuan | Hy3 | 2026-07 | 是 | MoE 295B/21B Active | GQA 64Q/8KV | RoPE theta 11.16M | 262,144 | GQA + QK-Norm | 192 专家 Top-8 + 1 shared，MTP | [HY3]；公开确认；已复核 2026-08-18 |
+| Hunyuan | Hunyuan-A13B-Instruct | 2025-06 | 是 | MoE 80B/13B Active | GQA 32Q/8KV | Dynamic RoPE | 256K，默认 32K | GQA | 64 专家 | [HUNYUAN-A13B]；公开确认 |
 
-### 表 1b：2026 代表模型全模块配置速查（官方 config.json 逐字段核实）
+### 表 1b：代表版本 A-K 全模块主表
 
-| 模型 | Attention | 位置编码 | 归一化 | FFN/激活 | MoE（路由/激活/共享） | 层结构与残差 | 词表 | 量化 |
-|------|-----------|----------|--------|----------|------------------------|--------------|------|------|
-| DeepSeek-V4-Pro | MLA + CSA/HCA + SWA(128)，1 KV head | YaRN factor 16（64K→1M） | RMSNorm | SwiGLU（limit 10） | 384 / Top-6 / 1，sqrtsoftplus + noaux_tc | 61 层，末 3 层全量，MTP×1，DSpark | 129,280 | FP8 权重 + FP4 专家 |
-| GLM-5.2 | MLA + DSA，IndexShare 每 4 层共享 | RoPE theta 8M | RMSNorm | SwiGLU | 256 / Top-8 / 1，sigmoid + noaux_tc | 78 层，前 3 层稠密，MTP×1 | 154,880 | BF16 |
-| Kimi K3 | 69 KDA + 24 Gated MLA（NoPE + 输出门控） | RoPE（MLA 分支 NoPE） | RMSNorm | SiTU（beta 4.0） | 896 / Top-16 / 2，sigmoid + noaux_tc | 93 层，首层稠密，AttnRes block 12，无 MTP | 163,840 | MXFP4/MXFP8 QAT |
-| Qwen3.8-2.4T | Gated DeltaNet + Gated Attention 3:1 | Partial RoPE 0.25，theta 1e7 | RMSNorm | SwiGLU + 输出门控 | 512 / Top-10 / 1，aux loss 0.001 | 92 层（23 个 3+1 块），MTP×1 | 248,320 | BF16 |
-| MiniMax-M3 | GQA 64Q/4KV + MSA（Top-16 block×128） | Partial RoPE 0.5，theta 5M | Gemma 式 RMSNorm + per-head QK-Norm | swigluoai（limit 7.0，alpha 1.702） | 128 / Top-4 / 1，sigmoid | 60 层，前 3 层稠密，MTP×7 | 200,064 | BF16 |
-| MiMo-V2.5-Pro | SWA(128) + 全局约 6:1，128Q/8KV | Partial RoPE 0.334，theta 1e7 | RMSNorm | SwiGLU | 384 / Top-8 / 0，sigmoid + noaux_tc | 70 层（10 层全量），MTP×3 | 152,576 | FP8 block |
-| Hy3 | GQA 64Q/8KV | RoPE theta ≈1.1e7 | RMSNorm + QK-Norm | SwiGLU | 192 / Top-8 / 1，sigmoid + 均衡偏置 | 80 层，首层稠密，MTP×1，fp32 LM head | 120,832 | BF16 |
+> 表 1a 负责版本、参数、A/B 与上下文演进；本表是 C-K 的规范化伴随表，并再次列出 A/B 以便独立阅读。只对每个系列的代表版本给出已披露字段，`未披露` 是有效结果，不能从同系列或同规模模型继承。旧版本差异见第二章各系列表。
+
+| 模型 | A Attention | B 位置编码 | C/E FFN 与激活 | D/F 归一化与残差 | G MoE | H SSM/Hybrid | I Embedding/输出头 | J 整体范式 | K 训练/推理系统 | 证据等级/复核 |
+|------|-------------|------------|------------------|----------------------|-------|--------------|----------------------|------------|-------------------|---------------|
+| Qwen3.8-2.4T | Gated DeltaNet + Gated Attention，3:1 | Partial RoPE 0.25，theta 1e7 | SwiGLU；Attention 输出门控 | RMSNorm；Pre-Norm | 512 / Top-10 / 1；aux loss 0.001 | 线性状态 + 全量 Attention 混合，非 SSM | vocab 248,320；MTP×1 | Decoder-only MoE | BF16；1M 扩展方案 | [QWEN38-24T]；公开确认；已复核 |
+| DeepSeek-V4-Pro | MLA 128Q/1KV + CSA/HCA + SWA(128) | YaRN factor 16（64K→1M） | Clamp-SwiGLU（limit 10） | RMSNorm + mHC（`hc_mult=4`，Sinkhorn×20） | 384 / Top-6 / 1；sqrtsoftplus + noaux_tc | 压缩稀疏/稠密 + 局部混合，非 SSM | vocab 129,280；主 MTP×1 + DSpark×3 | Decoder-only MoE | FP8/FP4；DSpark、分层/磁盘 KV | [DEEPSEEK-V4]；论文/报告 + 公开确认；已复核 |
+| GLM-5.2 | MLA + DSA；IndexShare 1:3 | RoPE theta 8M | SwiGLU | RMSNorm；前 3 层 dense FFN | 256 / Top-8 / 1；sigmoid + noaux_tc | 稀疏 Attention + 跨层 index 复用，非 SSM | vocab 154,880；MTP×1 | Decoder-only MoE | BF16；共享 indexer；MTP acceptance +20%（卡） | [GLM52] + [INDEXSHARE] + [INDEXCACHE]；已复核 |
+| Kimi K3 | 69 KDA + 24 Gated MLA | MLA 分支 NoPE；KDA 自带门控位置动态 | SiTU-GLU（beta 4.0） | RMSNorm；AttnRes block 12 | 896 / Top-16 / 2；LatentMoE、noaux_tc | KDA 线性状态 + MLA，非 SSM | vocab 163,840；无 MTP；401M 视觉塔 | Decoder-only 原生多模态 MoE | MXFP4/MXFP8 QAT | [KIMI-K3]；公开确认；已复核 |
+| MiniMax-M3 | GQA 64Q/4KV + MSA（Top-16×128） | Partial RoPE 0.5，theta 5M | Clamp-SwiGLU（limit 7.0） | Gemma 式 RMSNorm + QK-Norm；Pre-Norm | 128 / Top-4 / 1；sigmoid | 学习式稀疏 + 前 3 层全量，非 SSM | vocab 200,064；MTP modules×7；32 层 CLIP | Decoder-only 原生多模态 MoE | BF16；专用 sparse kernel | [MINIMAX-M3] + [MSA]；公开确认 + 论文/报告；已复核 |
+| Llama 4 Maverick | GQA + chunked local；NoPE 间隔层 | scaled RoPE + NoPE | GLU 族；精确变体待配置复核 | RMSNorm + QK-Norm；Pre-Norm | 128 专家；路由细节见源码 | Local + Global Attention，非 SSM | 文本/视觉输出细节按版本；未完全披露 | Decoder-only 原生多模态 MoE | 服务 kernel/量化方案非架构固定项 | [LLAMA4]；公开确认 |
+| Step-3.7-Flash | 12 Full 64Q/8KV + 33 SWA 96Q/8KV（window 512） | Llama3-style factor 2；Full partial 0.5 | SwiGLU clamp 配置；前 3 层 dense FFN | RMSNorm；head-wise attention gate | 288 / Top-8 / shared dim 1280；sigmoid + bias | SWA:Full 3:1，非 SSM | vocab 128,896；MTP×3；1.8B Vision Encoder | Decoder-only 原生多模态 MoE | BF16/FP8/NVFP4 发布变体 | [STEP37]；公开确认；已复核 |
+| MiMo-V2.5-Pro | SWA(128) + Full 6:1，128Q/8KV，QK/V=192/128 | Partial RoPE 0.334，theta 1e7 | SwiGLU | RMSNorm；Pre-Norm | 384 / Top-8 / 未配置 shared；sigmoid + noaux_tc | 60 SWA + 10 Full，非 SSM | vocab 152,576；MTP×3 | Decoder-only MoE | FP8 block；模型卡称 KV 近 7× | [MIMO-V25]；公开确认；已复核 |
+| Hy3 | GQA 64Q/8KV | RoPE theta 11,158,840 | SwiGLU | RMSNorm + QK-Norm；Pre-Norm | 192 / Top-8 / 1；sigmoid + 均衡偏置 | 纯 Attention，非 SSM | vocab 120,832；MTP×1（3.8B）；FP32 LM head | Decoder-only MoE | BF16 | [HY3]；公开确认；已复核 |
+| Mistral-Small-4 | MLA 类 | RoPE | FFN/激活细节待复核 | 归一化/残差细节待复核 | MoE；专家与路由字段待复核 | 纯 Attention 记录，非 SSM | Embedding/输出头未完整披露 | Decoder-only MoE | 量化/并行非固定架构项 | 第九章来源记录；公开确认；待联网复核 |
+| Gemma 4 12B | GQA + local/global；Unified K/V | p-RoPE | Gated FFN；激活细节待复核 | Norm/QK-Norm/残差细节待复核 | Dense 12B | Local + Global Attention，非 SSM | 多模态输入/LM head；tie 细节待复核 | Decoder-only 原生多模态 Dense | 推理量化依发布变体 | [GEMMA4]；公开确认；待联网复核 |
+| Nemotron-3-Super | 选择性 GQA 层 | 长上下文位置方案待复核 | MoE FFN；激活细节待复核 | 归一化/残差细节待复核 | LatentMoE 120B/12B Active | Mamba-2 + Attention hybrid | MTP；Embedding tie 未披露 | Decoder-only SSM/Attention/MoE 混合 | NVFP4 预训练记录 | [NEMOTRON-SUPER]；公开确认；待联网复核 |
+| Zamba2-7B | 13 个 shared MHA 32Q/32KV block | RoPE；4K，可扩展 16K | GELU Dense FFN | 配置级 norm/residual | 无 | 68 Mamba2 + 13 hybrid；`d_state=64` | vocab 32K；标准 LM head | Decoder-only SSM/Attention 混合 | 共享块 + LoRA 差异化 | [ZAMBA2]；公开确认；已复核 |
+| Arctic-Instruct | GQA 56Q/8KV | RoPE 4K | SiLU；Dense + MoE residual FFN | 配置级 norm/residual | 128 / Top-2；capacity/drop | 非 SSM | vocab 32K；标准 LM head | Decoder-only Dense-MoE Hybrid | 专家并行、capacity 管理 | [ARCTIC]；公开确认；已复核 |
+| GPT/Gemini/Claude 2026 闭源代表 | 官方未完全披露 | 官方未完全披露 | 官方未完全披露 | 官方未完全披露 | 官方未完全披露 | 官方未完全披露 | 产品输出接口公开，内部 head 未披露 | 闭源多模态产品；内部范式未披露 | 产品上下文/量化/并行不等于架构披露 | 名称/产品页与架构证据分离；架构不得推断；待联网复核 |
 
 ### 表 2：Attention 类型能力对比表
 
@@ -828,349 +659,96 @@ Attention 是 2026 年架构差异化的主线，但模型的最终形态同样�
 | SWA + 全局 | 窗口层 + 间隔全局层 | 近线性 | MiMo-V2.5（约 6:1）、Gemma 4 | 实现简单 | 窗口外依赖弱 | 长上下文 Dense/MoE | 按比例间隔 |
 | GQA/MLA + 学习式稀疏 | indexer 选择 KV block | 二次但稀疏 | DeepSeek-V4、GLM-5.2、MiniMax M3 | 召回损失小 | indexer 质量关键 | 1M 上下文生产 | 逐层或共享 indexer |
 
-### 表 7：模型与模块覆盖缺口表（按 A-K 模块类别，Prompt §4 要求）
-
-> 本表仅保留当前真正未完成或仅有教学版的项目；已完成项的逐项证据见 8.2。
-
-| 模型/模块 | 模块类别(A-K) | 文档覆盖 | 代码覆盖 | 优先级 | 建议实现方式 | 与现有接口兼容方案 |
-|-----------|----------------|----------|----------|--------|--------------|---------------------|
-| `attention_review_2026.md` 缺失 | A-L/文档 | 未覆盖 | 不适用 | 高 | 恢复文件，或正式并入本文第四章并修改 prompt | 文档层统一单一事实源 |
-| Ring Attention 多设备通信 | A | 原理已覆盖 | `distributed_ring_attention` collective ring reference；生产重叠 kernel 待补 | 高 | 加入 point-to-point 双缓冲、通信/计算重叠与多 rank 数值/梯度测试 | `RingAttention(..., distributed=True, process_group=None)` |
-| FlashMLA/CSA/HCA/DSA/MSA 生产 kernel | A | 原理/接口已覆盖 | 教学版/接口版 | 高 | Triton/CUDA 实现 block gather、ragged KV、低秩解码和 backward | 保留 `forward`，增 `backend="reference|triton|cuda"` |
-| LongRoPE preset 与 mRoPE 拼接 | B/J | 已覆盖 | LongRoPE registry、mRoPE axis IDs、`MultimodalCausalLM` 已实现；官方逐频率 preset 待补 | 中 | 导入已核验 256K/512K/1M 模型 config 与视频变长位置 | 扩展 `build_positional_encoding` 与 `CausalLMModel(positional="mrope")` |
-| FP8/INT8 QAT 包装 | A/C/K | 已覆盖 | `FakeQuantizer`/`QATWrapper`/`build_quantized` 已实现 INT4/INT8/approx-FP8、per-channel scale、STE | 高 | 增 observer/calibration、KV 粒度量化、真实 FP8 kernel 和导出 | `build_quantized(module, qconfig)` 包装任意 Attention/FFN |
-| QK-Norm/LayerScale/DeepNorm 模型级配置 | D/F | 已覆盖 | 模块存在，工厂集成不完整 | 中 | 新增 `norm_type`、`qk_norm`、`layer_scale_init`、`deepnorm_alpha` 配置传递 | 保留 `TransformerBlock` 默认值以兼容旧调用 |
-| 真实 Expert Parallel + Group GEMM + Gumbel | G | 已覆盖教学/参考 | Gumbel/STE 与 autograd all-to-all dispatch/combine 已有；Group GEMM/全球 capacity 待补 | 高 | 用 grouped matmul 替换 expert loop，补 ≥2 rank 一致性和溢出策略 | 保持 `MixtureOfExperts.forward(x)->Tensor`，EP 增 `process_group` |
-| 精确 Mamba-2 selective scan | H | 已覆盖教学/参考 | per-channel `d_state`、选择性 B/C/dt、causal conv、chunked scan 已有 | 高 | 对齐官方 SSD 参数化、fused parallel scan 和 checkpoint | 保持 `(x,state)->(y,state)` 签名，增 `backend` |
-| MTP 模型级训练返回 | I | 已覆盖 | `CausalLMOutput` 返回主 logits、MTP logits、加权 loss、label shift 和 ignore index | 中 | 对齐 chained MTP head 的参数共享与质量 | 增 `return_mtp`，默认仍返回 Tensor |
-| Prefix LM 遮罩回归 | J | 已覆盖 | `prefix_len` 与 padding 组合已实现并测试 | 中 | 增 packed/prefix batch 与 cache decode 语义 | 保留 `prefix_len` 入参 |
-| 多模态完整模型 | J | 已覆盖教学/参考 | `MultimodalCausalLM`、Vision adapter、CrossAttn、mRoPE、early/cross mask 已有 | 中 | 接入可替换真实 ViT、patch merge、视频和生产 checkpoint | 新增组合模型，复用 `CrossAttentionFuser` |
-| 严格投机解码/EAGLE/DSpark | K | 已覆盖教学/参考 | Speculative 逐行 acceptance/residual/autoregressive draft；DSpark block scheduler；EAGLE head 接口 | 高 | 训练 EAGLE head、KV reuse、ragged verifier 和真实 runtime | 保留 `SpeculativeDecoder`/`EagleSpeculator`，增 verifier/scheduler |
-| Paged KV + 分层 offload/COW | K | 已覆盖教学/参考 | `PagedAttentionCache` 引用计数/COW + `TieredKVCache` HBM/CPU/NVMe LRU | 高 | block-granular 异步 copy、stream 同步、GPU allocator 和并发调度 | 扩展 `PagedAttentionCache(memory_levels=..., enable_cow=True)` |
-
----
-
-## 七、行业趋势与未来判断
-
-### 7.1 为什么越来越多模型从 MHA 迁移到 GQA/MQA/MLA
-
-- 解码阶段是服务成本大头：MHA 的 KV Cache 随层数和上下文线性增长，GQA 将 KV Head 压缩到 `h_kv/h`，MLA 进一步以低秩潜向量压缩缓存。
-- 模型规模越大，KV Cache 占比越显著：1M 上下文下，MHA 即使有 FlashAttention 也无法解决缓存和服务吞吐问题。
-- MLA 在 DeepSeek-V2/V3 上经过生产验证后，2026 年被 GLM、Kimi、Mistral 等团队跟进，说明“低秩 KV + 解耦 RoPE”已经从论文变成工程共识。
-
-### 7.2 长上下文时代 Attention 的核心瓶颈
-
-- 训练瓶颈：注意力矩阵计算和上下文并行通信，而不是单纯显存。
-- 推理瓶颈：KV Cache 容量、解码带宽、稀疏选择器 kernel 效率。
-- 产品瓶颈：1M 上下文能否稳定检索、保持长程推理和降低每 Token 成本。
-
-### 7.3 训练优化与推理优化的重心
-
-- 训练：FlashAttention 系列、上下文并行、长序列数据、位置编码缩放、线性/稀疏注意力训练稳定性。
-- 推理：MLA/稀疏/线性压缩、PagedAttention、FP4/FP8、投机解码、on-disk KV、共享 prefix。
-
-### 7.4 非 Attention 模块趋势
-
-- **RMSNorm + Pre-Norm + SwiGLU 成为常用基线的原因**：RMSNorm 省去均值平移，算子更简洁；Pre-Norm 改善深层梯度传播并降低对 warmup 和初始化的敏感性，但不会消除 warmup 需求；SwiGLU 通常提供较好的质量/参数折中。
-- **QK-Norm 的优势场景**：大 `head_dim`、长训练或注意力 logit 尺度不稳定时，可抑制 Q/K 范数漂移。它可与 GQA/MLA/稀疏注意力结合，但仍可能改变最优温度、学习率与质量，不应称为“无损叠加”。
-- **FFN 中间维度的收缩逻辑**：4x 缩到 8/3x 是参数效率权衡；MoE 化后专家中间维度进一步缩小到 2048-3072，靠专家数量而非单专家宽度换容量——对质量的影响被路由补偿。
-- **MoE 激活数从 2 扩展到 4/6/8/10/16**：反映出更细专家粒度与更大总专家数的组合；其收益依赖负载均衡、容量限制与专家并行，不能仅由 Top-k 增大推导“工程已成熟”。
-- **共享专家增多**：常开专家可捕获通用模式并减轻路由专家负担；本文的若干旗舰样本使用 1-2 个，但 Mixtral、MiMo 等路线说明共享专家并非必选项。
-- **混合架构整体趋势**：「Linear+Full、SSM+Attention、Sparse+Dense」的层间混合增多，但纯 Softmax Attention 仍在大量稠密模型中有竞争力；趋势是设计空间扩大，不是单向替代。
-
-### 7.5 跨模块协同趋势
-
-- **Attention + FFN 从串行走向配比设计**：Qwen3.8 的 3:1、MiMo 的约 6:1、GLM-5.2 的 indexer 共享周期，都是“Attention 层类型 × FFN 形态”的联合设计，而非逐层独立选择。
-- **MoE × Attention 的常见模式**：多数 decoder-only MoE 将专家放在 FFN 位置，并常保留首 1-3 层稠密；但这是工程上的主流布局，不是 MoE 的数学必然规则。MTP 是另一条训练/投机解码协同路径。
-- **位置编码走向混合而非统一**：Partial RoPE（0.25-0.5）、NoPE 间隔/分支、mrope 多模态并存，RoPE 没有“完全胜出”，而是退化为按需组合的基底方案。
-- **多模态的新要求**：视觉塔与文本侧共享归一化/残差设计，mrope 把位置编码扩展到图像 patch 维度，Late Fusion projector 趋向轻量（patch merge + 小型 projector）。
-
-### 7.6 未来 1 到 2 年判断
-
-- GQA 仍会是中小模型和部分 MoE 的默认方案，但 MLA 类方案在 1M 上下文和超大 MoE 中会更主流。
-- 纯 Softmax Attention 不会消失，但会从“所有层”变成“少量全局层”。
-- Sparse Attention 和 Linear Attention 会在超长上下文中重新崛起，但需要更可靠的 indexer、门控状态和 kernel 生态。
-- Attention、SSM、线性状态、稀疏检索会进一步融合，边界会越来越模糊。
-- **MoE 会继续向中小激活规模渗透**（<10B 激活），主要瓶颈是专家并行通信与路由工程复杂度，而非模型质量。
-- **量化感知训练的使用率会上升**：FP8 已在部分旗舰训练中验证，FP4/MXFP4 也开始落地；是否下沉为普遍默认，仍取决于硬件、kernel、标定成本和质量容差。
-- 归一化/残差侧的下一块试验田是 AttnRes 类跨层通路与层类型配比搜索，而非新的逐点激活函数。
-- 闭源模型将继续不披露架构，但开源模型的官方配置和 kernel 会成为 Attention 研究的主要证据来源。
-
----
-
-## 八、代码实现方案
-
-### 8.1 当前仓库实现盘点
-
-- `llminfra/attention/sliding_window.py`
-  - `SlidingWindowAttention`，继承 `BaseAttention`，支持 `window_size`、`num_kv_groups`、`causal`。
-- `llminfra/attention/block_sparse.py`
-  - `BlockSparseAttention`，继承 `BaseAttention`，支持 `block_size`、`top_k`、显式 `block_indices`。
-- `llminfra/attention/linear.py`
-  - `LinearAttention`，继承 `BaseAttention`，支持 `elu/relu/linear` kernel 与因果状态累积。
-- `llminfra/inference/paged_attention.py`
-  - `PagedKVBlockAllocator`、`PagedAttentionCache` 和 `paged_attention`，模拟 block table、稠密 gather、引用计数、序列克隆与 partial-tail copy-on-write。
-- `llminfra/positional/`
-  - `RotaryPositionEmbedding`、`YaRNScaledRotaryEmbedding`、`DynamicNTKRotaryEmbedding`、`ALiBiBias` 和工厂函数。
-- `llminfra/moe/mixture.py`
-  - `ExpertFFN`、`TopKRouter`、`MixtureOfExperts`、`DeepSeekMoE`、`ExpertParallelMoE`，覆盖 Top-k 路由、共享专家、DeepSeek 风格 MoE 与专家并行模拟。
-- `llminfra/attention/hybrid.py`
-  - `HybridAttention`，按层索引在线性注意力和 GQA 全注意力之间路由，复现 Qwen3-Next/Kimi 的 3:1 混合模式。
-- `llminfra/attention/gated_delta_net.py`
-  - `GatedDeltaNet`，门控 Delta 规则线性注意力的教学实现。
-- `llminfra/attention/lightning.py`
-  - `LightningAttention`，分块线性注意力与 intra-block softmax 的 MiniMax 风格实现。
-- `llminfra/inference/sparse_indexer.py`
-  - `BlockSparseIndexer`，学习式 KV block Top-k 选择器，可与 `BlockSparseAttention` 组合。
-- `llminfra/moe/latent_moe.py`
-  - `LatentMoE`，Nemotron-3 风格的潜空间路由 MoE。
-- `llminfra/attention/residual.py`
-  - `AttentionResidual`，Kimi K3 Attention Residual 的简化教学版本。
-- `llminfra/inference/multi_token_prediction.py`
-  - `MultiTokenPredictionHead`，DeepSeek/Nemotron 风格多 Token 预测头。
-- `llminfra/attention/ring.py`
-  - `ring_attention` 与 `RingAttention`，分块在线 Softmax 精确注意力；`distributed_ring_attention` 提供基于 `torch.distributed` 的 KV 环式交换参考路径。
-- `llminfra/attention/compressed_sparse.py`
-  - `CompressedSparseAttention`，CSA 风格 KV 压缩 + block sparse 选择。
-- `llminfra/attention/alibi.py`
-  - `AlibiAttention`，GQA 与 ALiBi additive bias 集成。
-- `llminfra/attention/flash_mla.py`
-  - `FlashMLA`，MLA 推理接口模拟。
-- `llminfra/inference/speculative.py`
-  - `SpeculativeDecoder` 与 `EagleSpeculator`，支持自回归 draft rollout、逐 batch-row 验证、温度采样、拒绝残差和 bonus token 的教学接口。
-- `llminfra/layers/ssm.py`
-  - `Mamba2Layer`，按通道维护 `(batch, d_inner, d_state)` 选择性状态，含 input-dependent B/C/dt、causal depthwise convolution、recurrent/chunked 扫描和 `Mamba2State` 流式状态；仍不是官方 fused SSD kernel。
-- `llminfra/inference/kv_offload.py`
-  - `OnDiskKVStore` 与 `TieredKVCache`，提供 HBM/CPU/NVMe 的同步 LRU 提升/驱逐参考接口。
-- `llminfra/positional/` 扩展
-  - `LongRoPEScaledRotaryEmbedding`、`LongRoPEPreset` 注册表、`TwoDimensionalPositionEmbedding` 与 `MultiModalRotaryPositionEmbedding`。
-- `llminfra/moe/mixture.py` 扩展
-  - `load_balance_loss`、`router_z_loss`、无辅助损失路由偏置、`ExpertChoiceRouter`、expert dropout，以及教学级 `ExpertParallelMoE`。
-- `llminfra/layers/norm.py`
-  - `RMSNorm`、`LayerNorm`、`DeepNorm`、`LayerScale`。
-- `llminfra/layers/ffn.py`
-  - `SwiGLUFFN` 与 `FeedForward`，覆盖主流 Dense 和 MoE 专家网络。
-- `llminfra/layers/activations.py` 与 `llminfra/layers/ffn_variants.py`
-  - 精确/tanh GELU、Squared ReLU、Clipped SiLU、GeGLU、ReGLU、Clamp-SwiGLU 和 4x/8/3x/custom FFN 工厂。
-- `llminfra/layers/transformer.py`
-  - `TransformerBlock`，支持 Pre/Post/Sandwich-LN、串行/并行 Attention-FFN 与 AttnRes。
-- `llminfra/layers/hybrid_block.py`
-  - `HybridSSMBlock` 与 `HybridLayerStack`，支持 `linear:ssm:full` 层图、Pre-Norm 残差/FFN、共享 Full Attention 和多层 SSM 状态传递。
-- `llminfra/model.py`
-  - `CausalLMModel`，组合 Embedding、位置编码、Transformer Block、RMSNorm 与 LM Head；支持 `alibi`、`longrope`、`2d`、tied embeddings 和 `prefix_len`。
-- `llminfra/encoder_decoder.py` 与 `llminfra/multimodal.py`
-  - `CrossAttention`、`EncoderBlock`、`DecoderBlock`、`EncoderDecoderModel`、`VisionEncoderAdapter`、`CrossAttentionFuser`、`MultimodalCausalLM` 与 `build_multimodal_position_ids`；支持视觉前缀早期融合和 Cross-Attention 融合。
-- `llminfra/registry.py`
-  - `build_attention`、`build_positional_encoding`、`list_attentions`，统一模块选择入口。
-- `llminfra/inference/dspark.py`
-  - `DSparkScheduler` 与 `DSparkDecoder`，按验收率在离散 block 长度之间切换的 Markov 风格调度参考实现。
-- `tests/attention/`（test_base / test_classic / test_sparse / test_linear / test_hybrid）
-  - 覆盖 BaseAttention 工具、MHA/GQA/MQA/MLA/Ring、SWA/Block Sparse/CSA、Linear/Lightning/Gated DeltaNet、Hybrid/ALiBi/Residual/FlashMLA。
-- `tests/positional/test_positional.py`
-  - 覆盖 RoPE 范数保持、YaRN/NTK 有限性、ALiBi 掩码、Partial RoPE、Position Interpolation、LongRoPE/2D 与工厂函数。
-- `tests/layers/test_layers.py`
-  - 覆盖 RMSNorm、SwiGLU/FeedForward、Mamba2Layer、TransformerBlock 组合。
-- `tests/moe/test_moe.py`
-  - 覆盖路由权重归一化、MoE/DeepSeekMoE/LatentMoE/ExpertParallelMoE 梯度与负载均衡损失。
-- `tests/inference/test_inference.py`
-  - 覆盖 PagedAttention 与稠密注意力一致性、On-Disk KV、SpeculativeDecoder/EagleSpeculator、MTP、BlockSparseIndexer。
-- `tests/flashattention/`（test_versions / test_api / test_cuda）
-  - 覆盖 FA1-FA4 数值正确性、PyTorch 风格 API 与长序列 CUDA 用例。
-- `tests/test_model.py`
-  - 覆盖注册表、CausalLMModel 的 Dense/MoE/Hybrid 组合、位置编码、tied embeddings 与 Prefix LM。
-- `tests/test_encoder_decoder.py` 与 `tests/test_multimodal.py`
-  - 覆盖 Encoder-Decoder/Cross Attention 的形状与梯度，以及视觉特征投影/交叉融合。
-- `tests/test_mainstream_extensions.py`
-  - 覆盖 Gumbel 路由、Hybrid layer map、Mamba 流式状态、多模态 mRoPE、LongRoPE 预设、分层 KV、DSpark 与分布式 Ring 的前置条件。
-- 修改 `llminfra/__init__.py` 导出新模块。
-
-### 8.2 Prompt 清单 1-33 逐项状态与实现方案
-
-> 状态含义：“完成”是指达到本仓库教学级 PyTorch 交付标准，不代表等价于官方 CUDA/Triton/分布式实现；“部分”是指有接口或简化实现，但仍缺 prompt 指定的生产语义或模型级集成。
-
-| # | 类别 | 状态 | 当前证据 | 下一步/验收标准 |
-|---|------|------|----------|------------------|
-| 1 | A | 部分 | `FlashMLA`、`CompressedSparseAttention`、`BlockSparseIndexer` 提供接口/参考实现 | 增 Triton/CUDA 的 MLA decode、block gather、ragged KV 与 backward；对齐官方 kernel 结果 |
-| 2 | A | 部分 | `ring_attention` 保留单进程路径，`distributed_ring_attention` 已用 autograd-aware `all_to_all_single` 轮转 KV | 生产版需改为通信/计算重叠的 point-to-point kernel，并在多 rank 上验证梯度与吞吐 |
-| 3 | A | 部分 | `AlibiAttention`/`ALiBiBias` 已与模型组合 | 将 additive bias 融入 block kernel，避免显式 `n*n` bias |
-| 4 | B | 部分 | `LongRoPEPreset` 注册表含明确标注为 reference-uniform 的 256K/512K/1M 档位，并支持导入已核验的逐频率系数 | 从官方模型 config 导入逐频率 preset，补原长度回退和大规模外推验证；当前 reference preset 不声称官方系数 |
-| 5 | B/J | 部分 | `MultiModalRotaryPositionEmbedding`、`build_multimodal_position_ids` 与 `MultimodalCausalLM` 已接入图像 T/H/W + 文本位置及 early/cross fusion | 接入真实 ViT/patch merge、视频变长 batch 和 checkpoint-compatible head-wise mRoPE |
-| 6 | C | 完成 | `GeGLUFFN`、`ReGLUFFN`（GeGLU/GEGLU 同指 GELU-gated GLU） | 保持形状/梯度测试，补与 Transformers 同参数数值对齐可作加分项 |
-| 7 | C/K | 完成 | `ClampedSwiGLUFFN` + `QATWrapper` 已覆盖 INT4/INT8/approx-FP8 fake quant、per-tensor/per-channel scale 与 STE 梯度 | 生产版仍需 observer/calibration、真实低精度 kernel 和推理导出 |
-| 8 | C | 完成 | `ffn_factory` 支持 4x、8/3x、custom | 增 rounding multiple 配置后可更贴近 Llama/Qwen 生产尺寸 |
-| 9 | D | 完成 | `LayerNorm`、`DeepNorm` 已有公式/梯度测试，`TransformerBlock(norm_style="deepnorm")` 已接入 | 生产训练仍需按总层数设置 alpha/beta 初始化并做深层稳定性验证 |
-| 10 | D/A | 完成 | `BaseAttention(qk_norm=True)` 的统一逻辑已接入 MHA/GQA/MQA/MLA，并验证 head-wise unit RMS | fused QK-Norm kernel 与低精度误差验证仍待补 |
-| 11 | D/F | 完成 | `LayerScale` 已注入 `TransformerBlock` Attention/FFN 两条残差路径并有梯度测试 | 按模型配置补 layer-wise 初始化 schedule |
-| 12 | E | 完成 | `gelu_exact`、`gelu_tanh`，PyTorch exact 路径即 erf 定义 | 可增 `gelu_erf` 别名以避免用户误解 |
-| 13 | E | 完成 | `squared_relu`、`clamped_silu` 已注册到 activation factory | 补 FP16/FP8 边界值和极值测试 |
-| 14 | F | 完成 | `TransformerBlock(parallel=True)` | 保持 Pre/Post/Sandwich 三种组合的形状/梯度测试 |
-| 15 | F | 完成 | `norm_style="sandwich"` | 补与串行/并行块的数值回归 |
-| 16 | F | 完成 | `attention_residual=True` 将 `AttentionResidual` 集成 Block | 当前是逐维门控简化版；若追求 Kimi K3 对齐需补跨 block 缓冲与路由 |
-| 17 | G | 部分 | `ExpertParallelMoE` 在初始化 process group 时执行 autograd-aware token all-to-all dispatch/combine，并支持 capacity factor；无 process group 时保留本地模拟 | 用 ≥2 rank 集成测试校验全局路由、溢出 drop 和通信/计算重叠；生产版替换 Python expert loop 为 Group GEMM |
-| 18 | G | 完成 | `router_z_loss` 与 `TopKRouter(routing_strategy="gumbel")` 提供温度、hard/STE Gumbel-Top-k | 增大规模稀疏性/负载曲线回归；仍属于纯 PyTorch 路由参考实现 |
-| 19 | G | 完成 | `TopKRouter` 支持无梯度均衡 `router_bias` 更新 | 补多步负载收敛与不传梯度的回归测试 |
-| 20 | G | 完成 | `expert_dropout` 与 `ExpertChoiceRouter` 已有 | 将 router type 统一进入构建工厂 |
-| 21 | H | 部分 | `Mamba2Layer` 已有 per-channel `(batch, d_inner, d_state)`、causal depthwise conv、input-dependent B/C/dt、正确的 dt 离散化及 recurrent/chunked 等价扫描 | 对齐官方 SSD 参数化、并行扫描和 fused CUDA kernel；当前参考实现已覆盖数学/状态接口 |
-| 22 | H | 部分 | `HybridLayerStack`/`HybridSSMBlock` 支持 norm、残差、SwiGLU、共享 Full Attention、`Mamba2State` 多层传递 | 补 Zamba checkpoint-compatible 共享块、层间状态调度和真实 SSM+Attention 比例配置 |
-| 23 | H/A | 完成 | `HybridLayerStack(layer_map="linear:ssm:full")` 统一组合三类 mixer 并传递 SSM 状态 | 生产部署仍需各 mixer 的 streaming cache 与 fused kernel；参考接口已统一 |
-| 24 | I | 完成 | `CausalLMModel(tie_word_embeddings=True)` 与对应测试 | 在 README/API 文档中保持语义说明 |
-| 25 | I | 完成 | `CausalLMModel` 返回 `CausalLMOutput`，集成 MTP logits、label shift、多步权重及 `-100` ignore；多模态模型也可透传 MTP | 与官方 chained MTP head 做参数/数值对齐；当前共享 backbone hidden state 是教学简化 |
-| 26 | J | 完成 | `EncoderBlock`、`DecoderBlock`、`CrossAttention`、`EncoderDecoderModel` 及测试 | 当前是 T5-style 骨架，未声称复现 T5 relative bias |
-| 27 | J | 完成 | `CausalLMModel.forward(prefix_len=...)` 与 padding mask 组合已实现并测试前缀双向/生成因果可见性 | 增加 packed/prefix batch 和 cache decode 语义；当前为 dense mask 参考实现 |
-| 28 | J | 部分 | `MultimodalCausalLM` 已提供 Vision adapter、mRoPE ID、early prefix fusion、cross-attention fusion 与 alignment head | 接入真实 ViT、patch merge、视频位置和 checkpoint-compatible early/late fusion |
-| 29 | K | 完成 | `SpeculativeDecoder` 支持 temperature、逐行 acceptance、`norm(max(0,p_target-p_draft))` residual、自回归 draft rollout 与 bonus token | 加入 KV reuse、批量 ragged 输出和高性能 target verification kernel |
-| 30 | K | 部分 | `EagleSpeculator` 保留 hidden-state draft 接口；`DSparkScheduler`/`DSparkDecoder` 提供按验收率切换 block 的 Markov 风格参考调度 | 实现可训练 EAGLE head、KV 复用、真实 DSpark runtime 调度和 CUDA graph |
-| 31 | K | 部分 | `PagedAttentionCache` 已有引用计数/COW，`TieredKVCache` 已有同步 HBM-CPU-NVMe LRU 驱逐 | 加 block-granular asynchronous DMA、prefetch、并发请求调度和真实 GPU page allocator |
-| 32 | K | 完成 | `QuantizationConfig`、`FakeQuantizer`、`QATWrapper`、`build_quantized` 覆盖 INT4/INT8/approx-FP8、per-channel scale 与 STE；可包装 Attention/FFN | 补 KV 专用量化格式、observer/calibration、真实 FP8 kernel 和导出到推理引擎 |
-| 33 | L | 完成 | 本文已补 Step、MiMo、Zamba、Snowflake Arctic 系列 | 按官方模型卡/配置持续更新，未披露项保留为未知 |
-
-### 8.3 统一接口与设计说明
-
-- Attention 模块继承现有 `BaseAttention`，保持 `forward(hidden_state, attention_mask, return_attention_weights)` 接口；位置编码和 MoE 模块不继承 `BaseAttention`，因为它们不是 Attention 算子本身。
-- `BlockSparseAttention` 和 `SlidingWindowAttention` 仍物化 score 矩阵，因此定位是“教学/算法接口版”；真实生产版应由 CUDA kernel 直接跳过未选中 block。
-- `PagedAttentionCache` 已实现逻辑 block table、引用计数与 partial-tail copy-on-write，但不实现真实 GPU page allocator 或并发调度；生产系统应使用成熟 serving runtime 的 PagedAttention。
-- `LinearAttention` 使用 `cumsum` 计算因果状态，复杂度为 O(n) 状态更新，但仍是 PyTorch 教学实现，不包含 Gated DeltaNet 的门控与 chunkwise kernel。
-- `MixtureOfExperts` 按专家循环执行，便于阅读和测试；生产版本应使用 group GEMM、expert parallelism 和负载均衡调度。
-- `PartialRotaryPositionEmbedding`、`PositionInterpolation`、`RMSNorm` 和 `SwiGLUFFN` 是可直接组合的基础模块；YaRN 和 Dynamic NTK 的精确数值仍需与 Transformers 官方实现对比。
-- `distributed_ring_attention` 与 `ExpertParallelMoE` 只有在显式初始化 `torch.distributed` process group 后才执行集体通信；单进程环境会走可测试的参考路径或给出明确错误，不会假装拥有多设备吞吐。
-- `Mamba2State` 显式包含 SSM 与 causal-conv 历史；`HybridLayerStack` 按 `layer_map` 对齐状态列表，便于流式 decode 传递，生产系统仍需 fused scan/cache kernel。
-- `MultimodalCausalLM` 接受预计算 patch features，不内置 ViT 权重；early 模式将视觉 token 作为 prefix，cross-attention 模式保留文本长度，均返回结构化 logits/loss/alignment 输出。
-- `TieredKVCache` 是同步、序列粒度的 HBM/CPU/NVMe LRU 参考；`PagedAttentionCache` 的 block COW 和它们的真实 GPU allocator、异步 DMA、调度器仍需 serving runtime。
-
-### 8.4 运行与测试
-
-```bash
-python -m pytest tests/ -q
-ruff check llminfra tests
-```
-
-### 8.5 当前覆盖与待补充清单
-
-**已覆盖代码模块**
-
-- Attention：MHA、MQA、GQA、MLA、SWA、Block Sparse、Linear、Hybrid、Gated DeltaNet、Lightning Attention、Ring Attention、Compressed Sparse Attention、ALiBi Attention、PagedAttention、FlashAttention v1-v4。
-- 位置编码：RoPE、YaRN、Dynamic NTK、ALiBi、Partial RoPE、Position Interpolation、LongRoPE preset registry、2D Position、mRoPE。
-- MoE：ExpertFFN、TopKRouter（含 Gumbel/STE）、MixtureOfExperts、DeepSeekMoE、LatentMoE、ExpertChoiceRouter、ExpertParallel all-to-all reference、load-balance/z-loss。
-- 系统/工程接口：FlashMLA、SpeculativeDecoder、EagleSpeculator、DSparkScheduler/Decoder、OnDiskKVStore、TieredKVCache。
-- Transformer 基础：RMSNorm、LayerNorm、DeepNorm、LayerScale、SwiGLU/GeGLU/ReGLU、FeedForward、TransformerBlock、HybridLayerStack、Mamba2Layer、CausalLMModel、BlockSparseIndexer、AttentionResidual、MultiTokenPredictionHead、QATWrapper。
-- 注册表：`build_attention`、`build_positional_encoding`、`list_attentions`。
-
-**已覆盖模型级组合**
-
-- `CausalLMModel` 支持 Dense、MoE、Hybrid Attention、ALiBi、LongRoPE、2D Position、mRoPE position IDs、padding/causal/prefix mask、tie embeddings、MTP 和 `inputs_embeds`。
-- `MultimodalCausalLM` 支持 `[vision, text]` early prefix fusion、text-to-vision cross-attention fusion、mRoPE T/H/W IDs、alignment head 和训练 labels。
-- `HybridLayerStack` 支持 `linear:ssm:full` 自定义层图和多层流式状态。
-
-**未覆盖或待补充**
-
-- 真实 FlashMLA / CSA / DSA CUDA/Triton kernel，以及 KV 专用量化导出。
-- Ring/Expert Parallel 的生产级通信/计算重叠、capacity 全局一致性和 Group GEMM。
-- Mamba-2 官方 SSD 参数化、并行扫描和 fused CUDA kernel。
-- DSpark / EAGLE 真实投机解码 runtime、KV reuse 和 ragged batch kernel。
-- PagedAttention / KV offload 的 block-granular GPU allocator、异步 DMA、prefetch 与并发调度。
-- LongRoPE 官方精确系数与大规模验证。
-
-**测试基线**
-
-```bash
-python -m pytest tests/ -q
-# 294 passed, 9 skipped（CUDA 长序列用例在无 GPU 机器上跳过）
-
-ruff check llminfra tests
-# All checks passed
-```
-
----
-
 ## 九、参考资料
 
 ### Qwen
 
-- Qwen2 Technical Report: https://arxiv.org/abs/2407.10671
-- Qwen2.5 Technical Report: https://arxiv.org/abs/2412.15115
-- Qwen3-Next 官方模型卡: https://huggingface.co/Qwen/Qwen3-Next-80B-A3B-Instruct
-- Qwen3.8-27B 官方模型卡: https://huggingface.co/Qwen/Qwen3.8-27B
-- Qwen3.8-2.4T-A95B 官方模型卡: https://huggingface.co/Qwen/Qwen3.8-2.4T-A95B
+- [QWEN2] Qwen2 Technical Report: https://arxiv.org/abs/2407.10671
+- [QWEN25] Qwen2.5 Technical Report: https://arxiv.org/abs/2412.15115
+- [QWEN-NEXT] Qwen3-Next 官方模型卡: https://huggingface.co/Qwen/Qwen3-Next-80B-A3B-Instruct
+- [QWEN38-27B] Qwen3.8-27B 官方模型卡: https://huggingface.co/Qwen/Qwen3.8-27B
+- [QWEN38-24T] Qwen3.8-2.4T-A95B 官方模型卡: https://huggingface.co/Qwen/Qwen3.8-2.4T-A95B
 
 ### DeepSeek
 
-- DeepSeek-V2: https://arxiv.org/abs/2405.04434
-- DeepSeek-V3 Technical Report: https://arxiv.org/abs/2412.19437
-- DeepSeek-V4 Technical Report: https://arxiv.org/abs/2606.19348
-- DeepSeek-V4-Pro-0813 官方模型卡: https://huggingface.co/deepseek-ai/DeepSeek-V4-Pro-0813
+- [DEEPSEEK-V2] DeepSeek-V2: https://arxiv.org/abs/2405.04434
+- [DEEPSEEK-V3] DeepSeek-V3 Technical Report: https://arxiv.org/abs/2412.19437
+- [DEEPSEEK-V4] DeepSeek-V4 Technical Report（pp.5, 9–13, 25；访问 2026-08-18）: https://arxiv.org/abs/2606.19348
+- [DEEPSEEK-V4-CARD] DeepSeek-V4-Pro-0813 官方模型卡与 inference 代码: https://huggingface.co/deepseek-ai/DeepSeek-V4-Pro-0813 ; https://huggingface.co/deepseek-ai/DeepSeek-V4-Pro-0813/tree/main/inference
 
 ### GLM
 
-- GLM-130B: https://arxiv.org/abs/2210.02414
-- GLM-5 官方模型卡: https://huggingface.co/zai-org/GLM-5
-- GLM-5.2 官方模型卡: https://huggingface.co/zai-org/GLM-5.2
-- IndexShare: https://arxiv.org/abs/2603.12201
+- [GLM130B] GLM-130B: https://arxiv.org/abs/2210.02414
+- [GLM5] GLM-5 官方模型卡: https://huggingface.co/zai-org/GLM-5
+- [GLM52] GLM-5.2 官方模型卡: https://huggingface.co/zai-org/GLM-5.2
+- [INDEXSHARE] GLM-5.2 官方模型卡（IndexShare 声明；访问 2026-08-18）: https://huggingface.co/zai-org/GLM-5.2
+- [INDEXCACHE] IndexCache（pp.7–10；访问 2026-08-18）: https://arxiv.org/abs/2603.12201
 
 ### Kimi
 
-- Kimi 初代技术报告: https://arxiv.org/abs/2310.08588
-- Kimi Linear 官方模型卡: https://huggingface.co/moonshotai/Kimi-Linear-48B-A3B-Instruct
-- Kimi K3 官方模型卡: https://huggingface.co/moonshotai/Kimi-K3
+- [KIMI-ORIGIN] Kimi 初代技术报告: https://arxiv.org/abs/2310.08588
+- [KIMI-LINEAR] Kimi Linear 论文（arXiv:2510.26692，pp.1, 6, 13, 16；访问 2026-08-18）/官方模型卡: https://arxiv.org/abs/2510.26692 ; https://huggingface.co/moonshotai/Kimi-Linear-48B-A3B-Instruct
+- [KIMI-K3] Kimi K3 官方模型卡: https://huggingface.co/moonshotai/Kimi-K3
 
 ### MiniMax
 
-- MiniMax-01: https://arxiv.org/abs/2501.08313
-- MiniMax Sparse Attention: https://arxiv.org/abs/2606.13392
-- MiniMax MSA 仓库: https://github.com/MiniMax-AI/MSA
-- MiniMax-M3 官方模型卡: https://huggingface.co/MiniMaxAI/MiniMax-M3
+- [MINIMAX-01] MiniMax-01: https://arxiv.org/abs/2501.08313
+- [MSA] MiniMax Sparse Attention（pp.1, 8–12；访问 2026-08-18）: https://arxiv.org/abs/2606.13392
+- [MSA-REPO] MiniMax MSA 仓库: https://github.com/MiniMax-AI/MSA
+- [MINIMAX-M3] MiniMax-M3 官方模型卡: https://huggingface.co/MiniMaxAI/MiniMax-M3
 
 ### Llama
 
-- Llama 1: https://arxiv.org/abs/2302.13971
-- Llama 2: https://arxiv.org/abs/2307.09288
-- Llama 3 Herd: https://arxiv.org/abs/2503.24095
-- Llama 4 官方模型卡/源码: https://github.com/meta-llama/llama-models/tree/main/models/llama4
+- [LLAMA1] Llama 1: https://arxiv.org/abs/2302.13971
+- [LLAMA2] Llama 2: https://arxiv.org/abs/2307.09288
+- [LLAMA3] Llama 3 Herd: https://arxiv.org/abs/2503.24095
+- [LLAMA4] Llama 4 官方模型卡/源码: https://github.com/meta-llama/llama-models/tree/main/models/llama4
 
 ### Mistral / Gemma / 其他
 
-- Mistral 7B: https://arxiv.org/abs/2310.06825
-- Mixtral of Experts: https://arxiv.org/abs/2401.04088
-- Gemma 2: https://arxiv.org/abs/2408.00118
-- Gemma 4 官方模型卡: https://huggingface.co/google/gemma-4-12B-it
-- Falcon 模型卡: https://huggingface.co/tiiuae/falcon-40b
-- Grok-1 仓库: https://github.com/xai-org/grok-1
-- Claude Fable 5 / Mythos 5 官方页面: https://www.anthropic.com/news/claude-fable-5-mythos-5
+- [MISTRAL7B] Mistral 7B: https://arxiv.org/abs/2310.06825
+- [MIXTRAL] Mixtral of Experts: https://arxiv.org/abs/2401.04088
+- [GEMMA2] Gemma 2: https://arxiv.org/abs/2408.00118
+- [GEMMA4] Gemma 4 官方模型卡: https://huggingface.co/google/gemma-4-12B-it
+- [FALCON40B] Falcon 模型卡: https://huggingface.co/tiiuae/falcon-40b
+- [GROK1] Grok-1 仓库: https://github.com/xai-org/grok-1
+- [CLAUDE-2026] Claude Fable 5 / Mythos 5 官方页面: https://www.anthropic.com/news/claude-fable-5-mythos-5
 
 ### Phi / DBRX / Nemotron / InternLM / Baichuan
 
-- Phi-4 官方配置: https://huggingface.co/microsoft/Phi-4
-- Phi-4-mini 官方模型卡: https://huggingface.co/microsoft/Phi-4-mini-instruct
-- DBRX 官方开源说明: https://www.databricks.com/blog/dbrx-open-source-llm
-- DBRX 公开配置镜像: https://huggingface.co/alpindale/dbrx-instruct
-- Nemotron-3-Nano 官方模型卡: https://huggingface.co/nvidia/NVIDIA-Nemotron-3-Nano-30B-A3B-BF16
-- Nemotron-3-Super 官方模型卡: https://huggingface.co/nvidia/NVIDIA-Nemotron-3-Super-120B-A12B-BF16
-- InternLM2.5-7B 官方配置: https://huggingface.co/internlm/internlm2_5-7b
-- InternLM3-8B-Instruct 官方配置: https://huggingface.co/internlm/internlm3-8b-instruct
-- Baichuan-M2-32B 官方配置: https://huggingface.co/baichuan-inc/Baichuan-M2-32B
-- Baichuan-M3-235B 官方配置: https://huggingface.co/baichuan-inc/Baichuan-M3-235B
+- [PHI4] Phi-4 官方配置: https://huggingface.co/microsoft/Phi-4
+- [PHI4-MINI] Phi-4-mini 官方模型卡: https://huggingface.co/microsoft/Phi-4-mini-instruct
+- [DBRX] DBRX 官方开源说明: https://www.databricks.com/blog/dbrx-open-source-llm
+- [DBRX-CONFIG] DBRX 公开配置镜像: https://huggingface.co/alpindale/dbrx-instruct
+- [NEMOTRON-NANO] Nemotron-3-Nano 官方模型卡: https://huggingface.co/nvidia/NVIDIA-Nemotron-3-Nano-30B-A3B-BF16
+- [NEMOTRON-SUPER] Nemotron-3-Super 官方模型卡: https://huggingface.co/nvidia/NVIDIA-Nemotron-3-Super-120B-A12B-BF16
+- [INTERNLM25] InternLM2.5-7B 官方配置: https://huggingface.co/internlm/internlm2_5-7b
+- [INTERNLM3] InternLM3-8B-Instruct 官方配置: https://huggingface.co/internlm/internlm3-8b-instruct
+- [BAICHUAN-M2] Baichuan-M2-32B 官方配置: https://huggingface.co/baichuan-inc/Baichuan-M2-32B
+- [BAICHUAN-M3] Baichuan-M3-235B 官方配置: https://huggingface.co/baichuan-inc/Baichuan-M3-235B
 
 ### Step / MiMo / Zamba / Arctic
 
-- Step-3.7-Flash 官方模型卡: https://huggingface.co/stepfun-ai/Step-3.7-Flash
-- Xiaomi MiMo-V2.5-Pro 官方模型卡: https://huggingface.co/XiaomiMiMo/MiMo-V2.5-Pro
-- Zamba2-7B-Instruct-v2 官方模型卡: https://huggingface.co/Zyphra/Zamba2-7B-Instruct-v2
-- Snowflake Arctic-Instruct 官方模型卡: https://huggingface.co/Snowflake/snowflake-arctic-instruct
+- [STEP37] Step-3.7-Flash 官方模型卡: https://huggingface.co/stepfun-ai/Step-3.7-Flash
+- [MIMO-V25] Xiaomi MiMo-V2.5-Pro 官方模型卡: https://huggingface.co/XiaomiMiMo/MiMo-V2.5-Pro
+- [ZAMBA2] Zamba2-7B-Instruct-v2 官方模型卡: https://huggingface.co/Zyphra/Zamba2-7B-Instruct-v2
+- [ARCTIC] Snowflake Arctic-Instruct 官方模型卡: https://huggingface.co/Snowflake/snowflake-arctic-instruct
 
 ### Hunyuan
 
-- Hunyuan-A13B-Instruct 官方模型卡: https://huggingface.co/tencent/Hunyuan-A13B-Instruct
-- Hy3 官方模型卡: https://huggingface.co/tencent/Hy3
-- Hy-MT2-30B-A3B 官方模型卡: https://huggingface.co/tencent/Hy-MT2-30B-A3B
+- [HUNYUAN-A13B] Hunyuan-A13B-Instruct 官方模型卡: https://huggingface.co/tencent/Hunyuan-A13B-Instruct
+- [HY3] Hy3 官方模型卡: https://huggingface.co/tencent/Hy3
+- [HY-MT2] Hy-MT2-30B-A3B 官方模型卡: https://huggingface.co/tencent/Hy-MT2-30B-A3B
 
 ### Attention 机制论文
 
-- Attention Is All You Need: https://arxiv.org/abs/1706.03762
-- MQA: https://arxiv.org/abs/1911.02150
-- GQA: https://arxiv.org/abs/2305.13245
-- FlashAttention: https://arxiv.org/abs/2205.14135
-- FlashAttention-2: https://arxiv.org/abs/2307.08691
-- FlashAttention-3: https://arxiv.org/abs/2407.08608
-- PagedAttention: https://arxiv.org/abs/2309.06180
-- Ring Attention: https://arxiv.org/abs/2310.01889
-- YaRN: https://arxiv.org/abs/2309.00071
-- Gated DeltaNet: https://arxiv.org/abs/2412.06464
+- [TRANSFORMER] Attention Is All You Need: https://arxiv.org/abs/1706.03762
+- [MQA] MQA: https://arxiv.org/abs/1911.02150
+- [GQA] GQA: https://arxiv.org/abs/2305.13245
+- [FA1] FlashAttention: https://arxiv.org/abs/2205.14135
+- [FA2] FlashAttention-2: https://arxiv.org/abs/2307.08691
+- [FA3] FlashAttention-3: https://arxiv.org/abs/2407.08608
+- [PAGEDATTN] PagedAttention: https://arxiv.org/abs/2309.06180
+- [RINGATTN] Ring Attention: https://arxiv.org/abs/2310.01889
+- [YARN] YaRN: https://arxiv.org/abs/2309.00071
+- [GATED-DELTANET] Gated DeltaNet: https://arxiv.org/abs/2412.06464
