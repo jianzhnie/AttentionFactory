@@ -1,8 +1,8 @@
 """Tests for the inference-time modules.
 
 Covers paged attention (cache append/gather/reset/clone and the paged kernel
-vs. dense attention), the on-disk KV store, speculative and EAGLE decoding,
-the multi-token prediction head and the block-sparse indexer.
+vs. dense attention), the on-disk KV store, speculative/EAGLE/Medusa decoding
+components, the multi-token prediction head and the block-sparse indexer.
 """
 
 import pytest
@@ -12,10 +12,12 @@ from llminfra import (
     BlockSparseAttention,
     BlockSparseIndexer,
     EagleSpeculator,
+    MedusaHead,
     MultiTokenPredictionHead,
     OnDiskKVStore,
     PagedAttentionCache,
     SpeculativeDecoder,
+    medusa_loss,
     paged_attention,
 )
 
@@ -216,6 +218,22 @@ def test_multi_token_prediction_returns_multiple_logits():
     logits = head(x)
     assert len(logits) == 3
     assert all(item.shape == (BATCH, SEQ, 64) for item in logits)
+
+
+def test_medusa_head_candidates_loss_and_gradient():
+    head = MedusaHead(HIDDEN, vocab_size=64, num_heads=3)
+    hidden = torch.randn(BATCH, SEQ, HIDDEN, requires_grad=True)
+    labels = torch.randint(0, 64, (BATCH, SEQ))
+
+    logits = head(hidden)
+    assert logits.shape == (BATCH, SEQ, 3, 64)
+    candidate_ids, candidate_scores = head.generate_candidates(hidden, top_k=4)
+    assert candidate_ids.shape == candidate_scores.shape == (BATCH, 3, 4)
+
+    loss = medusa_loss(head, hidden, labels, weight_decay=0.8)
+    assert loss.ndim == 0 and torch.isfinite(loss)
+    loss.backward()
+    assert hidden.grad is not None and torch.isfinite(hidden.grad).all()
 
 
 def test_block_sparse_indexer_shape_and_causality():

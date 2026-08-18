@@ -2,6 +2,7 @@
 
 from .dspark import DSparkDecoder, DSparkScheduler
 from .kv_offload import OnDiskKVStore, TieredKVCache
+from .medusa import MedusaHead, medusa_loss
 from .multi_token_prediction import MultiTokenPredictionHead, mtp_loss
 from .paged_attention import (
     PagedAttentionCache,
@@ -16,12 +17,14 @@ __all__ = [
     "DSparkDecoder",
     "DSparkScheduler",
     "EagleSpeculator",
+    "MedusaHead",
     "MultiTokenPredictionHead",
     "OnDiskKVStore",
     "PagedAttentionCache",
     "PagedKVBlockAllocator",
     "SpeculativeDecoder",
     "TieredKVCache",
+    "medusa_loss",
     "mtp_loss",
     "paged_attention",
 ]
