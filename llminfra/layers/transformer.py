@@ -9,6 +9,7 @@ from ..attention.hybrid import HybridAttention
 from ..attention.mha import MultiHeadAttention
 from ..attention.residual import AttentionResidual
 from .ffn import SwiGLUFFN
+from .hyperconnection import ManifoldConstrainedHyperConnection
 from .norm import DeepNorm, LayerNorm, LayerScale, RMSNorm
 
 _NORM_STYLES = ("pre", "post", "sandwich", "deepnorm")
@@ -51,6 +52,10 @@ class TransformerBlock(nn.Module):
         layer_scale_init: Optional initial value for learned per-channel
             residual-branch scaling. ``None`` disables LayerScale.
         deepnorm_alpha: Residual multiplier for ``norm_style="deepnorm"``.
+        manifold_hyper_connection: Enable mHC-style constrained residual
+            mixing for both attention and FFN branches.
+        hc_mult: Number of residual streams used by each mHC mixer.
+        sinkhorn_iters: Sinkhorn normalization iterations for mHC.
     """
 
     def __init__(
@@ -68,6 +73,9 @@ class TransformerBlock(nn.Module):
         norm_type: str = "rmsnorm",
         layer_scale_init: float | None = None,
         deepnorm_alpha: float = 1.0,
+        manifold_hyper_connection: bool = False,
+        hc_mult: int = 4,
+        sinkhorn_iters: int = 20,
     ) -> None:
         super().__init__()
         if pre_norm is not None:
@@ -82,6 +90,18 @@ class TransformerBlock(nn.Module):
             )
         if norm_style == "deepnorm" and attention_residual:
             raise ValueError("attention_residual cannot be combined with deepnorm")
+        if manifold_hyper_connection and attention_residual:
+            raise ValueError(
+                "manifold_hyper_connection cannot be combined with attention_residual"
+            )
+        if manifold_hyper_connection and norm_style == "deepnorm":
+            raise ValueError(
+                "manifold_hyper_connection cannot be combined with deepnorm"
+            )
+        if manifold_hyper_connection and parallel:
+            raise ValueError(
+                "manifold_hyper_connection requires sequential sublayers"
+            )
         self.hidden_size = int(hidden_size)
         self.num_heads = int(num_heads)
         self.intermediate_size = int(intermediate_size)
@@ -121,14 +141,37 @@ class TransformerBlock(nn.Module):
         self.attn_res: AttentionResidual | None = None
         if attention_residual:
             self.attn_res = AttentionResidual(hidden_size)
+        self.attention_mhc: ManifoldConstrainedHyperConnection | None = None
+        self.ffn_mhc: ManifoldConstrainedHyperConnection | None = None
+        if manifold_hyper_connection:
+            self.attention_mhc = ManifoldConstrainedHyperConnection(
+                hidden_size,
+                hc_mult=hc_mult,
+                sinkhorn_iters=sinkhorn_iters,
+            )
+            self.ffn_mhc = ManifoldConstrainedHyperConnection(
+                hidden_size,
+                hc_mult=hc_mult,
+                sinkhorn_iters=sinkhorn_iters,
+            )
 
     def _add_attention_residual(
         self, hidden_state: torch.Tensor, attention_output: torch.Tensor
     ) -> torch.Tensor:
         """Add the attention output back, optionally through the learned gate."""
+        if self.attention_mhc is not None:
+            return self.attention_mhc(hidden_state, attention_output)
         if self.attn_res is not None:
             return self.attn_res(hidden_state, attention_output)
         return hidden_state + attention_output
+
+    def _add_ffn_residual(
+        self, hidden_state: torch.Tensor, ffn_output: torch.Tensor
+    ) -> torch.Tensor:
+        """Add the FFN branch through plain residual or mHC mixing."""
+        if self.ffn_mhc is not None:
+            return self.ffn_mhc(hidden_state, ffn_output)
+        return hidden_state + ffn_output
 
     def forward(
         self,
@@ -193,13 +236,15 @@ class TransformerBlock(nn.Module):
         hidden_state = self._add_attention_residual(hidden_state, attention_output)
         if self.norm_style == "post":
             hidden_state = self.norm1(hidden_state)
-            return self.norm2(hidden_state + self.ffn(hidden_state))
+            return self.norm2(
+                self._add_ffn_residual(hidden_state, self.ffn(hidden_state))
+            )
         ffn_output = self.ffn_scale(self.ffn(self.norm2(hidden_state)))
         if self.norm_style == "sandwich":
             if self.norm4 is None:
                 raise RuntimeError("sandwich FFN norm was not initialized")
             ffn_output = self.norm4(ffn_output)
-        return hidden_state + ffn_output
+        return self._add_ffn_residual(hidden_state, ffn_output)
 
     def _parallel_forward(
         self, hidden_state: torch.Tensor, attention_output: torch.Tensor
@@ -230,5 +275,6 @@ class TransformerBlock(nn.Module):
             f"intermediate_size={self.intermediate_size}, "
             f"norm_style={self.norm_style!r}, norm_type={self.norm_type!r}, "
             f"parallel={self.parallel}, "
-            f"attention_residual={self.attn_res is not None}"
+            f"attention_residual={self.attn_res is not None}, "
+            f"manifold_hyper_connection={self.attention_mhc is not None}"
         )

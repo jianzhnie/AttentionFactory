@@ -354,7 +354,7 @@ Arctic 是“Dense 主干 + 大规模 MoE 残差”的代表。
 | C. FFN/MLP | 已覆盖 | FeedForward/SwiGLU/GeGLU/ReGLU/Clamp-SwiGLU/FFN factory/QATWrapper 已实现 | QAT observer/calibration、KV 专用量化与生产低精度 kernel 仍待补 | 中 |
 | D. 归一化 | 已覆盖 | RMSNorm/LayerNorm/DeepNorm/LayerScale/QK-Norm 已实现并接入 MHA/MQA/GQA/MLA 与 TransformerBlock | 生产 fused norm 和大深度数值验证仍待补 | 中 |
 | E. 激活函数 | 已覆盖 | 精确 GELU/erf GELU/tanh GELU/ReLU/Squared ReLU/SiLU/Swish/Clipped SiLU 已实现 | 量化数值边界测试仍可补充 | 低 |
-| F. 残差/层序 | 已覆盖 | Pre/Post/Sandwich/DeepNorm、Parallel Block、LayerScale、AttnRes 已集成 `TransformerBlock`；mHC 提供 Sinkhorn 约束的 PyTorch 参考层 | AttnRes 仍是逐维门控参考版；mHC 尚未完成多副本流水线状态、fused kernel 与官方 checkpoint 对齐 | 中-高 |
+| F. 残差/层序 | 已覆盖 | Pre/Post/Sandwich/DeepNorm、Parallel Block、LayerScale、AttnRes、mHC 均已接入 `TransformerBlock`；mHC 使用 Sinkhorn 约束的 PyTorch 参考层 | AttnRes 仍是逐维门控参考版；mHC 尚未完成多副本流水线状态、fused kernel 与官方 checkpoint 对齐 | 中-高 |
 | G. MoE | 已覆盖 | Top-k/共享专家/LatentMoE/Z-Loss/无辅助偏置/Expert Choice/Expert Dropout/Gumbel/EP all-to-all reference 已实现 | Group GEMM、全局 capacity/drop 和真实多节点吞吐仍待补 | 高 |
 | H. SSM/Hybrid | 已覆盖 | `Mamba2Layer`、`HybridSSMBlock`、`HybridLayerStack` 已实现 per-channel state、causal conv、norm/residual/FFN 和 layer map | 官方 SSD/fused selective-scan kernel、checkpoint-compatible Zamba 配置仍待补 | 高 |
 | I. Embedding/输出头 | 已覆盖 | tied embeddings、`MultiTokenPredictionHead`、`mtp_loss`、序列/Token 分类、奖励、Embedding 头和结构化 `CausalLMOutput` 已实现 | chained MTP 与大规模参数/质量对齐仍待补 | 中 |

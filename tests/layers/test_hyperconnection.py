@@ -1,7 +1,7 @@
 import pytest
 import torch
 
-from llminfra import ManifoldConstrainedHyperConnection
+from llminfra import ManifoldConstrainedHyperConnection, TransformerBlock
 
 
 def test_hyperconnection_shape_constraint_and_gradients():
@@ -27,3 +27,41 @@ def test_hyperconnection_mixing_matrix_is_doubly_stochastic():
 def test_hyperconnection_rejects_invalid_dimensions(kwargs):
     with pytest.raises(ValueError):
         ManifoldConstrainedHyperConnection(**kwargs)
+
+
+def test_transformer_block_integrates_mhc_on_both_residual_branches():
+    block = TransformerBlock(
+        hidden_size=16,
+        num_heads=4,
+        intermediate_size=32,
+        manifold_hyper_connection=True,
+        hc_mult=4,
+        sinkhorn_iters=20,
+    )
+    hidden = torch.randn(2, 5, 16, requires_grad=True)
+    output = block(hidden)
+    assert output.shape == hidden.shape
+    output.square().mean().backward()
+    assert block.attention_mhc is not None
+    assert block.ffn_mhc is not None
+    assert block.attention_mhc.logits.grad is not None
+    assert block.ffn_mhc.logits.grad is not None
+
+
+@pytest.mark.parametrize(
+    "kwargs",
+    [
+        {"attention_residual": True},
+        {"norm_style": "deepnorm"},
+        {"parallel": True},
+    ],
+)
+def test_transformer_block_rejects_incompatible_mhc_layouts(kwargs):
+    with pytest.raises(ValueError, match="manifold_hyper_connection"):
+        TransformerBlock(
+            hidden_size=16,
+            num_heads=4,
+            intermediate_size=32,
+            manifold_hyper_connection=True,
+            **kwargs,
+        )
