@@ -1,0 +1,4 @@
+interface:
+  display_name: "Python Code Quality"
+  short_description: "Apply clear, typed, tested Python refactoring practices."
+  default_prompt: "Use $python-code-quality to review or refactor this Python code for correctness, clarity, typing, tests, security, and maintainability."

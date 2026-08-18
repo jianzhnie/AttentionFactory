@@ -171,7 +171,7 @@ class EncoderOnlyModel(nn.Module):
 
         if isinstance(
             self.positional,
-            (LearnedAbsolutePositionEmbedding, SinusoidalPositionEmbedding),
+            LearnedAbsolutePositionEmbedding | SinusoidalPositionEmbedding,
         ):
             hidden_state = self.positional(hidden_state, position_ids)
         else:
@@ -210,7 +210,7 @@ class EncoderOnlyModel(nn.Module):
             return None
         if isinstance(
             self.output_head,
-            (SequenceClassificationHead, RewardModelHead, EmbeddingHead),
+            SequenceClassificationHead | RewardModelHead | EmbeddingHead,
         ):
             return self.output_head(hidden_state, attention_mask)
         if isinstance(self.output_head, TokenClassificationHead):

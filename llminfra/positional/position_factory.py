@@ -85,7 +85,7 @@ def get_positional_encoding(
                 raise ValueError(
                     f"unsupported longrope preset arguments: {sorted(kwargs)}"
                 )
-            if not isinstance(dtype, torch.dtype) or not isinstance(base, (int, float)):
+            if not isinstance(dtype, torch.dtype) or not isinstance(base, int | float):
                 raise ValueError("longrope dtype/base have invalid types")
             return LongRoPEScaledRotaryEmbedding.from_preset(
                 preset,
