@@ -23,6 +23,7 @@ from .attention import (
     DynamicSparseAttention,
     FlashMLA,
     GatedDeltaNet,
+    GroupedQueryAttention,
     GroupQueryAttention,
     HierarchicalCompressedAttention,
     HybridAttention,
@@ -40,13 +41,6 @@ from .attention import (
     distributed_ring_attention,
     ring_attention,
 )
-from .encoder_decoder_model import (
-    CrossAttention,
-    DecoderBlock,
-    EncoderBlock,
-    EncoderDecoderModel,
-)
-from .encoder_model import EncoderOnlyModel, EncoderOutput
 from .flash_attention import FlashAttention, flash_attention
 from .inference import (
     BlockSparseIndexer,
@@ -64,7 +58,6 @@ from .inference import (
     mtp_loss,
     paged_attention,
 )
-from .language_model import CausalLMModel, CausalLMOutput, PrefixLMModel
 from .layers import (
     ACTIVATIONS,
     ClampedSwiGLUFFN,
@@ -85,6 +78,27 @@ from .layers import (
     build_feed_forward,
     get_activation,
 )
+from .models import (
+    CausalLMModel,
+    CausalLMOutput,
+    CrossAttention,
+    CrossAttentionFuser,
+    DecoderBlock,
+    EmbeddingHead,
+    EncoderBlock,
+    EncoderDecoderModel,
+    EncoderOnlyModel,
+    EncoderOutput,
+    MultimodalCausalLM,
+    MultimodalCausalLMOutput,
+    PrefixLMModel,
+    RewardModelHead,
+    SequenceClassificationHead,
+    TokenClassificationHead,
+    VisionEncoderAdapter,
+    build_multimodal_position_ids,
+    pool_hidden_state,
+)
 from .module_registry import build_attention, build_positional_encoding, list_attentions
 from .moe import (
     DeepSeekMoE,
@@ -96,20 +110,6 @@ from .moe import (
     TopKRouter,
     load_balance_loss,
     router_z_loss,
-)
-from .multimodal_model import (
-    CrossAttentionFuser,
-    MultimodalCausalLM,
-    MultimodalCausalLMOutput,
-    VisionEncoderAdapter,
-    build_multimodal_position_ids,
-)
-from .output_heads import (
-    EmbeddingHead,
-    RewardModelHead,
-    SequenceClassificationHead,
-    TokenClassificationHead,
-    pool_hidden_state,
 )
 from .positional import (
     LONGROPE_PRESETS,
@@ -181,6 +181,7 @@ __all__ = [
     "GatedDeltaNet",
     "GeGLUFFN",
     "GroupQueryAttention",
+    "GroupedQueryAttention",
     "HierarchicalCompressedAttention",
     "HybridAttention",
     "HybridLayerStack",

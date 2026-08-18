@@ -12,7 +12,7 @@ Simplifications (documented for teaching purposes):
   only defines the tensor interface ``(batch, num_patches, vision_dim) ->
   (batch, num_patches, hidden_size)``.
 - ``CrossAttentionFuser`` reuses ``CrossAttention`` from
-  ``llminfra.encoder_decoder_model`` because ``MultiHeadAttention`` only supports
+  ``llminfra.models.encoder_decoder`` because ``MultiHeadAttention`` only supports
   self-attention (query length == key/value length), while fusion requires
   text queries to attend over a different number of vision key/value tokens.
 """
@@ -25,8 +25,8 @@ import torch
 import torch.nn.functional as F
 from torch import nn
 
-from .encoder_decoder_model import CrossAttention
-from .language_model import CausalLMModel, CausalLMOutput
+from .encoder_decoder import CrossAttention
+from .language import CausalLMModel, CausalLMOutput
 
 
 class VisionEncoderAdapter(nn.Module):

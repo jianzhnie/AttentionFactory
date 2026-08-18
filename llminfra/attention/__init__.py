@@ -13,7 +13,7 @@ from .block_sparse_attention import BlockSparseAttention
 from .compressed_sparse_attention import CompressedSparseAttention
 from .flash_mla_attention import FlashMLA
 from .gated_delta_net import GatedDeltaNet
-from .grouped_query_attention import GroupQueryAttention
+from .grouped_query_attention import GroupedQueryAttention, GroupQueryAttention
 from .hybrid_attention import HybridAttention
 from .kimi_delta_attention import KDAAttention, KimiDeltaAttention
 from .lightning_attention import LightningAttention
@@ -43,6 +43,7 @@ __all__ = [
     "FlashMLA",
     "GatedDeltaNet",
     "GroupQueryAttention",
+    "GroupedQueryAttention",
     "HierarchicalCompressedAttention",
     "HybridAttention",
     "KDAAttention",

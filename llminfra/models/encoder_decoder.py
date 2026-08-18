@@ -20,10 +20,10 @@ from __future__ import annotations
 import torch
 from torch import nn
 
-from .attention.base_attention import BaseAttention
-from .attention.multi_head_attention import MultiHeadAttention
-from .layers.feed_forward import SwiGLUFFN
-from .layers.normalization import RMSNorm
+from ..attention.base_attention import BaseAttention
+from ..attention.multi_head_attention import MultiHeadAttention
+from ..layers.feed_forward import SwiGLUFFN
+from ..layers.normalization import RMSNorm
 
 
 class CrossAttention(BaseAttention):

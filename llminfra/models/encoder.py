@@ -7,19 +7,19 @@ from dataclasses import dataclass
 import torch
 from torch import nn
 
-from .encoder_decoder_model import EncoderBlock
-from .layers.normalization import LayerNorm, RMSNorm
-from .module_registry import build_positional_encoding
-from .output_heads import (
+from ..layers.normalization import LayerNorm, RMSNorm
+from ..module_registry import build_positional_encoding
+from ..positional.classic_position import (
+    LearnedAbsolutePositionEmbedding,
+    SinusoidalPositionEmbedding,
+)
+from .encoder_decoder import EncoderBlock
+from .heads import (
     EmbeddingHead,
     RewardModelHead,
     SequenceClassificationHead,
     TokenClassificationHead,
     pool_hidden_state,
-)
-from .positional.classic_position import (
-    LearnedAbsolutePositionEmbedding,
-    SinusoidalPositionEmbedding,
 )
 
 

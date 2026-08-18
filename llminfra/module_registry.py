@@ -7,7 +7,7 @@ from .attention.base_attention import BaseAttention
 from .attention.block_sparse_attention import BlockSparseAttention
 from .attention.compressed_sparse_attention import CompressedSparseAttention
 from .attention.gated_delta_net import GatedDeltaNet
-from .attention.grouped_query_attention import GroupQueryAttention
+from .attention.grouped_query_attention import GroupedQueryAttention
 from .attention.hybrid_attention import HybridAttention
 from .attention.kimi_delta_attention import KimiDeltaAttention
 from .attention.lightning_attention import LightningAttention
@@ -31,7 +31,7 @@ ATTENTION_REGISTRY: dict[str, type[BaseAttention]] = {
     "alibi": ALiBiAttention,
     "mha": MultiHeadAttention,
     "mqa": MultiQueryAttention,
-    "gqa": GroupQueryAttention,
+    "gqa": GroupedQueryAttention,
     "mla": MultiHeadLatentAttention,
     "swa": SlidingWindowAttention,
     "block_sparse": BlockSparseAttention,

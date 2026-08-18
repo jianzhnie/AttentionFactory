@@ -8,13 +8,13 @@ import torch
 import torch.nn.functional as F
 from torch import nn
 
-from .inference.multi_token_prediction import MultiTokenPredictionHead, mtp_loss
-from .layers.feed_forward import SwiGLUFFN
-from .layers.normalization import RMSNorm
-from .layers.transformer_block import TransformerBlock
-from .module_registry import build_attention, build_positional_encoding
-from .moe import DeepSeekMoE
-from .positional.multimodal_rope import MultiModalRotaryPositionEmbedding
+from ..inference.multi_token_prediction import MultiTokenPredictionHead, mtp_loss
+from ..layers.feed_forward import SwiGLUFFN
+from ..layers.normalization import RMSNorm
+from ..layers.transformer_block import TransformerBlock
+from ..module_registry import build_attention, build_positional_encoding
+from ..moe import DeepSeekMoE
+from ..positional.multimodal_rope import MultiModalRotaryPositionEmbedding
 
 
 @dataclass

@@ -8,7 +8,7 @@ on the vision input).
 import pytest
 import torch
 
-from llminfra.multimodal_model import CrossAttentionFuser, VisionEncoderAdapter
+from llminfra.models.multimodal import CrossAttentionFuser, VisionEncoderAdapter
 
 
 def test_vision_encoder_adapter_shape():

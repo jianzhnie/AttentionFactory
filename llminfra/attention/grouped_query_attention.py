@@ -6,7 +6,7 @@ from torch import nn
 from .base_attention import BaseAttention, validate_attention_inputs
 
 
-class GroupQueryAttention(BaseAttention):
+class GroupedQueryAttention(BaseAttention):
     """
     Group Query Attention module as described in "GQA: Training Generalized
     Multi-Query Transformer Models from Multi-Head Checkpoints" (Chen et al., 2023).
@@ -173,3 +173,9 @@ class GroupQueryAttention(BaseAttention):
             f"{super().extra_repr()}, num_kv_groups={self.num_kv_groups}, "
             f"heads_per_group={self.heads_per_group}"
         )
+
+
+# Preserve the historical spelling for downstream users.
+GroupQueryAttention = GroupedQueryAttention
+
+__all__ = ["GroupQueryAttention", "GroupedQueryAttention"]

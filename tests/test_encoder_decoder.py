@@ -8,7 +8,7 @@ source sequence, padding masks and gradient flow.
 
 import torch
 
-from llminfra.encoder_decoder_model import (
+from llminfra.models.encoder_decoder import (
     CrossAttention,
     DecoderBlock,
     EncoderBlock,

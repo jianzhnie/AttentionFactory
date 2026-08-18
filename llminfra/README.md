@@ -10,12 +10,8 @@ for public APIs and use subpackages when working on an implementation.
 | `layers/` | Feed-forward, normalization, SSM, residual and Transformer blocks |
 | `moe/` | Routers, experts, latent MoE and expert-parallel references |
 | `inference/` | KV paging/offload, MTP and speculative decoding |
+| `models/` | Encoder, decoder, language, multimodal models and output heads |
 | `flash_attention/` | Educational FlashAttention v1-v4 implementations |
-| `language_model.py` | Decoder-only and prefix language-model composition |
-| `encoder_model.py` | Encoder-only model composition |
-| `encoder_decoder_model.py` | Encoder-decoder and cross-attention composition |
-| `multimodal_model.py` | Vision adapters and multimodal fusion |
-| `output_heads.py` | Classification, reward and embedding output heads |
 | `quantization.py` | Fake quantization and QAT wrappers |
 | `module_registry.py` | Public factories and implementation registries |
 
@@ -27,4 +23,6 @@ for public APIs and use subpackages when working on an implementation.
 - Public constructors use `build_*`; discovery helpers use `list_*`.
 - Import the canonical modules directly: `feed_forward`, `normalization`,
   `state_space`, `transformer_block`, `gated_feed_forward`, `hybrid_layers`
-  and `hyper_connection`.
+  and `hyper_connection`. Model implementations live in `models/encoder`,
+  `models/encoder_decoder`, `models/language`, `models/multimodal` and
+  `models/heads`.
