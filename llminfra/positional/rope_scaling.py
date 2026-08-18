@@ -14,8 +14,8 @@ from dataclasses import dataclass
 
 import torch
 
-from .base import BasePositionalEncoding
-from .rope import (
+from .base_position import BasePositionalEncoding
+from .rotary import (
     RotaryPositionEmbedding,
     _default_inv_freq,
     apply_rotary_pos_emb,

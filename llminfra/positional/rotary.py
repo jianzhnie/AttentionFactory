@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import torch
 
-from .base import BasePositionalEncoding
+from .base_position import BasePositionalEncoding
 
 
 def apply_rotary_pos_emb(

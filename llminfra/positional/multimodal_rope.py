@@ -6,8 +6,8 @@ from collections.abc import Sequence
 
 import torch
 
-from .base import BasePositionalEncoding
-from .rope import _default_inv_freq, apply_rotary_pos_emb
+from .base_position import BasePositionalEncoding
+from .rotary import _default_inv_freq, apply_rotary_pos_emb
 
 
 class MultiModalRotaryPositionEmbedding(BasePositionalEncoding):

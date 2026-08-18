@@ -15,17 +15,16 @@ Transformers implementations, especially for exact YaRN coefficients.
 """
 
 from .alibi import ALiBiBias
-from .base import BasePositionalEncoding
-from .classic import (
+from .base_position import BasePositionalEncoding
+from .classic_position import (
     LearnedAbsolutePositionEmbedding,
     NoPositionEncoding,
     SinusoidalPositionEmbedding,
     T5RelativePositionBias,
 )
-from .factory import get_positional_encoding, list_positional_encodings
-from .mrope import MultiModalRotaryPositionEmbedding
-from .rope import RotaryPositionEmbedding, apply_rotary_pos_emb
-from .scaling import (
+from .multimodal_rope import MultiModalRotaryPositionEmbedding
+from .position_factory import get_positional_encoding, list_positional_encodings
+from .rope_scaling import (
     LONGROPE_PRESETS,
     DynamicNTKRotaryEmbedding,
     LongRoPEPreset,
@@ -37,7 +36,8 @@ from .scaling import (
     get_longrope_preset,
     register_longrope_preset,
 )
-from .two_d import TwoDimensionalPositionEmbedding
+from .rotary import RotaryPositionEmbedding, apply_rotary_pos_emb
+from .two_dimensional import TwoDimensionalPositionEmbedding
 
 __all__ = [
     "LONGROPE_PRESETS",

@@ -5,23 +5,23 @@ from __future__ import annotations
 import torch
 
 from .alibi import ALiBiBias
-from .base import BasePositionalEncoding
-from .classic import (
+from .base_position import BasePositionalEncoding
+from .classic_position import (
     LearnedAbsolutePositionEmbedding,
     NoPositionEncoding,
     SinusoidalPositionEmbedding,
     T5RelativePositionBias,
 )
-from .mrope import MultiModalRotaryPositionEmbedding
-from .rope import RotaryPositionEmbedding
-from .scaling import (
+from .multimodal_rope import MultiModalRotaryPositionEmbedding
+from .rope_scaling import (
     DynamicNTKRotaryEmbedding,
     LongRoPEScaledRotaryEmbedding,
     PartialRotaryPositionEmbedding,
     PositionInterpolation,
     YaRNScaledRotaryEmbedding,
 )
-from .two_d import TwoDimensionalPositionEmbedding
+from .rotary import RotaryPositionEmbedding
+from .two_dimensional import TwoDimensionalPositionEmbedding
 
 
 def get_positional_encoding(
