@@ -324,6 +324,11 @@ class LongRoPEScaledRotaryEmbedding(RotaryPositionEmbedding):
             torch.tensor(long_factor, dtype=dtype),
             persistent=False,
         )
+        self.register_buffer(
+            "short_factor",
+            torch.tensor(short_factor, dtype=dtype),
+            persistent=False,
+        )
 
     @classmethod
     def from_preset(
@@ -351,12 +356,6 @@ class LongRoPEScaledRotaryEmbedding(RotaryPositionEmbedding):
             base=base,
             dtype=dtype,
         )
-        self.register_buffer(
-            "short_factor",
-            torch.tensor(short_factor, dtype=dtype),
-            persistent=False,
-        )
-
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         """Apply LongRoPE with the appropriate frequency factor."""
         seq_len = x.size(-2)

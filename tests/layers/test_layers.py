@@ -66,7 +66,8 @@ def test_mamba2_layer_shape_and_gradient():
     x = make_hidden_state(BATCH, SEQ, HIDDEN).requires_grad_(True)
     out, state = layer(x)
     assert out.shape == x.shape
-    assert state.shape == (BATCH, 8)
+    assert state.ssm.shape == (BATCH, HIDDEN, 8)
+    assert state.convolution.shape == (BATCH, HIDDEN, 3)
     out.sum().backward()
     assert x.grad is not None and torch.isfinite(x.grad).all()
 
@@ -87,7 +88,7 @@ def test_mamba2_empty_sequence():
     x = make_hidden_state(BATCH, SEQ, HIDDEN)
     out, state = layer(x[:, :0])
     assert out.shape == (BATCH, 0, HIDDEN)
-    assert state.shape == (BATCH, 8)
+    assert state.ssm.shape == (BATCH, HIDDEN, 8)
 
 
 def test_transformer_block_shape_and_gradient():
@@ -260,7 +261,11 @@ def test_mamba2_chunked_scan_matches_recurrent():
     out_chunked, state_chunked = layer(x, scan="chunked", chunk_size=3)
 
     torch.testing.assert_close(out_chunked, out_recurrent)
-    torch.testing.assert_close(state_chunked, state_recurrent)
+    torch.testing.assert_close(state_chunked.ssm, state_recurrent.ssm)
+    torch.testing.assert_close(
+        state_chunked.convolution,
+        state_recurrent.convolution,
+    )
 
 
 def test_mamba2_chunked_scan_threads_state():

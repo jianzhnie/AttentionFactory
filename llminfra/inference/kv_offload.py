@@ -83,6 +83,8 @@ class TieredKVCache:
         """Insert or replace a sequence in the HBM tier."""
         if key.shape != value.shape:
             raise ValueError("key and value shapes must match")
+        if seq_id in self.nvme:
+            self.store.delete(seq_id)
         self.hbm[seq_id] = _KVRecord(
             key.to(self.hbm_device),
             value.to(self.hbm_device),
@@ -107,6 +109,7 @@ class TieredKVCache:
             record = self.hbm[seq_id]
         elif seq_id in self.nvme:
             key, value = self.store.load(seq_id)
+            self.store.delete(seq_id)
             self.hbm[seq_id] = _KVRecord(
                 key.to(self.hbm_device),
                 value.to(self.hbm_device),
