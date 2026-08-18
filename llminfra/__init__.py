@@ -32,6 +32,12 @@ from .attention import (
     distributed_ring_attention,
     ring_attention,
 )
+from .encoder_decoder import (
+    CrossAttention,
+    DecoderBlock,
+    EncoderBlock,
+    EncoderDecoderModel,
+)
 from .flashattention import FlashAttention, flash_attention
 from .inference import (
     BlockSparseIndexer,
@@ -48,23 +54,35 @@ from .inference import (
     paged_attention,
 )
 from .layers import (
+    ACTIVATIONS,
+    ClampedSwiGLUFFN,
+    DeepNorm,
     FeedForward,
+    GeGLUFFN,
     HybridLayerStack,
+    HybridSSMBlock,
+    LayerNorm,
+    LayerScale,
     Mamba2Layer,
     Mamba2State,
+    ReGLUFFN,
     RMSNorm,
     SwiGLUFFN,
     TransformerBlock,
+    ffn_factory,
+    get_activation,
 )
 from .model import CausalLMModel, CausalLMOutput
 from .moe import (
     DeepSeekMoE,
+    ExpertChoiceRouter,
     ExpertFFN,
     ExpertParallelMoE,
     LatentMoE,
     MixtureOfExperts,
     TopKRouter,
     load_balance_loss,
+    router_z_loss,
 )
 from .multimodal import (
     CrossAttentionFuser,
@@ -100,6 +118,7 @@ from .quantization import (
 from .registry import build_attention, build_positional_encoding, list_attentions
 
 __all__ = [
+    "ACTIVATIONS",
     "LONGROPE_PRESETS",
     "ALiBiBias",
     "AlibiAttention",
@@ -109,13 +128,20 @@ __all__ = [
     "BlockSparseIndexer",
     "CausalLMModel",
     "CausalLMOutput",
+    "ClampedSwiGLUFFN",
     "CompressedSparseAttention",
+    "CrossAttention",
     "CrossAttentionFuser",
     "DSparkDecoder",
     "DSparkScheduler",
+    "DecoderBlock",
+    "DeepNorm",
     "DeepSeekMoE",
     "DynamicNTKRotaryEmbedding",
     "EagleSpeculator",
+    "EncoderBlock",
+    "EncoderDecoderModel",
+    "ExpertChoiceRouter",
     "ExpertFFN",
     "ExpertParallelMoE",
     "FakeQuantizer",
@@ -123,10 +149,14 @@ __all__ = [
     "FlashAttention",
     "FlashMLA",
     "GatedDeltaNet",
+    "GeGLUFFN",
     "GroupQueryAttention",
     "HybridAttention",
     "HybridLayerStack",
+    "HybridSSMBlock",
     "LatentMoE",
+    "LayerNorm",
+    "LayerScale",
     "LightningAttention",
     "LinearAttention",
     "LongRoPEPreset",
@@ -149,6 +179,7 @@ __all__ = [
     "QATWrapper",
     "QuantizationConfig",
     "RMSNorm",
+    "ReGLUFFN",
     "RingAttention",
     "RotaryPositionEmbedding",
     "SlidingWindowAttention",
@@ -167,7 +198,9 @@ __all__ = [
     "build_positional_encoding",
     "build_quantized",
     "distributed_ring_attention",
+    "ffn_factory",
     "flash_attention",
+    "get_activation",
     "get_longrope_preset",
     "get_positional_encoding",
     "list_attentions",
@@ -176,4 +209,5 @@ __all__ = [
     "paged_attention",
     "register_longrope_preset",
     "ring_attention",
+    "router_z_loss",
 ]

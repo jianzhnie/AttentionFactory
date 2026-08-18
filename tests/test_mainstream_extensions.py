@@ -5,6 +5,7 @@ import tempfile
 import pytest
 import torch
 
+import llminfra
 from llminfra import (
     DSparkDecoder,
     DSparkScheduler,
@@ -17,6 +18,25 @@ from llminfra import (
     distributed_ring_attention,
     get_positional_encoding,
 )
+
+
+def test_mainstream_modules_are_available_from_package_root():
+    public_names = {
+        "ClampedSwiGLUFFN",
+        "CrossAttention",
+        "DeepNorm",
+        "EncoderDecoderModel",
+        "ExpertChoiceRouter",
+        "GeGLUFFN",
+        "HybridSSMBlock",
+        "LayerNorm",
+        "LayerScale",
+        "ReGLUFFN",
+        "ffn_factory",
+        "router_z_loss",
+    }
+    assert public_names <= set(llminfra.__all__)
+    assert all(hasattr(llminfra, name) for name in public_names)
 
 
 def test_gumbel_router_has_straight_through_gradient():
