@@ -1,13 +1,13 @@
 """Reusable network layers: FFN, normalization, SSM and transformer blocks."""
 
 from .activations import ACTIVATIONS, get_activation
-from .ffn import FeedForward, SwiGLUFFN
-from .ffn_variants import ClampedSwiGLUFFN, GeGLUFFN, ReGLUFFN, ffn_factory
-from .hybrid_block import HybridLayerStack, HybridSSMBlock
-from .hyperconnection import ManifoldConstrainedHyperConnection
-from .norm import DeepNorm, LayerNorm, LayerScale, RMSNorm
-from .ssm import Mamba2Layer, Mamba2State
-from .transformer import TransformerBlock
+from .feed_forward import FeedForward, SwiGLUFFN
+from .gated_feed_forward import ClampedSwiGLUFFN, GeGLUFFN, ReGLUFFN, ffn_factory
+from .hybrid_layers import HybridLayerStack, HybridSSMBlock
+from .hyper_connection import ManifoldConstrainedHyperConnection
+from .normalization import DeepNorm, LayerNorm, LayerScale, RMSNorm
+from .state_space import Mamba2Layer, Mamba2State
+from .transformer_block import TransformerBlock
 
 __all__ = [
     "ACTIVATIONS",

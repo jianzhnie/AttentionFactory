@@ -1,7 +1,7 @@
 """Gated feed-forward network variants and a sizing factory.
 
 GeGLU/ReGLU share the gate/up/down structure of
-:class:`~llminfra.layers.ffn.SwiGLUFFN` but swap the gating activation, as
+:class:`~llminfra.layers.feed_forward.SwiGLUFFN` but swap the gating activation, as
 studied in "GLU Variants Improve Transformer" (Shazeer, 2020).
 :class:`ClampedSwiGLUFFN` is a teaching-grade simplification of the GPT-OSS
 FFN, and :func:`ffn_factory` builds an FFN from a sizing rule.
@@ -16,7 +16,7 @@ import torch
 from torch import nn
 
 from .activations import get_activation
-from .ffn import FeedForward, SwiGLUFFN
+from .feed_forward import FeedForward, SwiGLUFFN
 
 
 class _GatedFFN(nn.Module):

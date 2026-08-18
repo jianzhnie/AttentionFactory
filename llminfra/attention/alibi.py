@@ -9,7 +9,7 @@ from ..positional import ALiBiBias
 from .base import BaseAttention, validate_attention_inputs
 
 
-class AlibiAttention(BaseAttention):
+class ALiBiAttention(BaseAttention):
     """Grouped-query attention with ALiBi additive position biases."""
 
     def __init__(
@@ -76,3 +76,9 @@ class AlibiAttention(BaseAttention):
 
     def extra_repr(self) -> str:
         return f"{super().extra_repr()}, num_kv_groups={self.num_kv_groups}"
+
+
+# Preserve the original spelling for downstream users.
+AlibiAttention = ALiBiAttention
+
+__all__ = ["ALiBiAttention", "AlibiAttention"]

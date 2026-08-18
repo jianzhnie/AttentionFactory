@@ -22,14 +22,14 @@ from llminfra import (
 # level exports are wired separately.
 from llminfra.attention.mha import MultiHeadAttention
 from llminfra.layers.activations import ACTIVATIONS, get_activation
-from llminfra.layers.ffn_variants import (
+from llminfra.layers.gated_feed_forward import (
     ClampedSwiGLUFFN,
     GeGLUFFN,
     ReGLUFFN,
     ffn_factory,
 )
-from llminfra.layers.hybrid_block import HybridSSMBlock
-from llminfra.layers.norm import DeepNorm, LayerNorm, LayerScale
+from llminfra.layers.hybrid_layers import HybridSSMBlock
+from llminfra.layers.normalization import DeepNorm, LayerNorm, LayerScale
 
 HIDDEN = 32
 HEADS = 4

@@ -16,9 +16,9 @@ from torch import nn
 
 from ..attention.linear import LinearAttention
 from ..attention.mha import MultiHeadAttention
-from .ffn import SwiGLUFFN
-from .norm import RMSNorm
-from .ssm import Mamba2Layer, Mamba2State
+from .feed_forward import SwiGLUFFN
+from .normalization import RMSNorm
+from .state_space import Mamba2Layer, Mamba2State
 
 VALID_TOKENS = ("ssm", "attn")
 HYBRID_LAYER_TYPES = ("linear", "ssm", "full")

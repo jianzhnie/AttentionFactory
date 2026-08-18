@@ -9,9 +9,9 @@ import torch.nn.functional as F
 from torch import nn
 
 from .inference.multi_token_prediction import MultiTokenPredictionHead, mtp_loss
-from .layers.ffn import SwiGLUFFN
-from .layers.norm import RMSNorm
-from .layers.transformer import TransformerBlock
+from .layers.feed_forward import SwiGLUFFN
+from .layers.normalization import RMSNorm
+from .layers.transformer_block import TransformerBlock
 from .moe import DeepSeekMoE
 from .positional.mrope import MultiModalRotaryPositionEmbedding
 from .registry import build_attention, build_positional_encoding

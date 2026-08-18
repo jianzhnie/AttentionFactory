@@ -22,8 +22,8 @@ from torch import nn
 
 from .attention.base import BaseAttention
 from .attention.mha import MultiHeadAttention
-from .layers.ffn import SwiGLUFFN
-from .layers.norm import RMSNorm
+from .layers.feed_forward import SwiGLUFFN
+from .layers.normalization import RMSNorm
 
 
 class CrossAttention(BaseAttention):

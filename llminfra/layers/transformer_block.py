@@ -8,9 +8,9 @@ from torch import nn
 from ..attention.hybrid import HybridAttention
 from ..attention.mha import MultiHeadAttention
 from ..attention.residual import AttentionResidual
-from .ffn import SwiGLUFFN
-from .hyperconnection import ManifoldConstrainedHyperConnection
-from .norm import DeepNorm, LayerNorm, LayerScale, RMSNorm
+from .feed_forward import SwiGLUFFN
+from .hyper_connection import ManifoldConstrainedHyperConnection
+from .normalization import DeepNorm, LayerNorm, LayerScale, RMSNorm
 
 _NORM_STYLES = ("pre", "post", "sandwich", "deepnorm")
 _NORM_TYPES = ("rmsnorm", "layernorm")

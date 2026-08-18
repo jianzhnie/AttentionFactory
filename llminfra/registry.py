@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from .attention.alibi import AlibiAttention
+from .attention.alibi import ALiBiAttention
 from .attention.base import BaseAttention
 from .attention.block_sparse import BlockSparseAttention
 from .attention.compressed_sparse import CompressedSparseAttention
@@ -28,7 +28,7 @@ from .positional import (
 )
 
 ATTENTION_REGISTRY: dict[str, type[BaseAttention]] = {
-    "alibi": AlibiAttention,
+    "alibi": ALiBiAttention,
     "mha": MultiHeadAttention,
     "mqa": MultiQueryAttention,
     "gqa": GroupQueryAttention,

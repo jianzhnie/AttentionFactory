@@ -6,7 +6,7 @@ live here too since they are drop-in attention layers. File names match the
 mechanism name without a redundant ``_attention`` suffix.
 """
 
-from .alibi import AlibiAttention
+from .alibi import ALiBiAttention, AlibiAttention
 from .base import BaseAttention, validate_attention_inputs
 from .block_sparse import BlockSparseAttention
 from .compressed_sparse import CompressedSparseAttention
@@ -32,6 +32,7 @@ from .sparse_variants import (
 )
 
 __all__ = [
+    "ALiBiAttention",
     "AlibiAttention",
     "AttentionResidual",
     "BaseAttention",

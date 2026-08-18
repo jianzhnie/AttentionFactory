@@ -13,6 +13,7 @@ regardless of the internal layout.
 """
 
 from .attention import (
+    ALiBiAttention,
     AlibiAttention,
     AttentionResidual,
     BaseAttention,
@@ -143,6 +144,7 @@ from .registry import build_attention, build_positional_encoding, list_attention
 __all__ = [
     "ACTIVATIONS",
     "LONGROPE_PRESETS",
+    "ALiBiAttention",
     "ALiBiBias",
     "AlibiAttention",
     "AttentionResidual",

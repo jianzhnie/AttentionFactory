@@ -15,7 +15,7 @@ from .heads import (
     TokenClassificationHead,
     pool_hidden_state,
 )
-from .layers.norm import LayerNorm, RMSNorm
+from .layers.normalization import LayerNorm, RMSNorm
 from .positional.classic import (
     LearnedAbsolutePositionEmbedding,
     SinusoidalPositionEmbedding,
