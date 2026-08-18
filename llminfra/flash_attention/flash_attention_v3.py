@@ -284,9 +284,9 @@ def forward(
                     else None,
                 }
             )
-            active_buffer = next_buffer
-            if active_buffer is None:
+            if next_buffer is None:
                 break
+            active_buffer = next_buffer
 
     # The deferred softmax division is applied inside `assemble_forward_result`.
     return assemble_forward_result(
@@ -415,9 +415,9 @@ def backward(
                     "buffer_id": active_buffer.buffer_id,
                 }
             )
-            active_buffer = next_buffer
-            if active_buffer is None:
+            if next_buffer is None:
                 break
+            active_buffer = next_buffer
 
         grad_q[:, :, q_slice, :] = grad_q_block
 

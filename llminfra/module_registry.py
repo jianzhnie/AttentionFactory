@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import Any
+
 from .attention.alibi_attention import ALiBiAttention
 from .attention.base_attention import BaseAttention
 from .attention.block_sparse_attention import BlockSparseAttention
@@ -56,7 +58,7 @@ def build_attention(
     name: str,
     hidden_size: int,
     num_heads: int,
-    **kwargs: object,
+    **kwargs: Any,
 ) -> BaseAttention:
     """Build an attention module by registry name.
 
@@ -84,7 +86,7 @@ def build_positional_encoding(
     dim: int,
     num_heads: int | None = None,
     max_seq_len: int = 4096,
-    **kwargs: object,
+    **kwargs: Any,
 ) -> BasePositionalEncoding:
     """Build a positional encoding module by name."""
     return get_positional_encoding(

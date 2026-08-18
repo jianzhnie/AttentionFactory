@@ -1,75 +1,9 @@
-"""Tests for the attention registry helpers and CausalLMModel.
-
-Covers ``build_attention``/``list_attentions`` and the CausalLMModel wrapper:
-output shapes, gradient flow, padding masks, MoE and hybrid-attention wiring,
-tied embeddings and positional-encoding selection.
-"""
+"""Tests for decoder-only and prefix language models."""
 
 import pytest
 import torch
 
-from llminfra import (
-    AlibiAttention,
-    CausalLMModel,
-    CompressedSparseAttention,
-    GatedDeltaNet,
-    MultiHeadAttention,
-    RingAttention,
-    SlidingWindowAttention,
-    build_attention,
-    list_attentions,
-)
-
-HIDDEN = 32
-HEADS = 4
-
-
-def test_build_attention_registry():
-    assert isinstance(
-        build_attention("mha", hidden_size=HIDDEN, num_heads=HEADS),
-        MultiHeadAttention,
-    )
-    assert isinstance(
-        build_attention(
-            "swa",
-            hidden_size=HIDDEN,
-            num_heads=HEADS,
-            window_size=4,
-        ),
-        SlidingWindowAttention,
-    )
-    assert isinstance(
-        build_attention(
-            "gated_delta",
-            hidden_size=HIDDEN,
-            num_heads=HEADS,
-            feature_dim=8,
-        ),
-        GatedDeltaNet,
-    )
-    assert "hybrid" in list_attentions()
-    with pytest.raises(ValueError, match="Unknown attention"):
-        build_attention("unknown", hidden_size=HIDDEN, num_heads=HEADS)
-
-
-def test_gap_modules_in_registry():
-    assert isinstance(
-        build_attention("ring", hidden_size=HIDDEN, num_heads=HEADS),
-        RingAttention,
-    )
-    assert isinstance(
-        build_attention("alibi", hidden_size=HIDDEN, num_heads=HEADS),
-        AlibiAttention,
-    )
-    assert isinstance(
-        build_attention(
-            "compressed_sparse",
-            hidden_size=HIDDEN,
-            num_heads=HEADS,
-            compress_ratio=2,
-        ),
-        CompressedSparseAttention,
-    )
+from llminfra import CausalLMModel
 
 
 def test_causal_lm_shape_and_gradient():

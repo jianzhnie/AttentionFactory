@@ -340,40 +340,6 @@ python -m pytest -p no:capture -q
 
 注意：当前机器的默认 pytest 9.0.1 在 capture 初始化阶段会触发 macOS readline 相关段错误，使用 `-p no:capture` 可正常运行。
 
-## 项目结构
-
-```
-LLMInfra/
-├── llminfra/
-│   ├── __init__.py          # 顶层 API 导出（from llminfra import X）
-│   ├── attention/           # 全部注意力变体与共享基类（文件名即机制名）
-│   │   ├── base.py          #   BaseAttention 与输入校验
-│   │   ├── mha.py / mqa.py / gqa.py / mla.py  # 经典变体
-│   │   ├── sliding_window.py / ring.py        # 窗口 / 环形
-│   │   ├── linear.py / lightning.py / gated_delta_net.py  # 线性类
-│   │   ├── block_sparse.py / compressed_sparse.py         # 稀疏类
-│   │   └── hybrid.py / alibi.py / residual.py / flash_mla.py
-│   ├── flashattention/      # FlashAttention v1-v4 教学实现（含 autograd）
-│   │   ├── fa1.py ... fa4.py
-│   │   └── common/          #   共享的在线 softmax / 掩码 / 分块原语
-│   ├── layers/              # ffn.py / norm.py / ssm.py / transformer.py
-│   ├── moe/                 # mixture.py（Router/MoE）/ latent_moe.py
-│   ├── inference/           # PagedAttention、KV offload、投机解码、MTP、稀疏索引
-│   ├── positional/          # rope.py / scaling.py / alibi.py / two_d.py / factory.py
-│   ├── model.py             # CausalLMModel
-│   └── registry.py          # Attention / Positional 注册表
-├── tests/                   # pytest 测试套件，目录镜像包结构
-│   ├── attention/           #   classic / sparse / linear / hybrid 变体与基类
-│   ├── flashattention/      #   FA 教学实现：versions / api / cuda
-│   ├── positional/  layers/  moe/  inference/
-│   ├── helpers.py           #   共享的带种子输入构造器
-│   └── test_model.py        #   CausalLMModel 与注册表
-├── docs/                    # 架构综述与选型文档
-├── pyproject.toml
-├── LICENSE
-└── README.md
-```
-
 ## 参考文献
 
 1. Vaswani, A., et al. "Attention is All You Need." NeurIPS 2017.

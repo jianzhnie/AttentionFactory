@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import Any
 
 import torch
 import torch.nn.functional as F
@@ -72,9 +73,9 @@ class CausalLMModel(nn.Module):
         intermediate_size: int,
         max_seq_len: int = 4096,
         attention_name: str = "gqa",
-        attention_kwargs: dict[str, object] | None = None,
+        attention_kwargs: dict[str, Any] | None = None,
         positional: str = "rope",
-        positional_kwargs: dict[str, object] | None = None,
+        positional_kwargs: dict[str, Any] | None = None,
         use_moe: bool = False,
         num_experts: int = 8,
         expert_top_k: int = 2,
@@ -227,7 +228,8 @@ class CausalLMModel(nn.Module):
             hidden_state = self.embed_tokens(input_ids)
             device = input_ids.device
         else:
-            assert inputs_embeds is not None
+            if inputs_embeds is None:
+                raise ValueError("inputs_embeds is required when input_ids is omitted")
             if inputs_embeds.dim() != 3 or inputs_embeds.size(-1) != self.hidden_size:
                 raise ValueError(
                     "inputs_embeds must have shape (batch, seq, hidden_size)"

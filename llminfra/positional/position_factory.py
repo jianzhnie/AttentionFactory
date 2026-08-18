@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import Any
+
 import torch
 
 from .alibi import ALiBiBias
@@ -30,7 +32,7 @@ def get_positional_encoding(
     dim: int,
     num_heads: int | None = None,
     max_seq_len: int = 4096,
-    **kwargs: object,
+    **kwargs: Any,
 ) -> BasePositionalEncoding:
     """Create a positional encoding module by name.
 

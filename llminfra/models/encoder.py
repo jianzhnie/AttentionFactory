@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import Any
 
 import torch
 from torch import nn
@@ -65,7 +66,7 @@ class EncoderOnlyModel(nn.Module):
         intermediate_size: int,
         max_seq_len: int = 512,
         positional: str = "learned",
-        positional_kwargs: dict[str, object] | None = None,
+        positional_kwargs: dict[str, Any] | None = None,
         type_vocab_size: int = 0,
         embedding_dropout: float = 0.0,
         norm_eps: float = 1e-5,

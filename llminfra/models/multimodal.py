@@ -20,6 +20,7 @@ Simplifications (documented for teaching purposes):
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import Any
 
 import torch
 import torch.nn.functional as F
@@ -227,8 +228,8 @@ class MultimodalCausalLM(nn.Module):
         alignment_dim: int | None = None,
         max_seq_len: int = 4096,
         attention_name: str = "gqa",
-        attention_kwargs: dict[str, object] | None = None,
-        **language_model_kwargs: object,
+        attention_kwargs: dict[str, Any] | None = None,
+        **language_model_kwargs: Any,
     ) -> None:
         super().__init__()
         if fusion_mode not in {"early", "cross_attention"}:
