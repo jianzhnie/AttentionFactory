@@ -13,7 +13,7 @@ import torch.nn.functional as F
 from torch import nn
 
 
-class _MedusaPredictionHead(nn.Module):
+class MedusaPredictionHead(nn.Module):
     """One residual Medusa branch followed by a vocabulary projection."""
 
     def __init__(
@@ -67,7 +67,7 @@ class MedusaHead(nn.Module):
         self.vocab_size = int(vocab_size)
         self.num_heads = int(num_heads)
         self.heads = nn.ModuleList(
-            _MedusaPredictionHead(hidden_size, vocab_size, bias=bias)
+            MedusaPredictionHead(hidden_size, vocab_size, bias=bias)
             for _ in range(num_heads)
         )
 

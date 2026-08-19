@@ -44,18 +44,10 @@ from .attention import (
 from .flash_attention import FlashAttention, flash_attention
 from .inference import (
     BlockSparseIndexer,
-    DSparkDecoder,
-    DSparkScheduler,
-    EagleSpeculator,
-    MedusaHead,
-    MultiTokenPredictionHead,
     OnDiskKVStore,
     PagedAttentionCache,
     PagedKVBlockAllocator,
-    SpeculativeDecoder,
     TieredKVCache,
-    medusa_loss,
-    mtp_loss,
     paged_attention,
 )
 from .layers import (
@@ -140,6 +132,22 @@ from .quantization import (
     QuantizationConfig,
     build_quantized,
 )
+from .speculative_decoding import (
+    DSFlashDecoder,
+    DSparkDecoder,
+    DSparkScheduler,
+    Eagle1Speculator,
+    Eagle2Speculator,
+    Eagle3Speculator,
+    EagleSpeculator,
+    MedusaHead,
+    MTPDecoder,
+    MultiTokenPredictionHead,
+    NGramSpeculator,
+    SpeculativeDecoder,
+    medusa_loss,
+    mtp_loss,
+)
 
 __all__ = [
     "ACTIVATIONS",
@@ -157,6 +165,7 @@ __all__ = [
     "CompressedSparseAttention",
     "CrossAttention",
     "CrossAttentionFuser",
+    "DSFlashDecoder",
     "DSparkDecoder",
     "DSparkScheduler",
     "DecoderBlock",
@@ -165,6 +174,9 @@ __all__ = [
     "DeepSeekSparseAttention",
     "DynamicNTKRotaryEmbedding",
     "DynamicSparseAttention",
+    "Eagle1Speculator",
+    "Eagle2Speculator",
+    "Eagle3Speculator",
     "EagleSpeculator",
     "EmbeddingHead",
     "EncoderBlock",
@@ -196,6 +208,7 @@ __all__ = [
     "LinearAttention",
     "LongRoPEPreset",
     "LongRoPEScaledRotaryEmbedding",
+    "MTPDecoder",
     "Mamba2Layer",
     "Mamba2State",
     "ManifoldConstrainedHyperConnection",
@@ -209,6 +222,7 @@ __all__ = [
     "MultiTokenPredictionHead",
     "MultimodalCausalLM",
     "MultimodalCausalLMOutput",
+    "NGramSpeculator",
     "NoPositionEncoding",
     "OnDiskKVStore",
     "PagedAttentionCache",

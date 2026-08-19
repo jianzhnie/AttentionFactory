@@ -7,7 +7,7 @@ from collections.abc import Callable, Sequence
 import torch
 from torch import nn
 
-from .speculative_decoder import SpeculativeDecoder
+from .base import SpeculativeDecoder
 
 
 class DSparkScheduler:
@@ -111,3 +111,7 @@ class DSparkDecoder(nn.Module):
             f"temperature={self.temperature}, "
             f"append_bonus_token={self.append_bonus_token}"
         )
+
+
+class DSFlashDecoder(DSparkDecoder):
+    """DSFlash-compatible name for dynamically scheduled decoding."""

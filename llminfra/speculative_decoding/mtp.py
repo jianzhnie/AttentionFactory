@@ -1,10 +1,37 @@
-"""Multi-Token Prediction (MTP) head used by DeepSeek/Nemotron-style models."""
+"""Multi-Token Prediction (MTP) head and speculative decoder."""
 
 from __future__ import annotations
 
 import torch
 from torch import nn
 from torch.nn import functional as F
+
+
+class MTPDecoder(nn.Module):
+    """Verify greedily predicted MTP tokens with a target model."""
+
+    def __init__(self, mtp_head: MultiTokenPredictionHead, target_model) -> None:
+        super().__init__()
+        self.mtp_head = mtp_head
+        self.target_model = target_model
+
+    def forward(
+        self, input_ids: torch.Tensor, hidden_state: torch.Tensor
+    ) -> torch.Tensor:
+        logits = self.mtp_head(hidden_state)
+        draft = torch.stack(
+            [torch.argmax(item[:, -1], dim=-1) for item in logits], dim=-1
+        )
+        target_logits = self.target_model(torch.cat((input_ids, draft), dim=-1))
+        accepted = []
+        for index, token in enumerate(draft.unbind(dim=1)):
+            target = torch.argmax(
+                target_logits[:, input_ids.size(1) - 1 + index], dim=-1
+            )
+            accepted.append(target)
+            if not torch.equal(target, token):
+                break
+        return torch.cat((input_ids, *[item[:, None] for item in accepted]), dim=-1)
 
 
 class MultiTokenPredictionHead(nn.Module):
@@ -114,3 +141,6 @@ def mtp_loss(
     if weight_sum == 0:
         return hidden_state.sum() * 0.0
     return total / weight_sum
+
+
+__all__ = ["MTPDecoder", "MultiTokenPredictionHead", "mtp_loss"]

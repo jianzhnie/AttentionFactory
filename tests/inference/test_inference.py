@@ -11,9 +11,15 @@ import torch
 from llminfra import (
     BlockSparseAttention,
     BlockSparseIndexer,
+    DSFlashDecoder,
+    DSparkScheduler,
+    Eagle1Speculator,
+    Eagle2Speculator,
+    Eagle3Speculator,
     EagleSpeculator,
     MedusaHead,
     MultiTokenPredictionHead,
+    NGramSpeculator,
     OnDiskKVStore,
     PagedAttentionCache,
     SpeculativeDecoder,
@@ -206,6 +212,41 @@ def test_eagle_speculator_deterministic():
     output = speculator(input_ids, hidden_states)
     assert output.size(1) == 7
     assert (output[:, 4:] == 2).all()
+
+
+def test_eagle_versioned_aliases_and_dsflash():
+    vocab = 8
+
+    def target(input_ids):
+        logits = torch.zeros(input_ids.size(0), input_ids.size(1), vocab)
+        logits[..., 1] = 1.0
+        return logits
+
+    def draft_head(hidden_states):
+        logits = torch.zeros(hidden_states.size(0), hidden_states.size(1), vocab)
+        logits[..., 1] = 1.0
+        return logits
+
+    hidden = torch.randn(1, 3, HIDDEN)
+    input_ids = torch.zeros(1, 3, dtype=torch.long)
+    for speculator in (Eagle1Speculator, Eagle2Speculator, Eagle3Speculator):
+        output = speculator(draft_head, target, num_speculative_tokens=2)(
+            input_ids, hidden
+        )
+        assert output.shape == (1, 5)
+    decoder = DSFlashDecoder(target, target, DSparkScheduler((2,)))
+    assert decoder(input_ids).size(1) >= input_ids.size(1)
+
+
+def test_ngram_speculator_copies_prompt_continuation():
+    def target(input_ids):
+        logits = torch.zeros(input_ids.size(0), input_ids.size(1), 8)
+        logits[..., 3] = 1.0
+        return logits
+
+    prompt = torch.tensor([[1, 2, 1, 2, 0]])
+    output = NGramSpeculator(target, ngram_size=2, num_speculative_tokens=1)(prompt)
+    assert output.shape[0] == 1
 
 
 def test_multi_token_prediction_returns_multiple_logits():
