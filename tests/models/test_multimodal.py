@@ -8,7 +8,11 @@ on the vision input).
 import pytest
 import torch
 
-from llminfra.models.multimodal import CrossAttentionFuser, VisionEncoderAdapter
+from llminfra.models.multimodal import (
+    CrossAttentionFuser,
+    MultimodalCausalLM,
+    VisionEncoderAdapter,
+)
 
 
 def test_vision_encoder_adapter_shape():
@@ -61,3 +65,59 @@ def test_adapter_fuser_pipeline_and_gradient():
     assert text_state.grad is not None
     assert torch.isfinite(text_state.grad).all()
     assert adapter.proj.weight.grad is not None
+
+
+def _make_multimodal_model(fusion_mode: str) -> MultimodalCausalLM:
+    return MultimodalCausalLM(
+        vocab_size=32,
+        vision_dim=8,
+        hidden_size=16,
+        num_layers=1,
+        num_heads=2,
+        intermediate_size=32,
+        mrope_section=(2, 2, 4),
+        fusion_mode=fusion_mode,
+        max_seq_len=32,
+    )
+
+
+@pytest.mark.parametrize("fusion_mode", ["early", "cross_attention"])
+def test_alignment_logits_ignore_padded_positions(fusion_mode):
+    model = _make_multimodal_model(fusion_mode).eval()
+    input_ids = torch.randint(0, 32, (1, 4))
+    vision = torch.randn(1, 4, 8)
+    grid = torch.tensor([[1, 2, 2]])
+    text_mask = torch.tensor([[1, 1, 0, 0]], dtype=torch.bool)
+    vision_mask = torch.tensor([[1, 1, 0, 0]], dtype=torch.bool)
+    # Perturb only the padded positions; the alignment summaries must be
+    # computed from valid tokens alone.
+    perturbed_ids = (input_ids + 1) % 32
+    perturbed_ids[0, :2] = input_ids[0, :2]
+    perturbed_vision = vision.clone()
+    perturbed_vision[0, 2:] += 10.0
+    with torch.no_grad():
+        base = model(
+            input_ids,
+            vision,
+            grid,
+            attention_mask=text_mask,
+            vision_attention_mask=vision_mask,
+        )
+        changed = model(
+            perturbed_ids,
+            perturbed_vision,
+            grid,
+            attention_mask=text_mask,
+            vision_attention_mask=vision_mask,
+        )
+    torch.testing.assert_close(base.alignment_logits, changed.alignment_logits)
+
+
+@pytest.mark.parametrize("fusion_mode", ["early", "cross_attention"])
+def test_multimodal_still_validates_image_grid_token_count(fusion_mode):
+    model = _make_multimodal_model(fusion_mode)
+    input_ids = torch.randint(0, 32, (1, 4))
+    vision = torch.randn(1, 4, 8)
+    bad_grid = torch.tensor([[1, 2, 3]])  # 6 tokens, but vision has 4
+    with pytest.raises(ValueError, match="vision_features contains"):
+        model(input_ids, vision, bad_grid)

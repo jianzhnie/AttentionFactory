@@ -121,7 +121,13 @@ class CausalLMModel(nn.Module):
         if attention_name == "alibi" and "max_seq_len" not in attention_kwargs:
             attention_kwargs["max_seq_len"] = max_seq_len
         if attention_name == "gqa" and "num_kv_groups" not in attention_kwargs:
-            attention_kwargs["num_kv_groups"] = max(1, num_heads // 2)
+            # Largest divisor of num_heads not exceeding num_heads // 2, so
+            # the default stays valid even when num_heads is odd or prime.
+            attention_kwargs["num_kv_groups"] = next(
+                groups
+                for groups in range(max(1, num_heads // 2), 0, -1)
+                if num_heads % groups == 0
+            )
 
         self.positional = (
             None
@@ -311,6 +317,7 @@ class CausalLMModel(nn.Module):
                     self.mtp_head,
                     hidden_state,
                     labels,
+                    logits_list=mtp_logits,
                 )
 
         if return_dict or labels is not None or return_mtp:
@@ -365,6 +372,7 @@ class CausalLMModel(nn.Module):
             causal = causal | prefix_keys
         if attention_mask is None:
             return causal
+        attention_mask = attention_mask.to(device=device)
         if attention_mask.dim() == 2:
             padding = attention_mask[:, None, None, :]
         elif attention_mask.dim() == 3:
@@ -394,7 +402,10 @@ class PrefixLMModel(CausalLMModel):
     output types, and training semantics with :class:`CausalLMModel`.
     """
 
-    def forward(
+    # The explicit-prefix contract intentionally narrows forward: the
+    # parent's optional ``prefix_len`` becomes the required keyword-only
+    # ``prefix_lengths`` so prefix-LM masking is never applied by accident.
+    def forward(  # type: ignore[override]
         self,
         input_ids: torch.Tensor | None = None,
         *,

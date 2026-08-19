@@ -21,6 +21,27 @@ def test_hyperconnection_mixing_matrix_is_doubly_stochastic():
     torch.testing.assert_close(matrix.sum(dim=-2), torch.ones(3), atol=1e-5, rtol=1e-5)
 
 
+def test_hyperconnection_logits_change_output():
+    torch.manual_seed(0)
+    module = ManifoldConstrainedHyperConnection(8, hc_mult=4).eval()
+    hidden = torch.randn(2, 3, 8)
+    branch = torch.randn_like(hidden)
+    baseline = module(hidden, branch)
+    with torch.no_grad():
+        module.logits.copy_(torch.randn_like(module.logits) * 5)
+    assert not torch.allclose(module(hidden, branch), baseline)
+
+
+def test_hyperconnection_sinkhorn_stable_for_large_logits():
+    module = ManifoldConstrainedHyperConnection(8, hc_mult=4).eval()
+    with torch.no_grad():
+        module.logits.fill_(100.0)
+    matrix = module.mixing_matrix()
+    assert torch.isfinite(matrix).all()
+    output = module(torch.randn(2, 3, 8), torch.randn(2, 3, 8))
+    assert torch.isfinite(output).all()
+
+
 @pytest.mark.parametrize(
     "kwargs", [{"hidden_size": 0}, {"hidden_size": 4, "hc_mult": 0}]
 )

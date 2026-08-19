@@ -266,24 +266,27 @@ def forward(
                 block_sum,
                 weighted_values,
             )
-            pipeline_trace.append(
-                {
-                    "q_tile": q_tile_id,
-                    "kv_tile": active_buffer.tile_id,
-                    "buffer_id": active_buffer.buffer_id,
-                    "prefetched_next_tile": next_buffer.tile_id
-                    if next_buffer is not None
-                    else -1,
-                    "fp8": config.fp8,
-                    "q_scale": q_fp8_meta["scale"] if q_fp8_meta is not None else None,
-                    "k_scale": active_buffer.fp8_meta["k_scale"]
-                    if active_buffer.fp8_meta is not None
-                    else None,
-                    "v_scale": active_buffer.fp8_meta["v_scale"]
-                    if active_buffer.fp8_meta is not None
-                    else None,
-                }
-            )
+            if config.keep_debug_state:
+                pipeline_trace.append(
+                    {
+                        "q_tile": q_tile_id,
+                        "kv_tile": active_buffer.tile_id,
+                        "buffer_id": active_buffer.buffer_id,
+                        "prefetched_next_tile": next_buffer.tile_id
+                        if next_buffer is not None
+                        else -1,
+                        "fp8": config.fp8,
+                        "q_scale": q_fp8_meta["scale"]
+                        if q_fp8_meta is not None
+                        else None,
+                        "k_scale": active_buffer.fp8_meta["k_scale"]
+                        if active_buffer.fp8_meta is not None
+                        else None,
+                        "v_scale": active_buffer.fp8_meta["v_scale"]
+                        if active_buffer.fp8_meta is not None
+                        else None,
+                    }
+                )
             if next_buffer is None:
                 break
             active_buffer = next_buffer
@@ -408,13 +411,14 @@ def backward(
             grad_q_block += local_grad_q
             grad_k[:, :, active_buffer.tile_slice, :] += local_grad_k
             grad_v[:, :, active_buffer.tile_slice, :] += local_grad_v
-            pipeline_trace.append(
-                {
-                    "q_tile": q_tile_id,
-                    "kv_tile": active_buffer.tile_id,
-                    "buffer_id": active_buffer.buffer_id,
-                }
-            )
+            if config.keep_debug_state:
+                pipeline_trace.append(
+                    {
+                        "q_tile": q_tile_id,
+                        "kv_tile": active_buffer.tile_id,
+                        "buffer_id": active_buffer.buffer_id,
+                    }
+                )
             if next_buffer is None:
                 break
             active_buffer = next_buffer

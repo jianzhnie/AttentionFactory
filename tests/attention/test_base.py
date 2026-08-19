@@ -62,6 +62,21 @@ def test_validate_attention_inputs_rejects_mask_batch_mismatch():
         )
 
 
+def test_validate_attention_inputs_rejects_mask_seq_mismatch():
+    with pytest.raises(ValueError, match="sequence length"):
+        validate_attention_inputs(
+            torch.randn(2, 5, 8), torch.ones(2, 1, 1, 7), num_heads=4
+        )
+
+
+def test_validate_attention_inputs_rejects_float_mask():
+    """Additive float masks (0/-inf) must be rejected, not silently ignored."""
+    with pytest.raises(ValueError, match="1/0"):
+        validate_attention_inputs(
+            torch.randn(2, 5, 8), torch.zeros(2, 1, 1, 5), num_heads=4
+        )
+
+
 def test_extra_repr_reports_configuration(module):
     assert "hidden_size=32" in module.extra_repr()
     assert "num_heads=4" in module.extra_repr()

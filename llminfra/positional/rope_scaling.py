@@ -38,6 +38,9 @@ class LongRoPEPreset:
 
     Scalar factors are expanded over all rotary frequencies. Tuples preserve
     frequency-specific coefficients copied from a verified model config.
+    Factors are *multiplicative* coefficients applied to ``inv_freq``;
+    official configs that divide ``inv_freq`` by their ``long_factor`` must
+    be imported as reciprocals.
     """
 
     original_max_position_embeddings: int
@@ -78,7 +81,11 @@ def register_longrope_preset(
     *,
     overwrite: bool = False,
 ) -> None:
-    """Register a verified LongRoPE config for reuse by name."""
+    """Register a verified LongRoPE config for reuse by name.
+
+    Factors must be multiplicative coefficients for ``inv_freq``; use the
+    reciprocal when importing configs that divide by their factors.
+    """
     if not name:
         raise ValueError("preset name must not be empty")
     if name in LONGROPE_PRESETS and not overwrite:
@@ -120,9 +127,12 @@ def _yarn_linear_ramp_mask(min_val: float, max_val: float, dim: int) -> torch.Te
 class YaRNScaledRotaryEmbedding(BasePositionalEncoding):
     """YaRN-scaled RoPE for long-context extension.
 
-    This is a teaching implementation of the interpolation/extrapolation
-    blending formula. Exact numerical behavior should be checked against
-    Transformers and the official YaRN repository.
+    High-frequency dimensions are interpolated (frequencies divided by
+    ``params.factor``) while low-frequency dimensions keep their original
+    frequencies; a linear ramp blends the two regimes. This is a teaching
+    implementation of the interpolation/extrapolation blending formula.
+    Exact numerical behavior should be checked against Transformers and the
+    official YaRN repository.
     """
 
     def __init__(
@@ -163,17 +173,21 @@ class YaRNScaledRotaryEmbedding(BasePositionalEncoding):
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         """Apply YaRN-scaled RoPE to ``x``."""
-        scale = self.max_seq_len / self.params.original_max_position_embeddings
-        linear_factor = max(1.0, 1.0 / scale)
-        extrapolation = self.inv_freq / self.params.factor
-        interpolation = self.inv_freq * linear_factor
-        inv_freq = interpolation * (1.0 - self.ramp) + extrapolation * self.ramp
+        base_inv_freq = self.inv_freq
+        ramp = self.ramp
+        assert isinstance(base_inv_freq, torch.Tensor)
+        assert isinstance(ramp, torch.Tensor)
+        extrapolation = base_inv_freq
+        interpolation = base_inv_freq / self.params.factor
+        inv_freq = interpolation * (1.0 - ramp) + extrapolation * ramp
 
+        # Compute frequencies in float32 (like the reference kernels) so
+        # half-precision inputs do not lose positional accuracy.
         seq_len = x.size(-2)
-        positions = torch.arange(seq_len, device=x.device, dtype=x.dtype)
-        freqs = torch.einsum("s,f->sf", positions, inv_freq.to(x.dtype))
-        cos = torch.cos(freqs)
-        sin = torch.sin(freqs)
+        positions = torch.arange(seq_len, device=x.device, dtype=torch.float32)
+        freqs = torch.einsum("s,f->sf", positions, inv_freq.to(torch.float32))
+        cos = torch.cos(freqs).to(x.dtype)
+        sin = torch.sin(freqs).to(x.dtype)
         return apply_rotary_pos_emb(x, cos, sin)
 
 
@@ -195,6 +209,8 @@ class DynamicNTKRotaryEmbedding(BasePositionalEncoding):
     ) -> None:
         super().__init__()
         self.dim = int(dim)
+        if self.dim <= 2:
+            raise ValueError("dynamic NTK scaling requires dim > 2")
         self.original_max_position_embeddings = int(original_max_position_embeddings)
         self.max_seq_len = int(max_seq_len)
         self.base = float(base)
@@ -207,7 +223,9 @@ class DynamicNTKRotaryEmbedding(BasePositionalEncoding):
 
     def _scaled_inv_freq(self, seq_len: int) -> torch.Tensor:
         if seq_len <= self.original_max_position_embeddings:
-            return self.base_inv_freq
+            base_inv_freq = self.base_inv_freq
+            assert isinstance(base_inv_freq, torch.Tensor)
+            return base_inv_freq
         scale = seq_len / self.original_max_position_embeddings
         adjusted_base = self.base * (scale ** (self.dim / (self.dim - 2)))
         return _default_inv_freq(self.dim, adjusted_base, self.dtype)
@@ -215,11 +233,13 @@ class DynamicNTKRotaryEmbedding(BasePositionalEncoding):
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         """Apply dynamic NTK-scaled RoPE to ``x``."""
         seq_len = x.size(-2)
-        inv_freq = self._scaled_inv_freq(seq_len).to(x.device)
-        positions = torch.arange(seq_len, device=x.device, dtype=x.dtype)
-        freqs = torch.einsum("s,f->sf", positions, inv_freq.to(x.dtype))
-        cos = torch.cos(freqs)
-        sin = torch.sin(freqs)
+        inv_freq = self._scaled_inv_freq(seq_len).to(
+            device=x.device, dtype=torch.float32
+        )
+        positions = torch.arange(seq_len, device=x.device, dtype=torch.float32)
+        freqs = torch.einsum("s,f->sf", positions, inv_freq)
+        cos = torch.cos(freqs).to(x.dtype)
+        sin = torch.sin(freqs).to(x.dtype)
         return apply_rotary_pos_emb(x, cos, sin)
 
 
@@ -288,10 +308,12 @@ class PositionInterpolation(RotaryPositionEmbedding):
         """Apply interpolated positions to ``x``."""
         scale = self.original_max_position_embeddings / self.max_seq_len
         seq_len = x.size(-2)
-        positions = torch.arange(seq_len, device=x.device, dtype=x.dtype) * scale
-        freqs = torch.einsum("s,f->sf", positions, self.inv_freq.to(x.dtype))
-        cos = torch.cos(freqs)
-        sin = torch.sin(freqs)
+        positions = (
+            torch.arange(seq_len, device=x.device, dtype=torch.float32) * scale
+        )
+        freqs = torch.einsum("s,f->sf", positions, self.inv_freq.to(torch.float32))
+        cos = torch.cos(freqs).to(x.dtype)
+        sin = torch.sin(freqs).to(x.dtype)
         return apply_rotary_pos_emb(x, cos, sin)
 
     def extra_repr(self) -> str:
@@ -365,9 +387,12 @@ class LongRoPEScaledRotaryEmbedding(RotaryPositionEmbedding):
             if seq_len > self.original_max_position_embeddings
             else self.short_factor
         )
-        inv_freq = self.inv_freq * factors.to(self.inv_freq.device)
-        positions = torch.arange(seq_len, device=x.device, dtype=x.dtype)
-        freqs = torch.einsum("s,f->sf", positions, inv_freq.to(x.dtype))
-        cos = torch.cos(freqs)
-        sin = torch.sin(freqs)
+        base_inv_freq = self.inv_freq
+        assert isinstance(factors, torch.Tensor)
+        assert isinstance(base_inv_freq, torch.Tensor)
+        inv_freq = base_inv_freq * factors.to(base_inv_freq.device)
+        positions = torch.arange(seq_len, device=x.device, dtype=torch.float32)
+        freqs = torch.einsum("s,f->sf", positions, inv_freq.to(torch.float32))
+        cos = torch.cos(freqs).to(x.dtype)
+        sin = torch.sin(freqs).to(x.dtype)
         return apply_rotary_pos_emb(x, cos, sin)

@@ -57,7 +57,10 @@ class CrossAttention(BaseAttention):
         self.o_proj = nn.Linear(hidden_size, hidden_size, bias=bias)
         self._init_projections(self.q_proj, self.k_proj, self.v_proj, self.o_proj)
 
-    def forward(
+    # Cross-attention deliberately widens the base signature: queries come
+    # from query_state while keys/values come from key_value_state, so the
+    # single-hidden-state BaseAttention.forward contract cannot apply.
+    def forward(  # type: ignore[override]
         self,
         query_state: torch.Tensor,
         key_value_state: torch.Tensor,

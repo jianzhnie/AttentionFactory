@@ -5,6 +5,8 @@ output shapes, gradient flow, determinism, mask handling and the refusal to
 materialize quadratic attention weights.
 """
 
+import math
+
 import pytest
 import torch
 from helpers import make_hidden_state
@@ -87,6 +89,43 @@ def test_lightning_attention_masked_input_is_finite():
     assert torch.isfinite(out).all()
 
 
+def test_lightning_attention_accepts_combined_causal_mask():
+    """A dense causal mask must reduce to its (empty) key-padding component."""
+    layer = LightningAttention(
+        HIDDEN, HEADS, feature_dim=8, block_size=2, causal=True
+    ).eval()
+    x = make_hidden_state(BATCH, SEQ, HIDDEN)
+    causal_mask = torch.tril(torch.ones(BATCH, 1, SEQ, SEQ, dtype=torch.bool))
+    torch.testing.assert_close(layer(x, attention_mask=causal_mask), layer(x))
+
+
+def test_lightning_attention_accepts_3d_dense_mask():
+    """A dense (batch, seq, seq) mask must reduce over query rows, not crash."""
+    layer = LightningAttention(HIDDEN, HEADS, block_size=2, causal=True).eval()
+    x = make_hidden_state(BATCH, SEQ, HIDDEN)
+    causal_mask = torch.tril(torch.ones(BATCH, SEQ, SEQ, dtype=torch.bool))
+    torch.testing.assert_close(layer(x, attention_mask=causal_mask), layer(x))
+
+
+def test_lightning_attention_intra_block_scale_uses_feature_dim():
+    """Intra-block softmax scores contract over feature_dim, not head_dim."""
+    feature_dim = 8
+    assert feature_dim != HIDDEN // HEADS
+    layer = LightningAttention(
+        HIDDEN, HEADS, feature_dim=feature_dim, block_size=SEQ, causal=False
+    ).eval()
+    x = make_hidden_state(BATCH, SEQ, HIDDEN)
+
+    # Single block and empty initial state: output is the intra-block term.
+    q = layer.q_proj(x).view(BATCH, SEQ, HEADS, feature_dim).transpose(1, 2)
+    k = layer.k_proj(x).view(BATCH, SEQ, HEADS, feature_dim).transpose(1, 2)
+    v = layer.split_head(layer.v_proj(x))
+    scores = torch.einsum("bhid,bhjd->bhij", q, k) / math.sqrt(feature_dim)
+    ref = layer.o_proj(layer.combine_head(torch.softmax(scores, dim=-1) @ v))
+
+    torch.testing.assert_close(layer(x), ref)
+
+
 def test_lightning_attention_in_registry():
     layer = build_attention(
         "lightning",
@@ -130,6 +169,22 @@ def test_gated_delta_net_accepts_combined_causal_mask():
     x = make_hidden_state(BATCH, SEQ, HIDDEN)
     causal_mask = torch.tril(torch.ones(BATCH, 1, SEQ, SEQ, dtype=torch.bool))
     torch.testing.assert_close(layer(x, attention_mask=causal_mask), layer(x))
+
+
+def test_linear_attention_accepts_combined_causal_mask():
+    """A dense causal mask must reduce to its (empty) key-padding component."""
+    module = LinearAttention(HIDDEN, HEADS, feature_dim=16, causal=True).eval()
+    x = make_hidden_state(BATCH, SEQ, HIDDEN)
+    causal_mask = torch.tril(torch.ones(BATCH, 1, SEQ, SEQ, dtype=torch.bool))
+    torch.testing.assert_close(module(x, attention_mask=causal_mask), module(x))
+
+
+def test_linear_attention_accepts_3d_dense_mask():
+    """A dense (batch, seq, seq) mask must reduce over query rows, not crash."""
+    module = LinearAttention(HIDDEN, HEADS, causal=True).eval()
+    x = make_hidden_state(BATCH, SEQ, HIDDEN)
+    causal_mask = torch.tril(torch.ones(BATCH, SEQ, SEQ, dtype=torch.bool))
+    torch.testing.assert_close(module(x, attention_mask=causal_mask), module(x))
 
 
 def test_linear_attention_non_causal_runs():

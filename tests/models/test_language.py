@@ -237,3 +237,61 @@ def test_causal_lm_return_mtp_requires_configured_head():
     model = _make_prefix_model()
     with pytest.raises(ValueError, match="num_mtp_predictions"):
         model(torch.randint(0, 32, (1, 4)), return_mtp=True)
+
+
+def test_causal_lm_default_gqa_supports_odd_num_heads():
+    # num_heads=5 used to crash: the default num_kv_groups (5 // 2 = 2) does
+    # not divide 5. The default must fall back to a valid divisor.
+    model = CausalLMModel(
+        vocab_size=32,
+        hidden_size=20,
+        num_layers=1,
+        num_heads=5,
+        intermediate_size=32,
+    )
+    input_ids = torch.randint(0, 32, (2, 5))
+    assert model(input_ids).shape == (2, 5, 32)
+
+
+def test_causal_lm_moves_cpu_attention_mask_to_model_device():
+    if torch.backends.mps.is_available():
+        device = torch.device("mps")
+    elif torch.cuda.is_available():
+        device = torch.device("cuda")
+    else:
+        pytest.skip("requires an MPS or CUDA device")
+    model = CausalLMModel(
+        vocab_size=32,
+        hidden_size=16,
+        num_layers=1,
+        num_heads=2,
+        intermediate_size=32,
+    ).to(device)
+    input_ids = torch.randint(0, 32, (1, 4), device=device)
+    cpu_mask = torch.ones(1, 4, dtype=torch.bool)
+    logits = model(input_ids, attention_mask=cpu_mask)
+    assert logits.shape == (1, 4, 32)
+
+
+def test_causal_lm_mtp_head_forward_runs_once_with_labels(monkeypatch):
+    model = CausalLMModel(
+        vocab_size=32,
+        hidden_size=16,
+        num_layers=1,
+        num_heads=2,
+        intermediate_size=32,
+        num_mtp_predictions=2,
+    )
+    assert model.mtp_head is not None
+    calls = 0
+    original_forward = model.mtp_head.forward
+
+    def counting_forward(*args, **kwargs):
+        nonlocal calls
+        calls += 1
+        return original_forward(*args, **kwargs)
+
+    monkeypatch.setattr(model.mtp_head, "forward", counting_forward)
+    input_ids = torch.randint(0, 32, (2, 6))
+    model(input_ids, labels=input_ids)
+    assert calls == 1

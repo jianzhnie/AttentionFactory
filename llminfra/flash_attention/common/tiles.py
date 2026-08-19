@@ -14,10 +14,12 @@ def prepare_inputs(
     *,
     key_padding_mask: torch.Tensor | None,
 ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor | None]:
-    """Validate q/k/v shapes and normalize the padding mask.
+    """Validate q/k/v shapes and dtypes, and normalize the padding mask.
 
     Expects the layout ``(batch, heads, seq, dim)`` for all three tensors.
-    Q/K must share the head dimension; V's head dimension may differ.
+    Q/K must share the head dimension; V's head dimension may differ. All
+    three tensors must share the same dtype, and the sequence lengths and
+    head dimensions must be non-zero.
     """
     if q.ndim != 4 or k.ndim != 4 or v.ndim != 4:
         raise ValueError("q, k and v must have shape (batch, heads, seq, dim)")
@@ -29,8 +31,17 @@ def prepare_inputs(
         raise ValueError("k and v must have the same sequence length")
     if q.shape[3] != k.shape[3]:
         raise ValueError("q and k must have the same hidden dimension")
+    if q.shape[2] == 0 or k.shape[2] == 0:
+        raise ValueError("q and k must have non-zero sequence length")
+    if q.shape[3] == 0:
+        raise ValueError("q and k hidden dimension must be non-zero")
     if v.shape[3] == 0:
         raise ValueError("v hidden dimension must be non-zero")
+    if not (q.dtype == k.dtype == v.dtype):
+        raise ValueError(
+            f"q, k and v must have the same dtype; got {q.dtype}, {k.dtype} "
+            f"and {v.dtype}"
+        )
 
     normalized_mask = normalize_key_padding_mask(
         key_padding_mask,

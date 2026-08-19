@@ -12,6 +12,12 @@ from torch.nn import functional as F
 class MTPDecoder(nn.Module):
     """Verify greedily predicted MTP tokens with a target model.
 
+    Simplification: verification stops at the first mismatched draft
+    position across the whole batch (any row), unlike the per-row
+    verification of ``SpeculativeDecoder``. Emitted tokens are still exact
+    target-model argmax outputs; rows that would have accepted more tokens
+    simply receive a shorter continuation.
+
     Args:
         mtp_head: Head producing one logit tensor for each future position.
         target_model: Callable mapping token ids to target-model logits.
@@ -29,6 +35,13 @@ class MTPDecoder(nn.Module):
     def forward(
         self, input_ids: torch.Tensor, hidden_state: torch.Tensor
     ) -> torch.Tensor:
+        if input_ids.dim() != 2:
+            raise ValueError("input_ids must have shape (batch, seq)")
+        if hidden_state.dim() != 3 or hidden_state.size(0) != input_ids.size(0):
+            raise ValueError(
+                "hidden_state must have shape (batch, seq, hidden_size) "
+                "matching the input_ids batch size"
+            )
         logits = self.mtp_head(hidden_state)
         draft = torch.stack(
             [torch.argmax(item[:, -1], dim=-1) for item in logits], dim=-1
@@ -89,6 +102,7 @@ def mtp_loss(
     *,
     num_future: int | None = None,
     weight_decay: float = 1.0,
+    logits_list: list[torch.Tensor] | None = None,
 ) -> torch.Tensor:
     """Teaching-grade multi-token prediction training loss.
 
@@ -112,6 +126,9 @@ def mtp_loss(
             defaults to ``head.num_predictions``.
         weight_decay: Geometric per-step discount; step ``k`` is weighted by
             ``weight_decay ** k``. 1.0 weights all steps equally.
+        logits_list: Optional pre-computed ``head(hidden_state)`` result, so
+            callers that already ran the head (e.g. to return the logits) can
+            avoid a second forward pass.
 
     Returns:
         Scalar loss tensor (weighted mean of per-step cross-entropies).
@@ -132,7 +149,8 @@ def mtp_loss(
     if labels.size(1) <= num_future:
         raise ValueError("sequence length must be greater than num_future")
 
-    logits_list = head(hidden_state)
+    if logits_list is None:
+        logits_list = head(hidden_state)
     total = torch.zeros((), device=hidden_state.device)
     weight_sum = 0.0
     for step in range(num_future):

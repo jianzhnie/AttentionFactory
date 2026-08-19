@@ -227,4 +227,17 @@ def validate_attention_inputs(
                 f"must match hidden_state batch size {batch_size}"
             )
 
+        if attention_mask.size(-1) != seq_len:
+            raise ValueError(
+                f"attention_mask sequence length {attention_mask.size(-1)} "
+                f"must match hidden_state sequence length {seq_len}"
+            )
+
+        if attention_mask.is_floating_point():
+            raise ValueError(
+                "attention_mask must use the 1/0 (or bool) convention where "
+                "1 marks positions to attend to; additive float masks "
+                "(0/-inf) are not supported"
+            )
+
     return batch_size, seq_len

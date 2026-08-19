@@ -33,6 +33,14 @@ class CompressedSparseAttention(BaseAttention):
         visible if any of its tokens is valid. The compressed K/V mean still
         averages in masked tokens, which is a deliberate teaching
         simplification.
+
+    Note:
+        In causal mode the first ``compress_ratio - 1`` query positions
+        attend to nothing: entry 0 only becomes visible once its last source
+        token (position ``compress_ratio - 1``) is in the past, and the
+        fallback selection for the first query block also only points at
+        entry 0. Their attention weights are all-masked, so those positions
+        produce an all-zero output (via ``nan_to_num``).
     """
 
     def __init__(
@@ -120,7 +128,9 @@ class CompressedSparseAttention(BaseAttention):
             # visible if any of its source tokens is valid.
             key_mask = attention_mask
             if key_mask.dim() == 4:
-                key_mask = key_mask[..., 0, :]
+                # Reduce over query positions: a key stays visible if any
+                # query can attend to it (a pure causal mask has no padding).
+                key_mask = key_mask.any(dim=-2)
             key_mask = key_mask.reshape(key_mask.size(0), -1).bool()
             key_blocks = key_mask.view(
                 batch_size, compressed_len, self.compress_ratio

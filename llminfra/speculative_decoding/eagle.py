@@ -46,10 +46,26 @@ class EagleSpeculator(nn.Module):
         input_ids: torch.Tensor,
         hidden_states: torch.Tensor,
     ) -> torch.Tensor:
-        """Draft from hidden states and verify with the target model."""
+        """Draft from hidden states and verify with the target model.
+
+        Simplification: verification stops at the first mismatched draft
+        position across the whole batch (any row), unlike the per-row
+        verification of ``SpeculativeDecoder``. Emitted tokens are still
+        exact target-model argmax outputs; rows that would have accepted
+        more tokens simply receive a shorter continuation.
+        """
         if input_ids.size(1) < self.num_speculative_tokens:
             raise ValueError(
                 "input sequence must be at least num_speculative_tokens long"
+            )
+        if hidden_states.dim() != 3 or hidden_states.size(0) != input_ids.size(0):
+            raise ValueError(
+                "hidden_states must have shape (batch, seq_len, hidden_size) "
+                "matching the input_ids batch size"
+            )
+        if hidden_states.size(1) < self.num_speculative_tokens:
+            raise ValueError(
+                "hidden_states must be at least num_speculative_tokens long"
             )
         draft_logits = self.draft_head(hidden_states)
         draft_tokens = torch.argmax(

@@ -84,14 +84,15 @@ def forward(
     query_owners: list[dict[str, int]] = []
 
     for owner_id, q_slice in enumerate(q_slices):
-        query_owners.append(
-            {
-                "owner_id": owner_id,
-                "q_start": q_slice.start or 0,
-                "q_end": q_slice.stop or q.shape[2],
-                "num_kv_tiles": len(k_slices),
-            }
-        )
+        if config.keep_debug_state:
+            query_owners.append(
+                {
+                    "owner_id": owner_id,
+                    "q_start": q_slice.start or 0,
+                    "q_end": q_slice.stop or q.shape[2],
+                    "num_kv_tiles": len(k_slices),
+                }
+            )
 
         for k_slice in k_slices:
             # Real FA2 would launch multiple CTAs over query tiles so these owners
@@ -220,7 +221,8 @@ def backward(
             grad_v[:, :, k_slice, :] += local_grad_v
 
         grad_q[:, :, q_slice, :] = grad_q_block
-        owner_trace.append({"owner_id": owner_id, "num_kv_tiles": len(k_slices)})
+        if config.keep_debug_state:
+            owner_trace.append({"owner_id": owner_id, "num_kv_tiles": len(k_slices)})
 
     return BackwardResult(
         grad_q=grad_q.to(q.dtype),

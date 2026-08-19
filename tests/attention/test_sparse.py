@@ -165,6 +165,17 @@ def test_csa_padding_mask_with_compression():
     assert torch.isfinite(out).all()
 
 
+def test_csa_dense_causal_mask_matches_implicit_causal():
+    """A dense causal mask carries no padding: it must be a no-op for CSA."""
+    module = CompressedSparseAttention(
+        HIDDEN, HEADS, compress_ratio=2, top_k=2, causal=True
+    ).eval()
+    x = make_hidden_state(BATCH, 8, HIDDEN)
+    causal_mask = torch.tril(torch.ones(BATCH, 1, 8, 8, dtype=torch.bool))
+
+    torch.testing.assert_close(module(x, attention_mask=causal_mask), module(x))
+
+
 def test_csa_causal_boundary_excludes_unfinished_entry():
     """A compressed entry is hidden until its last source token is in the past."""
     module = CompressedSparseAttention(

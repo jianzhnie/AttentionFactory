@@ -28,7 +28,7 @@ from llminfra.layers.gated_feed_forward import (
     ReGLUFFN,
     build_feed_forward,
 )
-from llminfra.layers.hybrid_layers import HybridSSMBlock
+from llminfra.layers.hybrid_layers import HybridLayerStack, HybridSSMBlock
 from llminfra.layers.normalization import DeepNorm, LayerNorm, LayerScale
 
 HIDDEN = 32
@@ -254,6 +254,20 @@ def test_transformer_block_deepnorm_shape_and_gradient():
     assert x.grad is not None and torch.isfinite(x.grad).all()
 
 
+def test_transformer_block_only_builds_norms_used_by_the_style():
+    deepnorm = TransformerBlock(
+        HIDDEN, HEADS, intermediate_size=64, norm_style="deepnorm"
+    )
+    assert deepnorm.norm1 is None and deepnorm.norm2 is None
+    post_parallel = TransformerBlock(
+        HIDDEN, HEADS, intermediate_size=64, norm_style="post", parallel=True
+    )
+    assert post_parallel.norm1 is not None
+    assert post_parallel.norm2 is None
+    x = make_hidden_state(BATCH, SEQ, HIDDEN)
+    assert post_parallel(x).shape == x.shape
+
+
 def test_mamba2_chunked_scan_matches_recurrent():
     layer = Mamba2Layer(HIDDEN, d_state=8).eval()
     x = make_hidden_state(BATCH, SEQ, HIDDEN)
@@ -296,8 +310,33 @@ def test_hybrid_ssm_block_follows_pattern():
     x = make_hidden_state(BATCH, SEQ, HIDDEN)
 
     ssm_out, _ = block.layers[0](x)
-    expected = block.layers[1](ssm_out)
+    # Attention sublayers default to a causal mask when none is given.
+    causal = torch.ones(SEQ, SEQ, dtype=torch.bool).tril_()
+    expected = block.layers[1](
+        ssm_out, attention_mask=causal.view(1, 1, SEQ, SEQ).expand(BATCH, 1, SEQ, SEQ)
+    )
     torch.testing.assert_close(block(x), expected)
+
+
+def test_hybrid_ssm_block_attention_is_causal_by_default():
+    block = HybridSSMBlock(HIDDEN, num_heads=HEADS, pattern="ssm:attn").eval()
+    x = make_hidden_state(BATCH, SEQ, HIDDEN)
+    perturbed = x.clone()
+    perturbed[:, -1] += 1.0
+    torch.testing.assert_close(block(x)[:, :-1], block(perturbed)[:, :-1])
+
+
+def test_hybrid_layer_stack_full_attention_is_causal_by_default():
+    stack = HybridLayerStack(
+        hidden_size=HIDDEN,
+        num_heads=HEADS,
+        intermediate_size=64,
+        layer_map="linear:full",
+    ).eval()
+    x = make_hidden_state(BATCH, SEQ, HIDDEN)
+    perturbed = x.clone()
+    perturbed[:, -1] += 1.0
+    torch.testing.assert_close(stack(x)[:, :-1], stack(perturbed)[:, :-1])
 
 
 def test_hybrid_ssm_block_string_and_list_patterns_match():

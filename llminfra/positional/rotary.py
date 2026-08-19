@@ -64,10 +64,12 @@ class RotaryPositionEmbedding(BasePositionalEncoding):
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         """Rotate ``x`` by position indices derived from its sequence length."""
         seq_len = x.size(-2)
-        positions = torch.arange(seq_len, device=x.device, dtype=x.dtype)
-        freqs = torch.einsum("s,f->sf", positions, self.inv_freq.to(x.dtype))
-        cos = torch.cos(freqs)
-        sin = torch.sin(freqs)
+        # Compute frequencies in float32 so half-precision inputs do not
+        # lose positional accuracy on long sequences.
+        positions = torch.arange(seq_len, device=x.device, dtype=torch.float32)
+        freqs = torch.einsum("s,f->sf", positions, self.inv_freq.to(torch.float32))
+        cos = torch.cos(freqs).to(x.dtype)
+        sin = torch.sin(freqs).to(x.dtype)
         return apply_rotary_pos_emb(x, cos, sin)
 
     def extra_repr(self) -> str:

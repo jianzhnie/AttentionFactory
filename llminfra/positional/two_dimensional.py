@@ -40,12 +40,17 @@ class TwoDimensionalPositionEmbedding(BasePositionalEncoding):
             positions = (
                 torch.arange(seq_len, device=x.device) % self.max_positions_per_block
             )
-        if block_ids.max() >= self.max_blocks:
-            raise ValueError("block_ids exceeds max_blocks")
-        if positions.max() >= self.max_positions_per_block:
-            raise ValueError("positions exceeds max_positions_per_block")
-        return (
-            x
-            + self.block_embeddings(block_ids).unsqueeze(0)
-            + self.position_embeddings(positions).unsqueeze(0)
-        )
+        if block_ids.numel() and (
+            block_ids.min() < 0 or block_ids.max() >= self.max_blocks
+        ):
+            raise ValueError("block_ids must be in [0, max_blocks)")
+        if positions.numel() and (
+            positions.min() < 0 or positions.max() >= self.max_positions_per_block
+        ):
+            raise ValueError("positions must be in [0, max_positions_per_block)")
+        block = self.block_embeddings(block_ids)
+        position = self.position_embeddings(positions)
+        if block.dim() == x.dim() - 1:
+            block = block.unsqueeze(0)
+            position = position.unsqueeze(0)
+        return x + block + position

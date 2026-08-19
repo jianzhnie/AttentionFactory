@@ -139,6 +139,12 @@ class PagedAttentionCache:
             raise KeyError(f"Unknown sequence id: {seq_id}")
         block_table = self.block_tables[seq_id]
         num_tokens = self.num_tokens[seq_id]
+        if num_tokens == 0:
+            empty_shape = (0, self.num_heads, self.head_dim)
+            return (
+                self.key_cache.new_zeros(empty_shape),
+                self.value_cache.new_zeros(empty_shape),
+            )
         rows: list[tuple[torch.Tensor, torch.Tensor]] = []
         remaining = num_tokens
         for block_id in block_table:
@@ -200,6 +206,10 @@ def paged_attention(
     """
     if query.dim() != 3:
         raise ValueError("query must have shape (q_len, heads, head_dim)")
+    if num_tokens == 0 or not block_table:
+        return value_cache.new_zeros(
+            (query.size(0), value_cache.size(2), value_cache.size(3))
+        )
 
     rows: list[torch.Tensor] = []
     remaining = num_tokens
@@ -218,13 +228,13 @@ def paged_attention(
     value = torch.cat(rows, dim=0)
 
     scale = 1.0 / (query.size(-1) ** 0.5)
-    scores = torch.einsum("qhd,khd->qk", query.float(), key.float()) * scale
+    scores = torch.einsum("qhd,khd->hqk", query.float(), key.float()) * scale
     if causal:
         q_pos = torch.arange(query.size(0), device=query.device)
         k_pos = torch.arange(num_tokens, device=query.device)
         offset = num_tokens - query.size(0)
         scores = scores.masked_fill(
-            k_pos[None, :] > (q_pos[:, None] + offset), float("-inf")
+            k_pos[None, None, :] > (q_pos[None, :, None] + offset), float("-inf")
         )
     weights = torch.softmax(scores, dim=-1).to(value.dtype)
-    return torch.einsum("qk,khd->qhd", weights, value)
+    return torch.einsum("hqk,khd->qhd", weights, value)

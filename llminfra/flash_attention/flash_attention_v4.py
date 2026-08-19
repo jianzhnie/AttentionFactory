@@ -259,15 +259,16 @@ def forward(
                 scale_log2=scale_log2,
                 rescale_threshold=rescale_threshold,
             )
-            scheduler_trace.append(
-                {
-                    "wave_id": task.wave_id,
-                    "query_tile": task.query_tile,
-                    "key_tile": task.key_tile,
-                    "rescaled": bool(rescaled.any().item()),
-                    "rescale_threshold": rescale_threshold,
-                }
-            )
+            if config.keep_debug_state:
+                scheduler_trace.append(
+                    {
+                        "wave_id": task.wave_id,
+                        "query_tile": task.query_tile,
+                        "key_tile": task.key_tile,
+                        "rescaled": bool(rescaled.any().item()),
+                        "rescale_threshold": rescale_threshold,
+                    }
+                )
 
     # The deferred softmax division is applied inside `assemble_forward_result`.
     return assemble_forward_result(
@@ -359,13 +360,14 @@ def backward(
             grad_q[:, :, task.q_slice, :] += local_grad_q
             grad_k[:, :, task.k_slice, :] += local_grad_k
             grad_v[:, :, task.k_slice, :] += local_grad_v
-            scheduler_trace.append(
-                {
-                    "wave_id": task.wave_id,
-                    "query_tile": task.query_tile,
-                    "key_tile": task.key_tile,
-                }
-            )
+            if config.keep_debug_state:
+                scheduler_trace.append(
+                    {
+                        "wave_id": task.wave_id,
+                        "query_tile": task.query_tile,
+                        "key_tile": task.key_tile,
+                    }
+                )
 
     return BackwardResult(
         grad_q=grad_q.to(q.dtype),

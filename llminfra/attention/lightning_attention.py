@@ -102,7 +102,7 @@ class LightningAttention(BaseAttention):
             dtype=hidden_state.dtype,
         )
         outputs: list[torch.Tensor] = []
-        scale = 1.0 / math.sqrt(self.head_dim)
+        scale = 1.0 / math.sqrt(self.feature_dim)
 
         for start in range(0, seq_len, self.block_size):
             stop = min(start + self.block_size, seq_len)
@@ -167,9 +167,13 @@ class LightningAttention(BaseAttention):
         if attention_mask is None:
             return None
         if attention_mask.dim() == 4:
-            attention_mask = attention_mask[..., 0, :]
+            # Causal structure is already enforced by the chunked recurrence.
+            # Reduce over query positions to retain key-padding visibility.
+            attention_mask = attention_mask.any(dim=-2)
         elif attention_mask.dim() != 3:
             raise ValueError("attention_mask must be 3D or 4D")
+        elif attention_mask.size(1) != 1:
+            attention_mask = attention_mask.any(dim=1, keepdim=True)
         if attention_mask.size(0) != batch_size:
             raise ValueError("attention_mask batch size must match hidden_state")
         return attention_mask.bool()

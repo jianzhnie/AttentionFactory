@@ -115,10 +115,14 @@ def get_positional_encoding(
     if name == "2d":
         if not {"max_blocks", "max_positions_per_block"} <= set(kwargs):
             raise ValueError("2d requires max_blocks and max_positions_per_block")
+        max_blocks = kwargs.pop("max_blocks")
+        max_positions_per_block = kwargs.pop("max_positions_per_block")
+        if kwargs:
+            raise ValueError(f"unsupported 2d arguments: {sorted(kwargs)}")
         return TwoDimensionalPositionEmbedding(
             dim,
-            max_blocks=kwargs["max_blocks"],
-            max_positions_per_block=kwargs["max_positions_per_block"],
+            max_blocks=max_blocks,
+            max_positions_per_block=max_positions_per_block,
         )
     if name == "alibi":
         if num_heads is None:

@@ -76,6 +76,15 @@ class TopKRouter(nn.Module):
             violation. This is a teaching simplification: the real systems
             update the bias per training step with a tuned schedule.
         balance_update_rate: Step size ``u`` of the bias update.
+        routing_strategy: ``"topk"`` (default) or ``"gumbel"``. Gumbel
+            routing is a training-time relaxation only; in eval mode the
+            router always falls back to deterministic top-k selection.
+        gumbel_temperature: Temperature ``tau`` of the gumbel-softmax
+            relaxation (gumbel strategy only).
+        gumbel_hard: With the gumbel strategy, select experts through a
+            straight-through hard mask. The forward weights are the unbiased
+            softmax/sigmoid scores of the selected experts (matching the
+            top-k path); the gumbel probabilities only provide gradients.
     """
 
     def __init__(
@@ -150,18 +159,35 @@ class TopKRouter(nn.Module):
         if self.router_bias is not None:
             selection_logits = logits + self.router_bias
         if self.training and self.routing_strategy == "gumbel":
-            probabilities = F.gumbel_softmax(
+            selection_probabilities = F.gumbel_softmax(
                 selection_logits,
                 tau=self.gumbel_temperature,
                 hard=False,
                 dim=-1,
             )
-            _, indices = torch.topk(probabilities, self.top_k, dim=-1)
+            _, indices = torch.topk(selection_probabilities, self.top_k, dim=-1)
+            probabilities = selection_probabilities
+            if self.router_bias is not None:
+                # The bias only steers selection; weights stay unbiased.
+                probabilities = F.gumbel_softmax(
+                    logits,
+                    tau=self.gumbel_temperature,
+                    hard=False,
+                    dim=-1,
+                )
             if self.gumbel_hard:
                 hard_mask = torch.zeros_like(probabilities).scatter_(-1, indices, 1.0)
                 probabilities = hard_mask + probabilities - probabilities.detach()
             weights = probabilities.gather(-1, indices)
-            weights = weights / weights.sum(dim=-1, keepdim=True).clamp_min(1e-12)
+            if self.gumbel_hard:
+                # Forward values are the unbiased softmax/sigmoid scores of
+                # the selected experts, matching the top-k path (and eval
+                # mode); the gumbel probabilities only provide a
+                # straight-through gradient.
+                scores = self._score(logits.gather(-1, indices))
+                weights = scores.detach() + weights - weights.detach()
+            else:
+                weights = weights / weights.sum(dim=-1, keepdim=True).clamp_min(1e-12)
         else:
             _, indices = torch.topk(selection_logits, self.top_k, dim=-1)
             weights = self._score(logits.gather(-1, indices))
@@ -245,6 +271,10 @@ class ExpertChoiceRouter(nn.Module):
             x: Token features of shape ``(num_tokens, hidden_size)`` with
                 ``num_tokens >= top_tokens``.
         """
+        if x.size(0) < self.top_tokens:
+            raise ValueError(
+                f"num_tokens ({x.size(0)}) must be >= top_tokens ({self.top_tokens})"
+            )
         logits = self.router(x)  # (num_tokens, num_experts)
         expert_scores = logits.transpose(0, 1)  # (num_experts, num_tokens)
         scores = torch.softmax(expert_scores, dim=-1)
@@ -374,7 +404,9 @@ class DeepSeekMoE(nn.Module):
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         """Return routed output plus shared-expert output."""
-        shared = torch.stack([expert(x) for expert in self.shared_experts]).sum(dim=0)
+        shared = self.shared_experts[0](x)
+        for expert in self.shared_experts[1:]:
+            shared = shared + expert(x)
         return self.routed(x) + shared
 
     def extra_repr(self) -> str:
@@ -611,6 +643,9 @@ def load_balance_loss(
         raise ValueError("router_logits last dim must equal num_experts")
     if expert_indices.dim() != 2:
         raise ValueError("expert_indices must have shape (num_tokens, top_k)")
+    if router_logits.size(0) == 0:
+        # mean over an empty token axis would be NaN; no tokens, no loss.
+        return router_logits.new_zeros(())
     counts = torch.zeros(num_experts, device=expert_indices.device, dtype=torch.float32)
     for k in range(expert_indices.size(-1)):
         counts += torch.bincount(

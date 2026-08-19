@@ -138,6 +138,39 @@ def test_fully_masked_rows_produce_zero_output(version):
     assert (fwd.out == 0).all()
 
 
+@pytest.mark.parametrize("version", MODULES.values(), ids=MODULES.keys())
+def test_mixed_input_dtypes_raise(version):
+    """Mixed q/k/v dtypes must fail fast in forward instead of crashing in backward."""
+    q, k, v = make_qkv(1, 2, 8, 8, 16, 16)
+
+    with pytest.raises(ValueError, match="same dtype"):
+        version.forward(q, k, v.to(torch.float16))
+
+
+@pytest.mark.parametrize("version", MODULES.values(), ids=MODULES.keys())
+@pytest.mark.parametrize(
+    "case", ["empty_q", "empty_kv", "zero_head_dim"]
+)
+def test_degenerate_shapes_raise(version, case):
+    """Empty sequences / zero head dims must raise a descriptive ValueError."""
+    q, k, v = make_qkv(1, 1, 4, 4, 8, 8)
+    generator = torch.Generator().manual_seed(0)
+    if case == "empty_q":
+        q = torch.randn(1, 1, 0, 8, generator=generator)
+        match = "non-zero sequence length"
+    elif case == "empty_kv":
+        k = torch.randn(1, 1, 0, 8, generator=generator)
+        v = torch.randn(1, 1, 0, 8, generator=generator)
+        match = "non-zero sequence length"
+    else:
+        q = torch.randn(1, 1, 4, 0, generator=generator)
+        k = torch.randn(1, 1, 4, 0, generator=generator)
+        match = "hidden dimension must be non-zero"
+
+    with pytest.raises(ValueError, match=match):
+        version.forward(q, k, v)
+
+
 # --- FA3: simulated FP8 path -------------------------------------------------
 
 

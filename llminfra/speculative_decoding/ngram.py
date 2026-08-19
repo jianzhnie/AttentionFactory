@@ -36,15 +36,23 @@ class NGramSpeculator(nn.Module):
         for row in input_ids:
             sequence = row.tolist()
             key = sequence[-self.ngram_size :]
-            continuation = next(
+            match = next(
                 (
-                    sequence[i + self.ngram_size]
+                    i
                     for i in range(len(sequence) - self.ngram_size - 1, -1, -1)
                     if sequence[i : i + self.ngram_size] == key
                 ),
-                self.pad_token_id,
+                None,
             )
-            draft = row.new_full((self.num_speculative_tokens,), continuation)
+            if match is None:
+                continuation = [self.pad_token_id]
+            else:
+                continuation = sequence[match + self.ngram_size :]
+            continuation = continuation[: self.num_speculative_tokens]
+            draft = row.new_tensor(
+                continuation
+                + [continuation[-1]] * (self.num_speculative_tokens - len(continuation))
+            )
             logits = self.target_model(torch.cat((row, draft)).unsqueeze(0))
             verified = torch.argmax(logits[:, row.numel() - 1 : -1], dim=-1)[0]
             accepted = []

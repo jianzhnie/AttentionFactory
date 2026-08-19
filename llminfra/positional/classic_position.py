@@ -79,7 +79,9 @@ class SinusoidalPositionEmbedding(BasePositionalEncoding):
             self.max_seq_len,
             position_ids,
         )
-        positional = self.encoding[positions].to(dtype=x.dtype)
+        encoding = self.encoding
+        assert isinstance(encoding, torch.Tensor)
+        positional = encoding[positions].to(dtype=x.dtype)
         return self.dropout(x + positional)
 
 

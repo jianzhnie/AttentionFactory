@@ -10,13 +10,9 @@ from .sparse_attention_indexer import BlockSparseIndexer
 
 __all__ = [
     "BlockSparseIndexer",
-    "MedusaHead",
-    "MultiTokenPredictionHead",
     "OnDiskKVStore",
     "PagedAttentionCache",
     "PagedKVBlockAllocator",
     "TieredKVCache",
-    "medusa_loss",
-    "mtp_loss",
     "paged_attention",
 ]

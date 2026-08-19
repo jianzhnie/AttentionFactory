@@ -86,8 +86,8 @@ class TieredKVCache:
         if seq_id in self.nvme:
             self.store.delete(seq_id)
         self.hbm[seq_id] = _KVRecord(
-            key.to(self.hbm_device),
-            value.to(self.hbm_device),
+            key.detach().clone().to(self.hbm_device),
+            value.detach().clone().to(self.hbm_device),
             time.monotonic(),
         )
         self.cpu.pop(seq_id, None)
@@ -136,8 +136,8 @@ class TieredKVCache:
             seq_id, record = min(self.hbm.items(), key=lambda item: item[1].last_access)
             del self.hbm[seq_id]
             self.cpu[seq_id] = _KVRecord(
-                record.key.detach().to("cpu"),
-                record.value.detach().to("cpu"),
+                record.key.detach().clone().to("cpu"),
+                record.value.detach().clone().to("cpu"),
                 record.last_access,
             )
         while len(self.cpu) > self.max_cpu_entries:

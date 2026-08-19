@@ -89,7 +89,13 @@ class DSparkDecoder(nn.Module):
         self.pad_token_id = int(pad_token_id)
 
     def forward(self, input_ids: torch.Tensor) -> torch.Tensor:
-        """Generate one dynamically sized block and update scheduler state."""
+        """Generate one dynamically sized block and update scheduler state.
+
+        Note: every call advances ``self.scheduler`` based on the observed
+        acceptance rate, even under ``eval()``/``no_grad()``. Repeated calls
+        with the same input may therefore use different draft lengths. This
+        stateful behavior is intentional for teaching purposes.
+        """
         decoder = SpeculativeDecoder(
             self.draft_model,
             self.target_model,

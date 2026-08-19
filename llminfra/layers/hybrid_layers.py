@@ -24,6 +24,15 @@ VALID_TOKENS = ("ssm", "attn")
 HYBRID_LAYER_TYPES = ("linear", "ssm", "full")
 
 
+def _causal_attention_mask(hidden_state: torch.Tensor) -> torch.Tensor:
+    """Build a lower-triangular causal mask matching ``hidden_state``."""
+    batch_size, seq_len = hidden_state.shape[:2]
+    mask = torch.ones(
+        seq_len, seq_len, dtype=torch.bool, device=hidden_state.device
+    ).tril_()
+    return mask.view(1, 1, seq_len, seq_len).expand(batch_size, 1, seq_len, seq_len)
+
+
 class HybridSSMBlock(nn.Module):
     """Alternate Mamba2 SSM sublayers and attention sublayers by a pattern.
 
@@ -81,7 +90,9 @@ class HybridSSMBlock(nn.Module):
 
         SSM sublayers return ``(output, state)``; only ``output`` is passed
         on and the state is dropped (no streaming across calls here).
-        ``attention_mask`` is forwarded to every attention sublayer.
+        ``attention_mask`` is forwarded to every attention sublayer. When no
+        mask is given, attention sublayers default to a causal
+        (lower-triangular) mask so they cannot leak future tokens.
 
         Args:
             hidden_state: Input of shape ``(batch, seq_len, hidden_size)``.
@@ -94,7 +105,10 @@ class HybridSSMBlock(nn.Module):
             if isinstance(layer, Mamba2Layer):
                 hidden_state, _ = layer(hidden_state)
             else:
-                hidden_state = layer(hidden_state, attention_mask=attention_mask)
+                layer_mask = attention_mask
+                if layer_mask is None:
+                    layer_mask = _causal_attention_mask(hidden_state)
+                hidden_state = layer(hidden_state, attention_mask=layer_mask)
         return hidden_state
 
     def extra_repr(self) -> str:
@@ -196,6 +210,9 @@ class HybridLayerStack(nn.Module):
 
         ``states`` is aligned with ``layer_map``; non-SSM entries must be
         ``None``. This makes state ownership explicit during streaming decode.
+        When ``attention_mask`` is ``None``, ``full`` layers fall back to a
+        causal (lower-triangular) mask; ``linear`` and ``ssm`` layers are
+        causal by construction.
         """
         if states is None:
             states = [None] * len(self.mixers)
@@ -226,7 +243,12 @@ class HybridLayerStack(nn.Module):
             else:
                 if state is not None:
                     raise ValueError("non-SSM layer state must be None")
-                mixed = mixer(normalized, attention_mask=attention_mask)
+                layer_mask = attention_mask
+                if layer_mask is None and layer_type == "full":
+                    # LinearAttention is already causal (causal=True); full
+                    # attention defaults to a causal mask to match.
+                    layer_mask = _causal_attention_mask(normalized)
+                mixed = mixer(normalized, attention_mask=layer_mask)
                 next_states.append(None)
             hidden_state = hidden_state + self.dropout(mixed)
             hidden_state = hidden_state + self.dropout(ffn(ffn_norm(hidden_state)))

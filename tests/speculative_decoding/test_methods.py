@@ -11,10 +11,12 @@ from llminfra import (
     Eagle3Speculator,
     EagleSpeculator,
     MedusaHead,
+    MTPDecoder,
     MultiTokenPredictionHead,
     NGramSpeculator,
     SpeculativeDecoder,
     medusa_loss,
+    mtp_loss,
 )
 
 HIDDEN_SIZE = 32
@@ -79,6 +81,26 @@ def test_ngram_speculator_copies_prompt_continuation() -> None:
     assert output.shape[0] == 1
 
 
+def test_ngram_speculator_drafts_observed_continuation() -> None:
+    def model(input_ids: torch.Tensor) -> torch.Tensor:
+        logits = torch.zeros(input_ids.size(0), input_ids.size(1), 8)
+        # Accept the expected continuation at the four verified positions.
+        for offset, token in enumerate((3, 1, 2, 2)):
+            logits[:, 4 + offset, token] = 1.0
+        return logits
+
+    prompt = torch.tensor([[1, 2, 3, 1, 2]])
+    output = NGramSpeculator(
+        model,
+        ngram_size=2,
+        num_speculative_tokens=4,
+        append_bonus_token=False,
+    )(prompt)
+    # The matched [1, 2] at index 0 is followed by [3, 1, 2]; the draft
+    # copies that continuation and pads with its last token to length 4.
+    assert output.tolist() == [[1, 2, 3, 1, 2, 3, 1, 2, 2]]
+
+
 def test_multi_token_prediction_returns_multiple_logits() -> None:
     head = MultiTokenPredictionHead(HIDDEN_SIZE, vocab_size=64, num_predictions=3)
     logits = head(torch.randn(2, 7, HIDDEN_SIZE))
@@ -130,3 +152,39 @@ def test_eagle_speculator_validates_arguments() -> None:
     model = _constant_model()
     with pytest.raises(ValueError, match=">= 1"):
         EagleSpeculator(model, model, num_speculative_tokens=0)
+
+
+def test_eagle_speculator_validates_hidden_states() -> None:
+    model = _constant_model()
+    speculator = EagleSpeculator(model, model, num_speculative_tokens=3)
+    input_ids = torch.zeros(2, 4, dtype=torch.long)
+    with pytest.raises(ValueError, match="num_speculative_tokens"):
+        speculator(input_ids, torch.randn(2, 2, HIDDEN_SIZE))
+    with pytest.raises(ValueError, match="batch size"):
+        speculator(input_ids, torch.randn(3, 4, HIDDEN_SIZE))
+
+
+def test_mtp_decoder_validates_hidden_state() -> None:
+    model = _constant_model()
+    head = MultiTokenPredictionHead(HIDDEN_SIZE, vocab_size=32, num_predictions=2)
+    decoder = MTPDecoder(head, model)
+    input_ids = torch.zeros(2, 4, dtype=torch.long)
+    with pytest.raises(ValueError, match="batch size"):
+        decoder(input_ids, torch.randn(3, 4, HIDDEN_SIZE))
+    with pytest.raises(ValueError, match="batch, seq"):
+        decoder(torch.zeros(4, dtype=torch.long), torch.randn(2, 4, HIDDEN_SIZE))
+
+
+def test_mtp_loss_reuses_precomputed_logits(monkeypatch) -> None:
+    head = MultiTokenPredictionHead(HIDDEN_SIZE, vocab_size=32, num_predictions=2)
+    hidden = torch.randn(2, 7, HIDDEN_SIZE)
+    labels = torch.randint(0, 32, (2, 7))
+    expected = mtp_loss(head, hidden, labels)
+    logits_list = head(hidden)
+    monkeypatch.setattr(
+        head,
+        "forward",
+        lambda *args, **kwargs: pytest.fail("head must not run again"),
+    )
+    actual = mtp_loss(head, hidden, labels, logits_list=logits_list)
+    torch.testing.assert_close(actual, expected)

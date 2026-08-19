@@ -116,8 +116,15 @@ class TransformerBlock(nn.Module):
         self.attention = attention
         self.ffn = ffn
         norm_class: type[nn.Module] = RMSNorm if norm_type == "rmsnorm" else LayerNorm
-        self.norm1 = norm_class(hidden_size, eps=norm_eps)
-        self.norm2 = norm_class(hidden_size, eps=norm_eps)
+        # norm1/norm2 are only built when the style actually calls them:
+        # "deepnorm" uses the DeepNorm modules below instead, and the
+        # parallel "post" layout normalizes once (norm1) after the residual.
+        self.norm1: nn.Module | None = None
+        self.norm2: nn.Module | None = None
+        if norm_style != "deepnorm":
+            self.norm1 = norm_class(hidden_size, eps=norm_eps)
+        if norm_style != "deepnorm" and not (norm_style == "post" and parallel):
+            self.norm2 = norm_class(hidden_size, eps=norm_eps)
         # Post-sublayer norms, only used by the "sandwich" style.
         self.norm3: nn.Module | None = None
         self.norm4: nn.Module | None = None
@@ -188,6 +195,8 @@ class TransformerBlock(nn.Module):
         if self.norm_style in {"post", "deepnorm"}:
             attention_input = hidden_state
         else:
+            if self.norm1 is None:
+                raise RuntimeError("norm1 was not initialized")
             attention_input = self.norm1(hidden_state)
         if isinstance(self.attention, HybridAttention):
             result = self.attention(
@@ -233,10 +242,14 @@ class TransformerBlock(nn.Module):
             attention_output = self.norm3(attention_output)
         hidden_state = self._add_attention_residual(hidden_state, attention_output)
         if self.norm_style == "post":
+            if self.norm1 is None or self.norm2 is None:
+                raise RuntimeError("post-norm modules were not initialized")
             hidden_state = self.norm1(hidden_state)
             return self.norm2(
                 self._add_ffn_residual(hidden_state, self.ffn(hidden_state))
             )
+        if self.norm2 is None:
+            raise RuntimeError("norm2 was not initialized")
         ffn_output = self.ffn_scale(self.ffn(self.norm2(hidden_state)))
         if self.norm_style == "sandwich":
             if self.norm4 is None:
@@ -255,9 +268,13 @@ class TransformerBlock(nn.Module):
             combined = attention_output + self.ffn_scale(self.ffn(hidden_state))
             return self.deepnorm1(hidden_state, combined)
         if self.norm_style == "post":
+            if self.norm1 is None:
+                raise RuntimeError("norm1 was not initialized")
             ffn_output = self.ffn_scale(self.ffn(hidden_state))
             hidden_state = self._add_attention_residual(hidden_state, attention_output)
             return self.norm1(hidden_state + ffn_output)
+        if self.norm2 is None:
+            raise RuntimeError("norm2 was not initialized")
         ffn_output = self.ffn_scale(self.ffn(self.norm2(hidden_state)))
         if self.norm_style == "sandwich":
             if self.norm3 is None or self.norm4 is None:

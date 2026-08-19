@@ -27,6 +27,7 @@ import torch.nn.functional as F
 from torch import nn
 
 from .encoder_decoder import CrossAttention
+from .heads import pool_hidden_state
 from .language import CausalLMModel, CausalLMOutput
 
 
@@ -96,7 +97,9 @@ class CrossAttentionFuser(CrossAttention):
         bias: Whether to use bias in the linear projections.
     """
 
-    def forward(
+    # Late fusion reuses the cross-attention signature (separate text/vision
+    # inputs), which intentionally extends the BaseAttention contract.
+    def forward(  # type: ignore[override]
         self,
         text_state: torch.Tensor,
         vision_state: torch.Tensor,
@@ -278,11 +281,14 @@ class MultimodalCausalLM(nn.Module):
         if vision_state.size(0) != batch_size:
             raise ValueError("vision and text batch sizes must match")
         vision_length = vision_state.size(1)
-        build_multimodal_position_ids(
-            image_grid_thw,
-            text_length,
-            expected_image_tokens=vision_length,
-        )
+        if self.fusion_mode == "cross_attention":
+            # Early fusion re-validates the grid while building position ids;
+            # the cross-attention path never builds them, so validate here.
+            build_multimodal_position_ids(
+                image_grid_thw,
+                text_length,
+                expected_image_tokens=vision_length,
+            )
         text_state = self.language_model.embed_tokens(input_ids)
 
         if self.fusion_mode == "early":
@@ -307,8 +313,23 @@ class MultimodalCausalLM(nn.Module):
                 return_mtp,
             )
 
-        text_summary = text_state.mean(dim=1)
-        vision_summary = vision_state.mean(dim=1)
+        text_summary = pool_hidden_state(
+            text_state,
+            self._normalize_mask(
+                attention_mask, batch_size, text_length, text_state.device
+            ),
+            pooling="mean",
+        )
+        vision_summary = pool_hidden_state(
+            vision_state,
+            self._normalize_mask(
+                vision_attention_mask,
+                batch_size,
+                vision_state.size(1),
+                vision_state.device,
+            ),
+            pooling="mean",
+        )
         alignment_logits = F.cosine_similarity(
             self.text_alignment(text_summary),
             self.vision_alignment(vision_summary),

@@ -4,6 +4,7 @@ Covers ExpertFFN, the top-k router, MixtureOfExperts, DeepSeekMoE, LatentMoE,
 ExpertParallelMoE and the load-balancing auxiliary loss.
 """
 
+import pytest
 import torch
 from helpers import make_hidden_state
 
@@ -113,6 +114,16 @@ def test_load_balance_loss_is_finite():
     assert torch.isfinite(loss)
 
 
+def test_load_balance_loss_empty_tokens():
+    """Zero tokens must give a finite zero loss, not NaN."""
+    logits = torch.empty(0, 8)
+    indices = torch.empty(0, 2, dtype=torch.long)
+    loss = load_balance_loss(logits, indices, num_experts=8)
+    assert loss.ndim == 0
+    assert loss.item() == 0.0
+    assert torch.isfinite(loss)
+
+
 def test_router_noise_epsilon_actually_perturbs_routing():
     """noise_epsilon must scale the noise (adding a constant would be a no-op)."""
     router = TopKRouter(
@@ -204,6 +215,53 @@ def test_aux_free_balance_updates_only_in_training():
     assert not torch.equal(router.router_bias, torch.zeros(4))
 
 
+def test_gumbel_weights_ignore_router_bias():
+    """Gumbel mode: router_bias steers selection but never the weights."""
+    torch.manual_seed(0)
+    num_experts = 8
+    router = TopKRouter(
+        HIDDEN,
+        num_experts=num_experts,
+        top_k=num_experts,
+        routing_strategy="gumbel",
+        aux_free_balance=True,
+        gumbel_hard=False,
+    )
+    router.train()
+    x = torch.randn(4, HIDDEN)
+    # top_k == num_experts: the selection set is all experts either way,
+    # so identical gumbel draws must give identical weights if unbiased.
+    bias = torch.arange(num_experts, dtype=torch.float32) * 3.0
+
+    torch.manual_seed(1)
+    weights_clean, indices_clean = router(x)
+    router.router_bias.data = bias
+    torch.manual_seed(1)
+    weights_biased, indices_biased = router(x)
+
+    weights_clean = weights_clean.gather(-1, indices_clean.argsort(-1))
+    weights_biased = weights_biased.gather(-1, indices_biased.argsort(-1))
+    torch.testing.assert_close(weights_clean, weights_biased)
+
+
+def test_gumbel_hard_weights_match_unbiased_scores():
+    """Hard gumbel forward weights equal the unbiased top-k scores."""
+    torch.manual_seed(0)
+    router = TopKRouter(HIDDEN, num_experts=8, top_k=2, routing_strategy="gumbel")
+    router.train()
+    x = torch.randn(16, HIDDEN, requires_grad=True)
+    weights, indices = router(x)
+    expected = torch.softmax(router.router(x).gather(-1, indices), dim=-1)
+    torch.testing.assert_close(weights, expected)
+    torch.testing.assert_close(weights.sum(dim=-1), torch.ones(16))
+
+    # The straight-through gradient still reaches the router and the input.
+    weights.sum().backward()
+    assert router.router.weight.grad is not None
+    assert torch.isfinite(router.router.weight.grad).all()
+    assert x.grad is not None and torch.isfinite(x.grad).all()
+
+
 def test_expert_choice_router_shapes():
     num_experts, top_tokens = 8, 4
     router = ExpertChoiceRouter(
@@ -216,6 +274,12 @@ def test_expert_choice_router_shapes():
     assert torch.isfinite(weights).all()
     assert token_indices.max().item() < 16
     assert token_indices.min().item() >= 0
+
+
+def test_expert_choice_router_rejects_too_few_tokens():
+    router = ExpertChoiceRouter(hidden_size=HIDDEN, num_experts=4, top_tokens=8)
+    with pytest.raises(ValueError, match="top_tokens"):
+        router(torch.randn(4, HIDDEN))
 
 
 def test_mixture_of_experts_expert_dropout_training_randomness():

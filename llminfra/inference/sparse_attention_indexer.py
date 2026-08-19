@@ -55,6 +55,10 @@ class BlockSparseIndexer(nn.Module):
             raise ValueError(
                 f"seq_len {seq_len} exceeds max_seq_len {self.max_seq_len}"
             )
+        if seq_len == 0:
+            return hidden_state.new_zeros(
+                (batch_size, self.num_heads, 0, self.top_k), dtype=torch.long
+            )
         padded_len = (
             (seq_len + self.block_size - 1) // self.block_size
         ) * self.block_size

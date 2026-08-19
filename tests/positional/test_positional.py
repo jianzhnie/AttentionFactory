@@ -5,6 +5,8 @@ position interpolation, LongRoPE, 2D position embedding, the ALiBi bias and
 the ``get_positional_encoding`` factory.
 """
 
+import math
+
 import pytest
 import torch
 
@@ -56,6 +58,35 @@ def test_yarn_and_dynamic_ntk_are_finite():
     assert torch.isfinite(ntk(x)).all()
 
 
+def test_yarn_interpolates_high_and_keeps_low_frequencies():
+    params = YaRNParameters(
+        factor=4.0,
+        original_max_position_embeddings=2048,
+    )
+    yarn = YaRNScaledRotaryEmbedding(8, max_seq_len=4096, params=params)
+    plain = RotaryPositionEmbedding(8, max_seq_len=4096)
+    x = torch.randn(1, 1, 2, 8)
+    yarn_out = yarn(x)
+    plain_out = plain(x)
+    # The lowest-frequency pair keeps the original (unscaled) frequency.
+    torch.testing.assert_close(yarn_out[..., -2:], plain_out[..., -2:])
+    # The highest-frequency pair is interpolated: angle = position / factor.
+    a, b = x[0, 0, 1, 0], x[0, 0, 1, 1]
+    theta = 1.0 / params.factor  # inv_freq[0] == 1
+    cos, sin = math.cos(theta), math.sin(theta)
+    expected = torch.stack([a * cos - b * sin, a * sin + b * cos])
+    torch.testing.assert_close(yarn_out[0, 0, 1, :2], expected)
+
+
+def test_dynamic_ntk_requires_dim_greater_than_two():
+    with pytest.raises(ValueError, match="dim > 2"):
+        DynamicNTKRotaryEmbedding(
+            2,
+            original_max_position_embeddings=128,
+            max_seq_len=256,
+        )
+
+
 def test_alibi_shape_and_causal_mask():
     alibi = ALiBiBias(num_heads=4, max_seq_len=8)
     x = torch.randn(1, 4, 6, 8)
@@ -102,6 +133,43 @@ def test_longrope_and_2d_position_are_finite():
     assert torch.isfinite(two_d(y)).all()
 
 
+def test_two_dimensional_position_embedding_preserves_shape():
+    two_d = TwoDimensionalPositionEmbedding(8, max_blocks=4, max_positions_per_block=4)
+    # 2-D input (seq, dim) with default ids must not gain a batch dimension.
+    x2d = torch.randn(8, 8)
+    assert two_d(x2d).shape == x2d.shape
+    # Batched ids must broadcast per batch instead of adding a leading dim.
+    x = torch.randn(2, 8, 8)
+    block_ids = (torch.arange(8) // 4).expand(2, 8)
+    positions = (torch.arange(8) % 4).expand(2, 8)
+    out = two_d(x, block_ids, positions)
+    assert out.shape == x.shape
+    expected = torch.stack(
+        [
+            x[i]
+            + two_d.block_embeddings(block_ids[i])
+            + two_d.position_embeddings(positions[i])
+            for i in range(x.size(0))
+        ]
+    )
+    torch.testing.assert_close(out, expected)
+
+
+def test_two_dimensional_position_embedding_allows_empty_input():
+    two_d = TwoDimensionalPositionEmbedding(8, max_blocks=4, max_positions_per_block=4)
+    x = torch.randn(1, 0, 8)
+    assert two_d(x).shape == x.shape
+
+
+def test_two_dimensional_position_embedding_rejects_negative_ids():
+    two_d = TwoDimensionalPositionEmbedding(8, max_blocks=4, max_positions_per_block=4)
+    x = torch.randn(1, 4, 8)
+    with pytest.raises(ValueError, match="block_ids"):
+        two_d(x, block_ids=torch.tensor([0, 1, -1, 2]))
+    with pytest.raises(ValueError, match="positions"):
+        two_d(x, positions=torch.tensor([0, 1, -2, 3]))
+
+
 def test_positional_encoding_factory():
     assert isinstance(get_positional_encoding("rope", dim=8), RotaryPositionEmbedding)
     assert isinstance(get_positional_encoding("alibi", dim=8, num_heads=4), ALiBiBias)
@@ -126,6 +194,19 @@ def test_positional_factory_new_modes():
         get_positional_encoding("mrope", dim=8, mrope_section=(1, 1, 2)),
         MultiModalRotaryPositionEmbedding,
     )
+
+
+def test_positional_factory_2d_rejects_extra_kwargs():
+    assert isinstance(
+        get_positional_encoding(
+            "2d", dim=8, max_blocks=4, max_positions_per_block=4
+        ),
+        TwoDimensionalPositionEmbedding,
+    )
+    with pytest.raises(ValueError, match="unsupported 2d"):
+        get_positional_encoding(
+            "2d", dim=8, max_blocks=4, max_positions_per_block=4, dropout=0.1
+        )
 
 
 def test_mrope_preserves_norm_and_uses_independent_axes():

@@ -94,6 +94,8 @@ class MultiModalRotaryPositionEmbedding(BasePositionalEncoding):
                     f"got {tuple(positions.shape)}"
                 )
 
+        inv_freq = self.inv_freq
+        assert isinstance(inv_freq, torch.Tensor)
         frequencies: list[torch.Tensor] = []
         start = 0
         for axis, section in enumerate(self.mrope_section):
@@ -101,7 +103,7 @@ class MultiModalRotaryPositionEmbedding(BasePositionalEncoding):
             axis_frequency = torch.einsum(
                 "bs,f->bsf",
                 positions[axis].to(dtype=x.dtype),
-                self.inv_freq[start:stop].to(dtype=x.dtype),
+                inv_freq[start:stop].to(dtype=x.dtype),
             )
             frequencies.append(axis_frequency)
             start = stop

@@ -47,11 +47,13 @@ class ALiBiBias(BasePositionalEncoding):
             )
         # Derive the device from the registered buffer so the module works
         # after .to("cuda") / .to("mps") moves.
-        device = self.slopes.device
+        slopes = self.slopes
+        assert isinstance(slopes, torch.Tensor)
+        device = slopes.device
         q_pos = torch.arange(seq_len, device=device).view(-1, 1)
         k_pos = torch.arange(seq_len, device=device).view(1, -1)
         distance = q_pos - k_pos
-        bias = -self.slopes[:, None, None] * distance.abs().unsqueeze(0)
+        bias = -slopes[:, None, None] * distance.abs().unsqueeze(0)
         if self.causal:
             future = q_pos < k_pos
             bias = bias.masked_fill(future[None], float("-inf"))
