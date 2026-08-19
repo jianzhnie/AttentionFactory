@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
+
 import torch
-from torch import Callable, nn
+from torch import nn
 
 
 class EagleSpeculator(nn.Module):

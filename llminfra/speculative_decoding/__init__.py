@@ -1,8 +1,8 @@
 """Speculative decoding methods grouped by drafting strategy."""
 
-from .base import EagleSpeculator, SpeculativeDecoder
+from .base import SpeculativeDecoder
 from .dsflash import DSFlashDecoder, DSparkDecoder, DSparkScheduler
-from .eagle import Eagle1Speculator, Eagle2Speculator, Eagle3Speculator
+from .eagle import Eagle1Speculator, Eagle2Speculator, Eagle3Speculator, EagleSpeculator
 from .medusa import MedusaHead, medusa_loss
 from .mtp import MTPDecoder, MultiTokenPredictionHead, mtp_loss
 from .ngram import NGramSpeculator

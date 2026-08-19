@@ -2,15 +2,26 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
+
 import torch
 from torch import nn
 from torch.nn import functional as F
 
 
 class MTPDecoder(nn.Module):
-    """Verify greedily predicted MTP tokens with a target model."""
+    """Verify greedily predicted MTP tokens with a target model.
 
-    def __init__(self, mtp_head: MultiTokenPredictionHead, target_model) -> None:
+    Args:
+        mtp_head: Head producing one logit tensor for each future position.
+        target_model: Callable mapping token ids to target-model logits.
+    """
+
+    def __init__(
+        self,
+        mtp_head: MultiTokenPredictionHead,
+        target_model: Callable[[torch.Tensor], torch.Tensor],
+    ) -> None:
         super().__init__()
         self.mtp_head = mtp_head
         self.target_model = target_model
