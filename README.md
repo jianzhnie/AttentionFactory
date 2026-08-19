@@ -20,18 +20,18 @@
   - **Compressed Sparse Attention** - 压缩 KV + 稀疏选择
   - **ALiBi Attention** - GQA + ALiBi additive bias
 - **位置编码与长上下文扩展**：RoPE、YaRN、Dynamic NTK、ALiBi
-- **长上下文与系统接口**：LongRoPE、2D Position、FlashMLA 接口、On-Disk KV、SpeculativeDecoder、EagleSpeculator
+- **推测解码**：N-Gram、EAGLE 1–3、Medusa、MTP、DSpark 与 DSFlash
 - **MoE 模块**：Top-k Router、Expert FFN、Mixture-of-Experts、DeepSeek-style Shared Expert MoE、Expert Parallel MoE
 - **SSM 混合**：简化 Mamba2Layer
 - **稀疏索引与模型级模块**：Block Sparse Indexer、LatentMoE、Attention Residual、Multi-Token Prediction
 - **Transformer 基础模块**：RMSNorm、SwiGLU FFN、可插拔 Transformer Block
 - **模型级组合**：CausalLMModel 与 Attention/Positional 注册表
-- **FlashAttention 教学实现**：`flashattention` 子包包含 FA1–FA4 四个版本的纯 PyTorch 在线 softmax 分块实现（含 forward/backward），用于理解各版本算法结构的演进
+- **FlashAttention 教学实现**：`flash_attention` 子包包含 FA1–FA4 四个版本的纯 PyTorch 在线 softmax 分块实现（含 forward/backward），用于理解各版本算法结构的演进
 - **PagedAttention 接口模拟**：提供固定块 KV cache、block table 与稠密 gather 的教学实现，便于理解 vLLM 的系统层优化
 - **支持 Attention Mask**：支持广播的注意力掩码（padding mask 或完整 mask）
 - **权重返回**：可选返回注意力权重矩阵，便于可视化分析
 - **Xavier 初始化**：默认使用 Xavier 均匀初始化
-- **完整测试**：`tests/` 包含数值正确性、掩码语义、梯度流等 90+ 个测试用例
+- **完整测试**：`tests/` 按源码目录组织，覆盖数值正确性、掩码语义、梯度流和公共 API
 
 ## 安装
 
@@ -115,9 +115,9 @@ attention = MultiQueryAttention(
 分组查询注意力机制，出自论文 *GQA: Training Generalized Multi-Query Transformer Models from Multi-Head Checkpoints*。MHA 与 MQA 的折中方案，将 Query 头分组，每组共享一组 Key/Value 头。
 
 ```python
-from llminfra import GroupQueryAttention
+from llminfra import GroupedQueryAttention
 
-attention = GroupQueryAttention(
+attention = GroupedQueryAttention(
     hidden_size=512,
     num_heads=8,
     num_kv_groups=2,  # G=2 时每组 4 头共享一组 KV
@@ -155,7 +155,7 @@ attention = MultiHeadLatentAttention(
 
 ### 5. FlashAttention（教学实现）
 
-`llminfra.flashattention` 子包以纯 PyTorch 实现了 FlashAttention v1–v4 的核心算法结构（在线 softmax、分块循环、LSE 重算梯度），用于教学目的。提供与 PyTorch 一致的调用方式——函数式接口 `flash_attention`（类似 `F.scaled_dot_product_attention`）和 `nn.Module` 包装，均支持 autograd：
+`llminfra.flash_attention` 子包以纯 PyTorch 实现了 FlashAttention v1–v4 的核心算法结构（在线 softmax、分块循环、LSE 重算梯度），用于教学目的。提供与 PyTorch 一致的调用方式——函数式接口 `flash_attention`（类似 `F.scaled_dot_product_attention`）和 `nn.Module` 包装，均支持 autograd：
 
 ```python
 import torch

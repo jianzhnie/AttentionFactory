@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "llminfra"
 version = "1.0.0"
-description = ""
+description = "Educational PyTorch implementations of modern LLM building blocks"
 readme = "README.md"
 license = { text = "Apache-2.0" }
 requires-python = ">=3.10"
@@ -37,6 +37,9 @@ Issues = "https://github.com/jianzhnie/LLMInfra/issues"
 [tool.setuptools.packages.find]
 where = ["."]
 include = ["llminfra*"]
+
+[tool.setuptools.package-data]
+llminfra = ["py.typed"]
 
 [tool.ruff]
 line-length = 88
