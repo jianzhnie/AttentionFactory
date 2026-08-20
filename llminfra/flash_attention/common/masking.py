@@ -55,12 +55,20 @@ def build_block_mask(
         block_mask = key_padding_mask[:, None, None, k_slice]
 
     if causal:
-        q_positions = torch.arange(q_slice.start, q_slice.stop, device=device) + (
-            kv_len - q_len
-        )
-        k_positions = torch.arange(k_slice.start, k_slice.stop, device=device)
-        causal_mask = (q_positions[:, None] >= k_positions[None, :])[None, None]
-        block_mask = causal_mask if block_mask is None else block_mask & causal_mask
+        offset = kv_len - q_len
+        # A tile is fully below the causal diagonal (every position pair
+        # valid) iff its smallest query position covers its largest key
+        # position. Such tiles need no mask at all, which lets callers skip
+        # the masked_fill on the score block. This check is pure Python
+        # arithmetic on slice bounds, so it never forces a device sync.
+        tile_fully_valid = q_slice.start + offset >= k_slice.stop - 1
+        if not tile_fully_valid:
+            q_positions = (
+                torch.arange(q_slice.start, q_slice.stop, device=device) + offset
+            )
+            k_positions = torch.arange(k_slice.start, k_slice.stop, device=device)
+            causal_mask = (q_positions[:, None] >= k_positions[None, :])[None, None]
+            block_mask = causal_mask if block_mask is None else block_mask & causal_mask
 
     if block_mask is None:
         return None

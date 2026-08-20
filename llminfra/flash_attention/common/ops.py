@@ -27,7 +27,9 @@ def scaled_scores(q_block: torch.Tensor, k_block: torch.Tensor) -> torch.Tensor:
     """
     scale = 1.0 / math.sqrt(q_block.shape[-1])
     q_fp32 = q_block.to(torch.float32) * scale
-    return torch.einsum("bhid,bhjd->bhij", q_fp32, k_block.to(torch.float32))
+    # ``matmul`` on the trailing two dims is equivalent to
+    # ``einsum("bhid,bhjd->bhij")`` but skips einsum's equation parsing.
+    return torch.matmul(q_fp32, k_block.to(torch.float32).transpose(-1, -2))
 
 
 def block_scores_and_mask(
@@ -70,17 +72,18 @@ def compute_block_softmax(
         scores = scores.masked_fill(~valid_mask, float("-inf"))
 
     block_max = scores.max(dim=-1, keepdim=True).values
-    # A fully masked row has max -inf; substitute 0 so exp() yields 0 for that
-    # row instead of NaN. Masked positions are exp(-inf - m) = 0 either way.
-    block_max = torch.where(
-        torch.isfinite(block_max), block_max, torch.zeros_like(block_max)
-    )
+    if valid_mask is not None:
+        # A fully masked row has max -inf; substitute 0 so exp() yields 0 for
+        # that row instead of NaN. Masked positions are exp(-inf - m) = 0
+        # either way. Without a mask every row is finite, so this guard can
+        # be skipped entirely.
+        block_max = torch.where(
+            torch.isfinite(block_max), block_max, torch.zeros_like(block_max)
+        )
     exp_scores = torch.exp(scores - block_max)
 
     block_sum = exp_scores.sum(dim=-1, keepdim=True)
-    weighted_values = torch.einsum(
-        "bhij,bhjd->bhid", exp_scores.to(v_block.dtype), v_block
-    )
+    weighted_values = torch.matmul(exp_scores.to(v_block.dtype), v_block)
     return block_max, block_sum, weighted_values
 
 
@@ -231,11 +234,13 @@ def compute_block_gradients(
     probabilities = probabilities_from_lse(scores, valid_mask, lse_block).to(
         grad_out_block.dtype
     )
-    grad_v = torch.einsum("bhij,bhid->bhjd", probabilities, grad_out_block)
-    grad_probs = torch.einsum("bhid,bhjd->bhij", grad_out_block, v_block)
+    # Each ``matmul`` below is the einsum in the formula above with the
+    # transpose expressed as a strided view, which avoids einsum overhead.
+    grad_v = torch.matmul(probabilities.transpose(-1, -2), grad_out_block)
+    grad_probs = torch.matmul(grad_out_block, v_block.transpose(-1, -2))
     row_dot = torch.sum(grad_out_block * out_block, dim=-1, keepdim=True)
     grad_s = probabilities * (grad_probs - row_dot)
     scale = 1.0 / math.sqrt(q_block.shape[-1])
-    grad_q = scale * torch.einsum("bhij,bhjd->bhid", grad_s, k_block)
-    grad_k = scale * torch.einsum("bhij,bhid->bhjd", grad_s, q_block)
+    grad_q = scale * torch.matmul(grad_s, k_block)
+    grad_k = scale * torch.matmul(grad_s.transpose(-1, -2), q_block)
     return grad_q, grad_k, grad_v

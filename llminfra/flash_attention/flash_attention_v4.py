@@ -121,17 +121,8 @@ def _correction_merge(
     boolean tensor recording which rows took the full-rescale path.
     """
     has_prior_state = torch.isfinite(row_max_block)
-    safe_row_max_block = torch.where(has_prior_state, row_max_block, block_max)
-    acc_scale_log2 = (safe_row_max_block - block_max) * scale_log2
     requires_rescale = ~has_prior_state
     requires_rescale = requires_rescale | (block_max > row_max_block)
-    if rescale_threshold > 0.0:
-        selective_skip = (
-            has_prior_state
-            & (block_max > row_max_block)
-            & (acc_scale_log2 >= -rescale_threshold)
-        )
-        requires_rescale = requires_rescale & ~selective_skip
 
     merged_out_acc, merged_normalizer, merged_row_max = merge_unnormalized_block(
         out_acc_block,
@@ -141,6 +132,22 @@ def _correction_merge(
         block_sum,
         weighted_values,
     )
+
+    if rescale_threshold <= 0.0:
+        # Without selective rescaling, every row that would keep the old max
+        # gets a bitwise-identical result from the full merge (the new row max
+        # equals the old one, so old_scale is exactly 1). Return early and
+        # skip the relative-scale exp and the three torch.where selects.
+        return merged_out_acc, merged_normalizer, merged_row_max, requires_rescale
+
+    safe_row_max_block = torch.where(has_prior_state, row_max_block, block_max)
+    acc_scale_log2 = (safe_row_max_block - block_max) * scale_log2
+    selective_skip = (
+        has_prior_state
+        & (block_max > row_max_block)
+        & (acc_scale_log2 >= -rescale_threshold)
+    )
+    requires_rescale = requires_rescale & ~selective_skip
 
     # Selective-skip path: keep the old row max and fold the new tile in with
     # a relative scale, leaving the accumulated state untouched.
