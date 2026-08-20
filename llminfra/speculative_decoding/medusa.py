@@ -96,7 +96,9 @@ class MedusaHead(nn.Module):
         """
         if not 1 <= top_k <= self.vocab_size:
             raise ValueError(f"top_k must be in [1, {self.vocab_size}]")
-        final_logits = self(hidden_state)[:, -1]
+        # Only the final sequence position is scored; slice before the heads
+        # so the per-head vocab projections do not scale with seq_len.
+        final_logits = self(hidden_state[:, -1:])[:, -1]
         result = torch.topk(final_logits, k=top_k, dim=-1)
         return result.indices, result.values
 

@@ -293,12 +293,24 @@ class MultimodalCausalLM(nn.Module):
         vision_length = vision_state.size(1)
         if self.fusion_mode == "cross_attention":
             # Early fusion re-validates the grid while building position ids;
-            # the cross-attention path never builds them, so validate here.
-            build_multimodal_position_ids(
-                image_grid_thw,
-                text_length,
-                expected_image_tokens=vision_length,
-            )
+            # the cross-attention path never builds them, so validate the
+            # token count here. This mirrors the checks in
+            # ``build_multimodal_position_ids`` without materializing the
+            # (3, batch, tokens) id tensor that would be discarded.
+            if image_grid_thw.dim() != 2 or image_grid_thw.size(-1) != 3:
+                raise ValueError("image_grid_thw must have shape (batch, 3)")
+            if (image_grid_thw < 1).any():
+                raise ValueError("all image grid dimensions must be >= 1")
+            token_counts = image_grid_thw.prod(dim=-1)
+            if not torch.equal(
+                token_counts, token_counts[:1].expand_as(token_counts)
+            ):
+                raise ValueError("dense batches require equal image token counts")
+            if int(token_counts[0].item()) != vision_length:
+                raise ValueError(
+                    f"image grid produces {int(token_counts[0].item())} tokens, "
+                    f"but vision_features contains {vision_length}"
+                )
         text_state = self.language_model.embed_tokens(input_ids)
 
         if self.fusion_mode == "early":
@@ -323,20 +335,30 @@ class MultimodalCausalLM(nn.Module):
                 return_mtp,
             )
 
+        # pool_hidden_state has a mask-free fast path; forward None instead of
+        # an all-ones mask so alignment pooling skips the weights multiply.
         text_summary = pool_hidden_state(
             text_state,
-            self._normalize_mask(
-                attention_mask, batch_size, text_length, text_state.device
+            (
+                None
+                if attention_mask is None
+                else self._normalize_mask(
+                    attention_mask, batch_size, text_length, text_state.device
+                )
             ),
             pooling="mean",
         )
         vision_summary = pool_hidden_state(
             vision_state,
-            self._normalize_mask(
-                vision_attention_mask,
-                batch_size,
-                vision_state.size(1),
-                vision_state.device,
+            (
+                None
+                if vision_attention_mask is None
+                else self._normalize_mask(
+                    vision_attention_mask,
+                    batch_size,
+                    vision_state.size(1),
+                    vision_state.device,
+                )
             ),
             pooling="mean",
         )

@@ -67,7 +67,10 @@ class FakeQuantizer(nn.Module):
             else:
                 bits = 4 if self.config.mode == "int4" else 8
                 quantized = self._fake_symmetric_integer(tensor, bits)
-        return tensor + (quantized - tensor).detach()
+            # The STE residual is a constant for autograd; computing it under
+            # ``no_grad`` keeps a useless ``sub`` node out of the graph.
+            delta = quantized - tensor
+        return tensor + delta
 
     def _reduction_dims(self, tensor: torch.Tensor) -> tuple[int, ...]:
         if not self.config.per_channel:
@@ -81,11 +84,20 @@ class FakeQuantizer(nn.Module):
         qmax: int = 2 ** (bits - 1) - 1
         reduce_dims = self._reduction_dims(tensor)
         if reduce_dims:
-            max_abs = tensor.detach().abs().amax(dim=reduce_dims, keepdim=True)
+            # The inf-norm is exactly ``abs().amax()`` but reduces in a
+            # single pass without materializing the absolute values.
+            max_abs = torch.linalg.vector_norm(
+                tensor, ord=torch.inf, dim=reduce_dims, keepdim=True
+            )
         else:
             max_abs = tensor.detach().abs()
-        scale = (max_abs / qmax).clamp_min(self.config.eps)
-        return (tensor / scale).round().clamp(-qmax, qmax) * scale
+        # Both operands are fresh temporaries, so the in-place chain avoids
+        # extra allocations without touching the caller's tensor.
+        scale = max_abs.div_(qmax).clamp_min_(self.config.eps)
+        quantized = tensor / scale
+        # ``Tensor.round_`` is typed as returning ``Any`` in the stubs.
+        result: torch.Tensor = quantized.round_().clamp_(-qmax, qmax).mul_(scale)
+        return result
 
     @staticmethod
     def _fake_fp8_e4m3(tensor: torch.Tensor) -> torch.Tensor:
@@ -98,11 +110,15 @@ class FakeQuantizer(nn.Module):
         max_finite = 448.0
         clamped = tensor.clamp(-max_finite, max_finite)
         magnitude = clamped.abs()
-        safe = magnitude.clamp_min(torch.finfo(clamped.dtype).tiny)
-        exponent = torch.floor(torch.log2(safe)).clamp(-6, 8)
-        step = torch.pow(torch.full_like(exponent, 2.0), exponent - 3)
-        rounded = (clamped / step).round() * step
-        return torch.where(magnitude == 0, torch.zeros_like(rounded), rounded)
+        safe = magnitude.clamp_min_(torch.finfo(clamped.dtype).tiny)
+        exponent = torch.floor(torch.log2(safe)).clamp_(-6, 8)
+        # ``exp2`` is the same power-of-two step as ``pow(2, e - 3)`` but is
+        # a single elementwise kernel and much cheaper than generic ``pow``.
+        step = torch.exp2(exponent.sub_(3))
+        rounded = (clamped / step).round_().mul_(step)
+        # Zero inputs round to exactly zero on their own (0 / step == 0), so
+        # no explicit ``where`` masking is needed.
+        return rounded
 
     def extra_repr(self) -> str:
         """Show the quantizer mode and channel configuration in ``repr``."""

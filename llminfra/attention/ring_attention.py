@@ -70,7 +70,13 @@ def ring_attention(
         )
         k_start = 0
         for k_chunk, v_chunk in zip(k_chunks, v_chunks, strict=True):
-            scores = torch.einsum("bhid,bhjd->bhij", q_chunk, k_chunk) * scale
+            if causal and k_start > q_start + q_chunk.size(2) - 1 + (kv_len - q_len):
+                # Every key in this chunk is in the future of every query in
+                # the q chunk: the whole score block would be masked to -inf
+                # and contribute exactly zero, so skip it. Later chunks start
+                # even further ahead, so stop the inner loop entirely.
+                break
+            scores = torch.matmul(q_chunk, k_chunk.transpose(-1, -2)) * scale
             if causal:
                 q_pos = torch.arange(
                     q_start, q_start + q_chunk.size(2), device=q.device
@@ -88,11 +94,13 @@ def ring_attention(
                 torch.zeros_like(block_max),
             )
             new_max = torch.maximum(row_max, finite_block_max)
-            probabilities = torch.where(
-                torch.isfinite(block_max),
-                torch.exp(scores - new_max),
-                torch.zeros_like(scores),
+            # Guard only the (b, h, q, 1) max against -inf instead of the full
+            # score tile: masked entries are -inf, so exp() already yields the
+            # exact zeros the elementwise ``where`` used to produce.
+            safe_new_max = torch.where(
+                torch.isfinite(new_max), new_max, torch.zeros_like(new_max)
             )
+            probabilities = torch.exp(scores - safe_new_max)
             old_scale = torch.exp(row_max - new_max)
             normalizer = old_scale * normalizer + probabilities.sum(
                 dim=-1, keepdim=True
@@ -157,7 +165,7 @@ def distributed_ring_attention(
     scale = 1.0 / math.sqrt(head_dim)
 
     for step in range(world_size):
-        scores = torch.einsum("bhid,bhjd->bhij", q, current_k) * scale
+        scores = torch.matmul(q, current_k.transpose(-1, -2)) * scale
         if causal:
             k_positions = source_rank * local_seq + torch.arange(
                 local_seq, device=q.device
@@ -171,11 +179,12 @@ def distributed_ring_attention(
             torch.isfinite(block_max), block_max, torch.zeros_like(block_max)
         )
         new_max = torch.maximum(row_max, finite_block_max)
-        probabilities = torch.where(
-            torch.isfinite(block_max),
-            torch.exp(scores - new_max),
-            torch.zeros_like(scores),
+        # Guard only the (b, h, q, 1) max against -inf; masked score entries
+        # are -inf, so exp() already produces exact zeros for them.
+        safe_new_max = torch.where(
+            torch.isfinite(new_max), new_max, torch.zeros_like(new_max)
         )
+        probabilities = torch.exp(scores - safe_new_max)
         old_scale = torch.exp(row_max - new_max)
         normalizer = old_scale * normalizer + probabilities.sum(dim=-1, keepdim=True)
         output = old_scale * output + probabilities @ current_v

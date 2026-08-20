@@ -173,15 +173,18 @@ class BaseAttention(nn.Module, ABC):
             attention_mask: Optional attention mask
 
         Returns:
-            Normalized attention weights. Rows whose keys are all masked are
-            defined to be all-zero (softmax over all ``-inf`` would be NaN).
+            Normalized attention weights. When ``attention_mask`` is given,
+            rows whose keys are all masked are defined to be all-zero
+            (softmax over all ``-inf`` would be NaN).
 
         """
         attention_scores = self.apply_attention_mask(attention_scores, attention_mask)
         attention_weights: torch.Tensor = torch.softmax(attention_scores, dim=-1)
-        # Fully masked rows produce NaN in the softmax; define their weights
-        # (and therefore their output) as zero instead.
-        attention_weights = torch.nan_to_num(attention_weights, nan=0.0)
+        if attention_mask is not None:
+            # Fully masked rows produce NaN in the softmax; define their
+            # weights (and therefore their output) as zero instead. Without a
+            # mask no row can be fully masked, so skip the extra full pass.
+            attention_weights = torch.nan_to_num(attention_weights, nan=0.0)
         attention_weights = self.dropout(attention_weights)
         return attention_weights
 

@@ -135,6 +135,9 @@ class LinearAttention(BaseAttention):
         key_state = query.new_zeros(batch_size, self.num_heads, self.feature_dim)
         out_parts: list[torch.Tensor] = []
         norm_parts: list[torch.Tensor] = []
+        # Causal intra-chunk masks are identical for equal-length chunks;
+        # build each distinct one only once per forward pass.
+        future_masks: dict[int, torch.Tensor] = {}
 
         for start in range(0, seq_len, self.chunk_size):
             stop = min(start + self.chunk_size, seq_len)
@@ -143,27 +146,28 @@ class LinearAttention(BaseAttention):
             v_chunk = value[:, :, start:stop]
 
             # Intra-chunk: causally masked phi(q) phi(k)^T applied to v.
-            scores = torch.einsum("bhsf,bhtf->bhst", q_chunk, k_chunk)
-            future = torch.triu(
-                torch.ones(
-                    stop - start,
-                    stop - start,
-                    dtype=torch.bool,
-                    device=query.device,
-                ),
-                diagonal=1,
-            )
+            scores = torch.matmul(q_chunk, k_chunk.transpose(-1, -2))
+            length = stop - start
+            future = future_masks.get(length)
+            if future is None:
+                future = torch.triu(
+                    torch.ones(length, length, dtype=torch.bool, device=query.device),
+                    diagonal=1,
+                )
+                future_masks[length] = future
             scores = scores.masked_fill(future, 0.0)
-            local = torch.einsum("bhst,bhtd->bhsd", scores, v_chunk)
+            local = torch.matmul(scores, v_chunk)
             # Inter-chunk: attend to the running state of previous chunks.
-            history = torch.einsum("bhsf,bhfd->bhsd", q_chunk, state)
+            history = torch.matmul(q_chunk, state)
             out_parts.append(local + history)
 
-            local_norm = torch.einsum("bhsf,bhsf->bhs", q_chunk, k_chunk.cumsum(dim=2))
-            history_norm = torch.einsum("bhsf,bhf->bhs", q_chunk, key_state)
+            # Row sums of the causally masked scores are exactly
+            # sum_{t<=s} phi(q_s)·phi(k_t), so no cumsum is needed.
+            local_norm = scores.sum(dim=-1)
+            history_norm = torch.matmul(q_chunk, key_state.unsqueeze(-1)).squeeze(-1)
             norm_parts.append(local_norm + history_norm)
 
-            state = state + torch.einsum("bhsf,bhsd->bhfd", k_chunk, v_chunk)
+            state = state + torch.matmul(k_chunk.transpose(-1, -2), v_chunk)
             key_state = key_state + k_chunk.sum(dim=2)
 
         return torch.cat(out_parts, dim=2), torch.cat(norm_parts, dim=2)

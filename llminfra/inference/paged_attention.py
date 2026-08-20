@@ -13,6 +13,44 @@ from __future__ import annotations
 import torch
 
 
+def _gather_rows(
+    cache: torch.Tensor, block_table: list[int], num_tokens: int
+) -> torch.Tensor:
+    """Collect the first ``num_tokens`` cached rows as one dense tensor.
+
+    Gathers whole physical blocks in one advanced-indexing op and truncates
+    the final partial block; cheaper than per-block slicing + ``torch.cat``
+    once more than a few blocks are involved.
+    """
+    block_ids = torch.as_tensor(block_table, dtype=torch.long, device=cache.device)
+    return cache[block_ids].view(-1, cache.size(2), cache.size(3))[:num_tokens]
+
+
+def _slot_indices(
+    block_table: list[int] | torch.Tensor,
+    start: int,
+    count: int,
+    block_size: int,
+    device: torch.device,
+) -> torch.Tensor:
+    """Flat cache row indices for token positions ``[start, start + count)``.
+
+    Position ``p`` lives in block ``block_table[p // block_size]`` at slot
+    ``p % block_size``; flattening the cache to
+    ``(num_blocks * block_size, ...)`` makes the write/gather a single op.
+    """
+    positions = torch.arange(start, start + count, device=device)
+    # Only the blocks spanned by [start, start + count) are converted, so
+    # single-token decode appends stay O(1) in the block-table length.
+    first_block = start // block_size
+    block_ids = torch.as_tensor(
+        block_table[first_block:], dtype=torch.long, device=device
+    )
+    return block_ids[positions // block_size - first_block] * block_size + (
+        positions % block_size
+    )
+
+
 class PagedKVBlockAllocator:
     """Simple allocator for fixed-size physical KV blocks."""
 
@@ -114,25 +152,49 @@ class PagedAttentionCache:
 
         block_table = self.block_tables.setdefault(seq_id, [])
         num_tokens = self.num_tokens.setdefault(seq_id, 0)
+        num_new = key.size(0)
+        if num_new == 0:
+            return
 
-        for token_idx in range(key.size(0)):
-            slot_in_block = num_tokens % self.block_size
-            if slot_in_block == 0:
-                block_table.append(self.allocator.allocate())
-            elif self.allocator.reference_count(block_table[-1]) > 1:
-                # A cloned sequence shares its prefix blocks. Appending into
-                # a partial shared tail first creates a private copy.
-                shared_block = block_table[-1]
-                private_block = self.allocator.allocate()
-                self.key_cache[private_block].copy_(self.key_cache[shared_block])
-                self.value_cache[private_block].copy_(self.value_cache[shared_block])
-                block_table[-1] = private_block
-                self.allocator.free(shared_block)
-            physical_block = block_table[-1]
-            self.key_cache[physical_block, slot_in_block] = key[token_idx]
-            self.value_cache[physical_block, slot_in_block] = value[token_idx]
-            num_tokens += 1
-            self.num_tokens[seq_id] = num_tokens
+        # Copy-on-write is resolved once per call: a cloned sequence shares
+        # its prefix blocks, so appending into a partial shared tail first
+        # creates a private copy. Blocks allocated below are always private.
+        if (
+            block_table
+            and num_tokens % self.block_size != 0
+            and self.allocator.reference_count(block_table[-1]) > 1
+        ):
+            shared_block = block_table[-1]
+            private_block = self.allocator.allocate()
+            self.key_cache[private_block].copy_(self.key_cache[shared_block])
+            self.value_cache[private_block].copy_(self.value_cache[shared_block])
+            block_table[-1] = private_block
+            self.allocator.free(shared_block)
+
+        # Allocate whole blocks up front instead of once per token.
+        needed_blocks = (num_tokens + num_new + self.block_size - 1) // self.block_size
+        while len(block_table) < needed_blocks:
+            block_table.append(self.allocator.allocate())
+
+        slot_in_block = num_tokens % self.block_size
+        first_block = num_tokens // self.block_size
+        last_block = (num_tokens + num_new - 1) // self.block_size
+        if first_block == last_block:
+            # The whole chunk lands in one block (e.g. token-at-a-time
+            # decode): a plain slice write avoids index-tensor overhead.
+            block_id = block_table[first_block]
+            self.key_cache[block_id, slot_in_block : slot_in_block + num_new] = key
+            self.value_cache[block_id, slot_in_block : slot_in_block + num_new] = value
+        else:
+            # Scatter the chunk in one gather-style write: map each new
+            # token position to a flat (block * block_size + slot) row index.
+            slots = _slot_indices(
+                block_table, num_tokens, num_new, self.block_size, self.key_cache.device
+            )
+            flat_shape = (-1, self.num_heads, self.head_dim)
+            self.key_cache.view(flat_shape)[slots] = key
+            self.value_cache.view(flat_shape)[slots] = value
+        self.num_tokens[seq_id] = num_tokens + num_new
 
     def get(self, seq_id: int) -> tuple[torch.Tensor, torch.Tensor]:
         """Gather the cached K/V rows for ``seq_id`` as dense tensors."""
@@ -146,19 +208,9 @@ class PagedAttentionCache:
                 self.key_cache.new_zeros(empty_shape),
                 self.value_cache.new_zeros(empty_shape),
             )
-        rows: list[tuple[torch.Tensor, torch.Tensor]] = []
-        remaining = num_tokens
-        for block_id in block_table:
-            count = min(remaining, self.block_size)
-            rows.append(
-                (
-                    self.key_cache[block_id, :count],
-                    self.value_cache[block_id, :count],
-                )
-            )
-            remaining -= count
-        keys = torch.cat([row[0] for row in rows], dim=0)
-        values = torch.cat([row[1] for row in rows], dim=0)
+        # One batched block gather replaces the per-block slice + cat loop.
+        keys = _gather_rows(self.key_cache, block_table, num_tokens)
+        values = _gather_rows(self.value_cache, block_table, num_tokens)
         return keys, values
 
     def clone_sequence(self, source_seq_id: int, new_seq_id: int) -> None:
@@ -213,30 +265,22 @@ def paged_attention(
             (query.size(0), value_cache.size(2), value_cache.size(3))
         )
 
-    rows: list[torch.Tensor] = []
-    remaining = num_tokens
-    for block_id in block_table:
-        count = min(remaining, block_size)
-        rows.append(key_cache[block_id, :count])
-        remaining -= count
-    key = torch.cat(rows, dim=0)
-
-    rows = []
-    remaining = num_tokens
-    for block_id in block_table:
-        count = min(remaining, block_size)
-        rows.append(value_cache[block_id, :count])
-        remaining -= count
-    value = torch.cat(rows, dim=0)
+    # Gather K/V once via whole-block indexing instead of per-block slice+cat.
+    key = _gather_rows(key_cache, block_table, num_tokens)
+    value = _gather_rows(value_cache, block_table, num_tokens)
 
     scale = 1.0 / (query.size(-1) ** 0.5)
-    scores = torch.einsum("qhd,khd->hqk", query.float(), key.float()) * scale
+    # Heads-first matmul is faster than einsum for these 3D layouts.
+    scores = (
+        torch.matmul(query.float().transpose(0, 1), key.float().permute(1, 2, 0))
+        * scale
+    )
     if causal:
         q_pos = torch.arange(query.size(0), device=query.device)
         k_pos = torch.arange(num_tokens, device=query.device)
         offset = num_tokens - query.size(0)
-        scores = scores.masked_fill(
+        scores.masked_fill_(
             k_pos[None, None, :] > (q_pos[None, :, None] + offset), float("-inf")
         )
     weights = torch.softmax(scores, dim=-1).to(value.dtype)
-    return torch.einsum("hqk,khd->qhd", weights, value)
+    return torch.matmul(weights, value.permute(1, 0, 2)).transpose(0, 1)

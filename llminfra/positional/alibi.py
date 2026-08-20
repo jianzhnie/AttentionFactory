@@ -34,6 +34,27 @@ class ALiBiBias(BasePositionalEncoding):
             for head in range(self.num_heads)
         ]
         self.register_buffer("slopes", torch.tensor(slopes), persistent=False)
+        # Bias depends only on (seq_len, device), so it is memoized within an
+        # element budget; larger grids fall back to on-the-fly computation.
+        self._bias_cache: dict[tuple[int, str], torch.Tensor] = {}
+
+    def _build_bias(self, seq_len: int, device: torch.device) -> torch.Tensor:
+        """Build the ``(heads, seq_len, seq_len)`` ALiBi bias tensor."""
+        slopes = self.slopes
+        assert isinstance(slopes, torch.Tensor)
+        q_pos = torch.arange(seq_len, device=device).view(-1, 1)
+        k_pos = torch.arange(seq_len, device=device).view(1, -1)
+        if self.causal:
+            # For k <= q, slope * (k - q) equals -slope * |q - k| exactly,
+            # and future entries are overwritten with -inf below, so the
+            # abs() pass of the symmetric formula can be skipped here.
+            bias = slopes[:, None, None] * (k_pos - q_pos)
+            future = q_pos < k_pos
+            bias = bias.masked_fill(future[None], float("-inf"))
+        else:
+            distance = q_pos - k_pos
+            bias = -slopes[:, None, None] * distance.abs()
+        return bias
 
     def forward(self, x: torch.Tensor | int | None = None) -> torch.Tensor:
         """Return ALiBi bias for the sequence length of ``x`` if provided."""
@@ -50,11 +71,14 @@ class ALiBiBias(BasePositionalEncoding):
         slopes = self.slopes
         assert isinstance(slopes, torch.Tensor)
         device = slopes.device
-        q_pos = torch.arange(seq_len, device=device).view(-1, 1)
-        k_pos = torch.arange(seq_len, device=device).view(1, -1)
-        distance = q_pos - k_pos
-        bias = -slopes[:, None, None] * distance.abs().unsqueeze(0)
-        if self.causal:
-            future = q_pos < k_pos
-            bias = bias.masked_fill(future[None], float("-inf"))
+        key = (seq_len, str(device))
+        bias = self._bias_cache.get(key)
+        if bias is None:
+            bias = self._build_bias(seq_len, device)
+            # Cap cached elements (~32 MB of float32); a few entries cover
+            # per-layer reuse at one sequence length.
+            if bias.numel() <= 1 << 23:
+                if len(self._bias_cache) >= 8:
+                    self._bias_cache.clear()
+                self._bias_cache[key] = bias
         return bias.unsqueeze(0)

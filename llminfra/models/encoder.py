@@ -149,7 +149,9 @@ class EncoderOnlyModel(nn.Module):
                 f"seq_len {seq_len} exceeds max_seq_len {self.max_seq_len}"
             )
         if attention_mask is None:
-            mask = torch.ones_like(input_ids, dtype=torch.bool)
+            # All positions are valid: skip the padding-mask machinery
+            # (all-ones masks multiply to identity and mask nothing).
+            mask = None
         else:
             if attention_mask.shape != input_ids.shape:
                 raise ValueError("attention_mask must have the same shape as input_ids")
@@ -184,13 +186,19 @@ class EncoderOnlyModel(nn.Module):
             hidden_state = self.positional(hidden_state)
         hidden_state = self.embedding_dropout(hidden_state)
 
-        query_mask = mask[:, :, None].to(hidden_state.dtype)
-        hidden_state = hidden_state * query_mask
-        key_mask = mask[:, None, None, :]
+        query_mask: torch.Tensor | None = None
+        key_mask: torch.Tensor | None = None
+        if mask is not None:
+            query_mask = mask[:, :, None].to(hidden_state.dtype)
+            hidden_state = hidden_state * query_mask
+            key_mask = mask[:, None, None, :]
         for block in self.blocks:
             hidden_state = block(hidden_state, attention_mask=key_mask)
+            if query_mask is not None:
+                hidden_state = hidden_state * query_mask
+        hidden_state = self.norm(hidden_state)
+        if query_mask is not None:
             hidden_state = hidden_state * query_mask
-        hidden_state = self.norm(hidden_state) * query_mask
 
         pooled = pool_hidden_state(hidden_state, mask, pooling="first")
         head_output = self._run_head(hidden_state, mask)
@@ -206,7 +214,7 @@ class EncoderOnlyModel(nn.Module):
     def _run_head(
         self,
         hidden_state: torch.Tensor,
-        attention_mask: torch.Tensor,
+        attention_mask: torch.Tensor | None,
     ) -> torch.Tensor | None:
         if self.output_head is None:
             return None

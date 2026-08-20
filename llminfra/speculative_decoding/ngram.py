@@ -32,7 +32,10 @@ class NGramSpeculator(nn.Module):
         """Generate and verify one N-Gram speculative block."""
         if input_ids.dim() != 2 or input_ids.size(1) < self.ngram_size:
             raise ValueError("input_ids must be 2-D and contain ngram_size tokens")
-        rows = []
+        # Drafts are padded to num_speculative_tokens for every row, so all
+        # rows can be verified by a single batched target-model call instead
+        # of one call per row.
+        drafts = []
         for row in input_ids:
             sequence = row.tolist()
             key = sequence[-self.ngram_size :]
@@ -49,19 +52,27 @@ class NGramSpeculator(nn.Module):
             else:
                 continuation = sequence[match + self.ngram_size :]
             continuation = continuation[: self.num_speculative_tokens]
-            draft = row.new_tensor(
+            drafts.append(
                 continuation
                 + [continuation[-1]] * (self.num_speculative_tokens - len(continuation))
             )
-            logits = self.target_model(torch.cat((row, draft)).unsqueeze(0))
-            verified = torch.argmax(logits[:, row.numel() - 1 : -1], dim=-1)[0]
+        draft = input_ids.new_tensor(drafts)
+        prompt_length = input_ids.size(1)
+        logits = self.target_model(torch.cat((input_ids, draft), dim=-1))
+        verified = torch.argmax(logits[:, prompt_length - 1 : -1], dim=-1)
+        bonus_tokens = torch.argmax(logits[:, -1], dim=-1)
+        rows = []
+        for row_index, row in enumerate(input_ids):
             accepted = []
-            for index, token in enumerate(verified):
+            for index, token in enumerate(verified[row_index]):
                 accepted.append(token.view(1))
-                if token != draft[index]:
+                if token != draft[row_index, index]:
                     break
-            if self.append_bonus_token and len(accepted) == self.num_speculative_tokens:
-                accepted.append(torch.argmax(logits[:, -1], dim=-1))
+            if (
+                self.append_bonus_token
+                and len(accepted) == self.num_speculative_tokens
+            ):
+                accepted.append(bonus_tokens[row_index].view(1))
             rows.append(torch.cat((row, *accepted)))
         output = input_ids.new_full(
             (len(rows), max(row.numel() for row in rows)), self.pad_token_id

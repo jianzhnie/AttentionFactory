@@ -25,6 +25,27 @@ from ..attention.multi_head_attention import MultiHeadAttention
 from ..layers.feed_forward import SwiGLUFFN
 from ..layers.normalization import RMSNorm
 
+_CAUSAL_MASK_CACHE: dict[tuple[int, torch.device], torch.Tensor] = {}
+
+
+def cached_causal_mask(seq_len: int, device: torch.device) -> torch.Tensor:
+    """Return a shared lower-triangular keep mask of shape ``(1, 1, seq, seq)``.
+
+    Building the ``(seq, seq)`` triangle costs O(seq^2) host work on every
+    forward; caching it per ``(seq_len, device)`` makes mask construction
+    O(1). The cached tensor is treated as read-only: callers combine it with
+    padding or prefix masks through logical ops that allocate fresh tensors,
+    and attention only reads it.
+    """
+    key = (seq_len, device)
+    mask = _CAUSAL_MASK_CACHE.get(key)
+    if mask is None:
+        mask = torch.tril(
+            torch.ones(seq_len, seq_len, dtype=torch.bool, device=device)
+        )[None, None]
+        _CAUSAL_MASK_CACHE[key] = mask
+    return mask
+
 
 class CrossAttention(BaseAttention):
     """Multi-head cross-attention where queries and keys/values differ.
@@ -376,9 +397,7 @@ class EncoderDecoderModel(nn.Module):
         encoder_output = self.encoder_norm(encoder_output)
 
         # Causal mask over the target sequence combined with target padding.
-        causal = torch.tril(
-            torch.ones(tgt_len, tgt_len, dtype=torch.bool, device=tgt_ids.device)
-        )
+        causal = cached_causal_mask(tgt_len, tgt_ids.device)
         if tgt_mask is not None:
             if tgt_mask.shape != (batch_size, tgt_len):
                 raise ValueError("tgt_mask must have shape (batch, tgt_len)")

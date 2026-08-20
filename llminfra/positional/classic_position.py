@@ -73,15 +73,26 @@ class SinusoidalPositionEmbedding(BasePositionalEncoding):
         position_ids: torch.Tensor | None = None,
     ) -> torch.Tensor:
         """Add fixed positional vectors to ``x``."""
-        positions = _resolve_position_ids(
-            x,
-            self.dim,
-            self.max_seq_len,
-            position_ids,
-        )
-        encoding = self.encoding
-        assert isinstance(encoding, torch.Tensor)
-        positional = encoding[positions].to(dtype=x.dtype)
+        if position_ids is None:
+            # Fast path: sequential positions are a row slice of the table,
+            # which broadcasts over batch and skips the gather entirely.
+            if x.dim() < 2 or x.size(-1) != self.dim:
+                raise ValueError(f"x must end in (seq_len, {self.dim})")
+            if x.size(-2) > self.max_seq_len:
+                raise ValueError("position_ids contain an out-of-range position")
+            encoding = self.encoding
+            assert isinstance(encoding, torch.Tensor)
+            positional = encoding[: x.size(-2)].to(dtype=x.dtype)
+        else:
+            positions = _resolve_position_ids(
+                x,
+                self.dim,
+                self.max_seq_len,
+                position_ids,
+            )
+            encoding = self.encoding
+            assert isinstance(encoding, torch.Tensor)
+            positional = encoding[positions].to(dtype=x.dtype)
         output: torch.Tensor = self.dropout(x + positional)
         return output
 
@@ -112,13 +123,24 @@ class LearnedAbsolutePositionEmbedding(BasePositionalEncoding):
         position_ids: torch.Tensor | None = None,
     ) -> torch.Tensor:
         """Add learned positional vectors to ``x``."""
+        if position_ids is None:
+            # Fast path: embedding(arange(n)) is exactly weight[:n], which
+            # broadcasts over batch and skips the gather entirely.
+            if x.dim() < 2 or x.size(-1) != self.dim:
+                raise ValueError(f"x must end in (seq_len, {self.dim})")
+            if x.size(-2) > self.max_seq_len:
+                raise ValueError("position_ids contain an out-of-range position")
+            output: torch.Tensor = self.dropout(
+                x + self.embedding.weight[: x.size(-2)]
+            )
+            return output
         positions = _resolve_position_ids(
             x,
             self.dim,
             self.max_seq_len,
             position_ids,
         )
-        output: torch.Tensor = self.dropout(x + self.embedding(positions))
+        output = self.dropout(x + self.embedding(positions))
         return output
 
 
@@ -162,6 +184,10 @@ class T5RelativePositionBias(BasePositionalEncoding):
         self.max_seq_len = int(max_seq_len)
         self.relative_attention_bias = nn.Embedding(num_buckets, num_heads)
         nn.init.normal_(self.relative_attention_bias.weight, mean=0.0, std=0.02)
+        # Buckets depend only on (query, key) lengths, so they are memoized
+        # per (lengths, device); embedding values are not cached because the
+        # weights may update during training.
+        self._bucket_cache: dict[tuple[int, int, str], torch.Tensor] = {}
 
     def forward(
         self,
@@ -171,10 +197,19 @@ class T5RelativePositionBias(BasePositionalEncoding):
         """Return bias shaped ``(1, heads, query_length, key_length)``."""
         query_length, resolved_key_length = self._resolve_lengths(x, key_length)
         device = self.relative_attention_bias.weight.device
-        context = torch.arange(query_length, device=device)[:, None]
-        memory = torch.arange(resolved_key_length, device=device)[None, :]
-        relative_position = memory - context
-        buckets = self._relative_position_bucket(relative_position)
+        key = (query_length, resolved_key_length, str(device))
+        buckets = self._bucket_cache.get(key)
+        if buckets is None:
+            context = torch.arange(query_length, device=device)[:, None]
+            memory = torch.arange(resolved_key_length, device=device)[None, :]
+            relative_position = memory - context
+            buckets = self._relative_position_bucket(relative_position)
+            # Cap cached elements (~32 MB of int64) so huge grids still work
+            # without unbounded memory; a few entries cover layer reuse.
+            if buckets.numel() <= 1 << 22:
+                if len(self._bucket_cache) >= 16:
+                    self._bucket_cache.clear()
+                self._bucket_cache[key] = buckets
         values: torch.Tensor = self.relative_attention_bias(buckets)
         return values.permute(2, 0, 1).unsqueeze(0)
 

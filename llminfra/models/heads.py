@@ -37,18 +37,19 @@ def pool_hidden_state(
         raise ValueError("pooling must be 'first', 'last', or 'mean'")
 
     if attention_mask is None:
-        mask = torch.ones(
-            batch_size,
-            seq_len,
-            dtype=torch.bool,
-            device=hidden_state.device,
-        )
-    else:
-        if attention_mask.shape != (batch_size, seq_len):
-            raise ValueError("attention_mask must have shape (batch, seq_len)")
-        mask = attention_mask.to(device=hidden_state.device, dtype=torch.bool)
-        if not mask.any(dim=1).all():
-            raise ValueError("every batch row must contain at least one valid token")
+        # No padding: pooling reduces to plain indexing / averaging and the
+        # arange/where bookkeeping below can be skipped entirely.
+        if pooling == "first":
+            return hidden_state[:, 0]
+        if pooling == "last":
+            return hidden_state[:, -1]
+        return hidden_state.mean(dim=1)
+
+    if attention_mask.shape != (batch_size, seq_len):
+        raise ValueError("attention_mask must have shape (batch, seq_len)")
+    mask = attention_mask.to(device=hidden_state.device, dtype=torch.bool)
+    if not mask.any(dim=1).all():
+        raise ValueError("every batch row must contain at least one valid token")
 
     if pooling == "mean":
         weights = mask.to(hidden_state.dtype).unsqueeze(-1)

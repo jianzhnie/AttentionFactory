@@ -16,6 +16,7 @@ from ..module_registry import build_attention, build_positional_encoding
 from ..moe import DeepSeekMoE
 from ..positional.multimodal_rope import MultiModalRotaryPositionEmbedding
 from ..speculative_decoding.mtp import MultiTokenPredictionHead, mtp_loss
+from .encoder_decoder import cached_causal_mask
 
 
 @dataclass
@@ -310,9 +311,17 @@ class CausalLMModel(nn.Module):
                 raise ValueError("labels must have shape (batch, seq_len)")
             if seq_len < 2:
                 raise ValueError("labels require a sequence length of at least 2")
+            # Score position i against labels[i + 1]. Slicing logits[:, :-1]
+            # would force a full (batch, seq, vocab) copy because the slice
+            # is not viewable; shifting the (tiny) labels instead and
+            # ignoring each row's final slot keeps logits a view. The set of
+            # scored positions is unchanged, so the mean loss is identical.
+            shifted_labels = torch.cat(
+                [labels[:, 1:], labels.new_full((batch_size, 1), -100)], dim=1
+            )
             loss = F.cross_entropy(
-                logits[:, :-1].reshape(-1, self.vocab_size),
-                labels[:, 1:].reshape(-1),
+                logits.reshape(-1, self.vocab_size),
+                shifted_labels.reshape(-1),
             )
             if self.mtp_head is not None and self.mtp_loss_weight:
                 loss = loss + self.mtp_loss_weight * mtp_loss(
@@ -352,9 +361,9 @@ class CausalLMModel(nn.Module):
         while later key positions follow the causal lower triangle. The
         result is combined with ``attention_mask`` (1 = keep) via logical AND.
         """
-        causal = torch.tril(
-            torch.ones(seq_len, seq_len, dtype=torch.bool, device=device)
-        ).expand(batch_size, 1, seq_len, seq_len)
+        causal = cached_causal_mask(seq_len, device).expand(
+            batch_size, 1, seq_len, seq_len
+        )
         if prefix_len is not None:
             if isinstance(prefix_len, int):
                 prefix_lengths = torch.full(

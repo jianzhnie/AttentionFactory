@@ -104,6 +104,9 @@ class LightningAttention(BaseAttention):
         )
         outputs: list[torch.Tensor] = []
         scale = 1.0 / math.sqrt(self.feature_dim)
+        # The causal intra-block mask is identical for equal-length blocks;
+        # build each distinct one only once per forward pass.
+        future_masks: dict[int, torch.Tensor] = {}
 
         for start in range(0, seq_len, self.block_size):
             stop = min(start + self.block_size, seq_len)
@@ -113,18 +116,19 @@ class LightningAttention(BaseAttention):
             raw_k_block = raw_key[:, :, start:stop]
             v_block = value[:, :, start:stop]
 
-            scores = torch.einsum("bhid,bhjd->bhij", raw_q_block, raw_k_block) * scale
+            scores = torch.matmul(raw_q_block, raw_k_block.transpose(-1, -2)) * scale
             if self.causal:
                 # Within a block, query row i may only attend to keys j <= i.
-                future = torch.triu(
-                    torch.ones(
-                        stop - start,
-                        stop - start,
-                        dtype=torch.bool,
-                        device=hidden_state.device,
-                    ),
-                    diagonal=1,
-                )
+                length = stop - start
+                future = future_masks.get(length)
+                if future is None:
+                    future = torch.triu(
+                        torch.ones(
+                            length, length, dtype=torch.bool, device=hidden_state.device
+                        ),
+                        diagonal=1,
+                    )
+                    future_masks[length] = future
                 scores = scores.masked_fill(future, float("-inf"))
             intra = torch.softmax(scores, dim=-1) @ v_block
             intra = torch.nan_to_num(intra, nan=0.0)
@@ -135,10 +139,10 @@ class LightningAttention(BaseAttention):
             safe_normalizer = torch.where(
                 normalizer >= 0, normalizer.clamp_min(eps), normalizer.clamp_max(-eps)
             )
-            inter = torch.einsum("bhsf,bhfd->bhsd", q_block, state) / safe_normalizer
+            inter = torch.matmul(q_block, state) / safe_normalizer
             outputs.append(intra + inter)
 
-            state = state + torch.einsum("bhsf,bhsd->bhfd", k_block, v_block)
+            state = state + torch.matmul(k_block.transpose(-1, -2), v_block)
             normalizer = normalizer + k_block.sum(dim=(2, 3), keepdim=True)
 
         output: torch.Tensor = torch.cat(outputs, dim=2)

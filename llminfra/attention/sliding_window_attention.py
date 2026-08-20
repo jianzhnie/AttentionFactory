@@ -75,17 +75,16 @@ class SlidingWindowAttention(BaseAttention):
     ) -> torch.Tensor | tuple[torch.Tensor, torch.Tensor]:
         """Run sliding-window attention over ``hidden_state``."""
         validate_attention_inputs(hidden_state, attention_mask, self.num_heads)
-        batch_size, seq_len, _ = hidden_state.size()
+        _batch_size, seq_len, _ = hidden_state.size()
 
         query = self.split_head(self.q_proj(hidden_state))
         key = self._split_kv(self.k_proj(hidden_state))
         value = self._split_kv(self.v_proj(hidden_state))
 
         scores = torch.matmul(query, key.transpose(-1, -2)) * self.scale_factor
+        # Keep the window mask at (1, 1, q, kv): ``masked_fill`` broadcasts
+        # it, so there is no need to materialize a per-batch/per-head copy.
         sliding_mask = self._sliding_mask(seq_len, key.size(-2), scores.device)
-        sliding_mask = sliding_mask.expand(
-            batch_size, self.num_heads, seq_len, key.size(-2)
-        )
         combined_mask = self._combine_with_input_mask(sliding_mask, attention_mask)
 
         attention_weights = self.compute_attention_weights(scores, combined_mask)

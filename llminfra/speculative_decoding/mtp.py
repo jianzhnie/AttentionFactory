@@ -68,7 +68,10 @@ class MTPDecoder(nn.Module):
                 "hidden_state must have shape (batch, seq, hidden_size) "
                 "matching the input_ids batch size"
             )
-        logits = self.mtp_head(hidden_state)
+        # Only the final position feeds the draft heads (see the docstring);
+        # slice before the head so the (batch, seq, vocab) projections shrink
+        # to a single position instead of scaling with the full sequence.
+        logits = self.mtp_head(hidden_state[:, -1:])
         draft = torch.stack(
             [torch.argmax(item[:, -1], dim=-1) for item in logits], dim=-1
         )

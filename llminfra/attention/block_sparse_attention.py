@@ -103,9 +103,6 @@ class BlockSparseAttention(BaseAttention):
             block_indices=block_indices,
             device=scores.device,
         )
-        sparse_mask = sparse_mask.expand(
-            batch_size, self.num_heads, seq_len, key.size(-2)
-        )
         combined_mask = self._combine_with_input_mask(sparse_mask, attention_mask)
 
         attention_weights = self.compute_attention_weights(scores, combined_mask)
@@ -183,7 +180,9 @@ class BlockSparseAttention(BaseAttention):
             index=block_indices.to(device=device),
             value=True,
         )
-        allowed = selected[:, :, q_block[:, None], k_block[None, :]]
+        # Two consecutive small gathers measurably beat one fused 4D
+        # fancy-index lookup when expanding blocks to token granularity.
+        allowed = selected[:, :, q_block][:, :, :, k_block]
         if self.causal:
             offset = kv_len - q_len
             q_pos = torch.arange(q_len, device=device).view(-1, 1)

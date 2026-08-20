@@ -352,17 +352,23 @@ class MixtureOfExperts(nn.Module):
             routing_weights = routing_weights / totals.clamp_min(1e-12)
         output = torch.zeros_like(flat)
 
-        for k in range(self.top_k):
-            token_weights = routing_weights[:, k]
-            token_experts = expert_indices[:, k]
-            for expert_id in range(self.num_experts):
-                mask = token_experts == expert_id
-                if not mask.any():
-                    continue
-                selected = flat[mask]
-                output[mask] += token_weights[mask].unsqueeze(-1) * self.experts[
-                    expert_id
-                ](selected)
+        # Flatten the (token, k) assignments so each expert runs a single GEMM
+        # over all of its tokens instead of top_k smaller masked slices;
+        # index_add_ scatters the weighted outputs back to their tokens.
+        flat_indices = expert_indices.reshape(-1)
+        flat_weights = routing_weights.reshape(-1)
+        token_ids = torch.arange(flat.size(0), device=flat.device).repeat_interleave(
+            self.top_k
+        )
+        for expert_id in range(self.num_experts):
+            hit = flat_indices == expert_id
+            if not hit.any():
+                continue
+            selected = token_ids[hit]
+            expert_output = self.experts[expert_id](flat[selected])
+            output.index_add_(
+                0, selected, flat_weights[hit].unsqueeze(-1) * expert_output
+            )
         return output.view_as(x)
 
     def extra_repr(self) -> str:
@@ -517,15 +523,9 @@ class ExpertParallelMoE(nn.Module):
         """Execute only the experts owned by this rank."""
         output = torch.zeros_like(flat)
         for local_index, expert_id in enumerate(self.local_expert_ids):
-            token_weights = torch.zeros(
-                flat.size(0), device=flat.device, dtype=flat.dtype
-            )
-            for k in range(self.top_k):
-                token_weights += torch.where(
-                    indices[:, k] == expert_id,
-                    weights[:, k],
-                    torch.zeros_like(weights[:, k]),
-                )
+            # Sum this expert's routing weight over the top-k slots in one
+            # vectorized step instead of a per-slot Python loop.
+            token_weights = (weights * (indices == expert_id)).sum(dim=-1)
             mask = token_weights > 0
             if self.capacity_factor is not None and mask.any():
                 capacity = max(
@@ -661,12 +661,11 @@ def load_balance_loss(
     if router_logits.size(0) == 0:
         # mean over an empty token axis would be NaN; no tokens, no loss.
         return router_logits.new_zeros(())
-    counts = torch.zeros(num_experts, device=expert_indices.device, dtype=torch.float32)
-    for k in range(expert_indices.size(-1)):
-        counts += torch.bincount(
-            expert_indices[:, k].flatten(),
-            minlength=num_experts,
-        ).to(counts.dtype)
+    # One bincount over the flattened (token, k) indices replaces the
+    # per-slot Python loop; integer counts are exact either way.
+    counts = torch.bincount(expert_indices.reshape(-1), minlength=num_experts).to(
+        torch.float32
+    )
     fraction = counts / max(1, expert_indices.numel())
     probabilities = torch.softmax(router_logits, dim=-1).mean(dim=0)
     return num_experts * (fraction * probabilities).sum()

@@ -132,17 +132,25 @@ class KimiDeltaAttention(BaseAttention):
             self.feature_dim,
             self.head_dim,
         )
+        # Hoist step-invariant ops out of the recurrence: one batched exp and
+        # broadcast reshape instead of seq_len small ones.
+        decay_exp = decay.exp().unsqueeze(-1)  # (batch, heads, seq, f, 1)
+        beta_u = beta.unsqueeze(-1)  # (batch, heads, seq, 1, 1)
         outputs: list[torch.Tensor] = []
         for step in range(seq_len):
             key_t = key[:, :, step]
             value_t = value[:, :, step]
-            state = state * decay[:, :, step].exp().unsqueeze(-1)
-            prediction = torch.einsum("bhfd,bhf->bhd", state, key_t)
+            state = state * decay_exp[:, :, step]
+            # (b, h, 1, f) @ (b, h, f, d) contracts the feature dim; plain
+            # matmul avoids einsum's per-call equation parsing, which
+            # dominates these tiny steps.
+            prediction = torch.matmul(key_t.unsqueeze(-2), state).squeeze(-2)
             error = value_t - prediction
-            state = state + beta[:, :, step].unsqueeze(-1) * (
-                key_t.unsqueeze(-1) * error.unsqueeze(-2)
+            # addcmul fuses ``state + beta * (k ⊗ error)`` into one kernel.
+            state = torch.addcmul(
+                state, beta_u[:, :, step], key_t.unsqueeze(-1) * error.unsqueeze(-2)
             )
-            output_t = torch.einsum("bhfd,bhf->bhd", state, query[:, :, step])
+            output_t = torch.matmul(query[:, :, step].unsqueeze(-2), state).squeeze(-2)
             outputs.append(output_t)
 
         core_output = torch.stack(outputs, dim=2)

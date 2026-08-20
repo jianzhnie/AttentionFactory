@@ -16,7 +16,9 @@ import torch
 
 from .base_position import BasePositionalEncoding
 from .rotary import (
+    _MAX_CACHED_TABLE_ELEMENTS,
     RotaryPositionEmbedding,
+    _cos_sin_with_cache,
     _default_inv_freq,
     apply_rotary_pos_emb,
 )
@@ -171,8 +173,8 @@ class YaRNScaledRotaryEmbedding(BasePositionalEncoding):
         ramp = _yarn_linear_ramp_mask(low, high, self.dim // 2)
         self.register_buffer("ramp", ramp, persistent=False)
 
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        """Apply YaRN-scaled RoPE to ``x``."""
+    def _build_cos_sin(self, seq_len: int) -> tuple[torch.Tensor, torch.Tensor]:
+        """Build the float32 cos/sin table with the blended YaRN frequencies."""
         base_inv_freq = self.inv_freq
         ramp = self.ramp
         assert isinstance(base_inv_freq, torch.Tensor)
@@ -180,14 +182,26 @@ class YaRNScaledRotaryEmbedding(BasePositionalEncoding):
         extrapolation = base_inv_freq
         interpolation = base_inv_freq / self.params.factor
         inv_freq = interpolation * (1.0 - ramp) + extrapolation * ramp
-
-        # Compute frequencies in float32 (like the reference kernels) so
+        # The table is built in float32 (like the reference kernels) so
         # half-precision inputs do not lose positional accuracy.
-        seq_len = x.size(-2)
-        positions = torch.arange(seq_len, device=x.device, dtype=torch.float32)
-        freqs = torch.einsum("s,f->sf", positions, inv_freq.to(torch.float32))
-        cos = torch.cos(freqs).to(x.dtype)
-        sin = torch.sin(freqs).to(x.dtype)
+        positions = torch.arange(
+            seq_len, device=base_inv_freq.device, dtype=torch.float32
+        )
+        freqs = torch.outer(positions, inv_freq.to(torch.float32))
+        return torch.cos(freqs), torch.sin(freqs)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        """Apply YaRN-scaled RoPE to ``x``."""
+        # The frequency blend is invariant, so cos/sin come from the shared
+        # lazily-built cache instead of being recomputed on every call.
+        cos, sin = _cos_sin_with_cache(
+            self,
+            x.size(-2),
+            x.dtype,
+            self.max_seq_len,
+            self.dim // 2,
+            self._build_cos_sin,
+        )
         return apply_rotary_pos_emb(x, cos, sin)
 
 
@@ -220,6 +234,42 @@ class DynamicNTKRotaryEmbedding(BasePositionalEncoding):
             _default_inv_freq(self.dim, self.base, dtype),
             persistent=False,
         )
+        # Memo for cos/sin tables of scaled (beyond-original-context) lengths,
+        # keyed by (seq_len, device); bounded and rebuilt after device moves.
+        self._scaled_cache: dict[tuple[int, str], tuple[torch.Tensor, torch.Tensor]] = {}
+
+    def _build_cos_sin(self, seq_len: int) -> tuple[torch.Tensor, torch.Tensor]:
+        """Build the unscaled float32 cos/sin table for short sequences."""
+        base_inv_freq = self.base_inv_freq
+        assert isinstance(base_inv_freq, torch.Tensor)
+        positions = torch.arange(
+            seq_len, device=base_inv_freq.device, dtype=torch.float32
+        )
+        freqs = torch.outer(positions, base_inv_freq.to(torch.float32))
+        return torch.cos(freqs), torch.sin(freqs)
+
+    def _scaled_cos_sin(
+        self, seq_len: int, x: torch.Tensor
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        """Return cos/sin for scaled lengths, memoized per (length, device)."""
+        key = (seq_len, str(x.device))
+        cached = self._scaled_cache.get(key)
+        if cached is not None:
+            return cached[0].to(x.dtype), cached[1].to(x.dtype)
+        inv_freq = self._scaled_inv_freq(seq_len).to(
+            device=x.device, dtype=torch.float32
+        )
+        positions = torch.arange(seq_len, device=x.device, dtype=torch.float32)
+        freqs = torch.outer(positions, inv_freq)
+        cos = torch.cos(freqs)
+        sin = torch.sin(freqs)
+        if seq_len * (self.dim // 2) <= _MAX_CACHED_TABLE_ELEMENTS:
+            # Layers in one forward pass share a length, so a small memo
+            # turns per-layer trig into one computation per length.
+            if len(self._scaled_cache) >= 32:
+                self._scaled_cache.clear()
+            self._scaled_cache[key] = (cos, sin)
+        return cos.to(x.dtype), sin.to(x.dtype)
 
     def _scaled_inv_freq(self, seq_len: int) -> torch.Tensor:
         if seq_len <= self.original_max_position_embeddings:
@@ -233,13 +283,19 @@ class DynamicNTKRotaryEmbedding(BasePositionalEncoding):
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         """Apply dynamic NTK-scaled RoPE to ``x``."""
         seq_len = x.size(-2)
-        inv_freq = self._scaled_inv_freq(seq_len).to(
-            device=x.device, dtype=torch.float32
-        )
-        positions = torch.arange(seq_len, device=x.device, dtype=torch.float32)
-        freqs = torch.einsum("s,f->sf", positions, inv_freq)
-        cos = torch.cos(freqs).to(x.dtype)
-        sin = torch.sin(freqs).to(x.dtype)
+        if seq_len <= self.original_max_position_embeddings:
+            # Unscaled regime: identical to the base table, amortized only
+            # up to the original context so longer rows are never served.
+            cos, sin = _cos_sin_with_cache(
+                self,
+                seq_len,
+                x.dtype,
+                min(self.max_seq_len, self.original_max_position_embeddings),
+                self.dim // 2,
+                self._build_cos_sin,
+            )
+        else:
+            cos, sin = self._scaled_cos_sin(seq_len, x)
         return apply_rotary_pos_emb(x, cos, sin)
 
 
@@ -305,15 +361,10 @@ class PositionInterpolation(RotaryPositionEmbedding):
         super().__init__(dim, base=base, max_seq_len=max_seq_len, dtype=dtype)
         self.original_max_position_embeddings = int(original_max_position_embeddings)
 
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        """Apply interpolated positions to ``x``."""
+    def _positions(self, seq_len: int) -> torch.Tensor:
+        """Return positions rescaled into the original training context."""
         scale = self.original_max_position_embeddings / self.max_seq_len
-        seq_len = x.size(-2)
-        positions = torch.arange(seq_len, device=x.device, dtype=torch.float32) * scale
-        freqs = torch.einsum("s,f->sf", positions, self.inv_freq.to(torch.float32))
-        cos = torch.cos(freqs).to(x.dtype)
-        sin = torch.sin(freqs).to(x.dtype)
-        return apply_rotary_pos_emb(x, cos, sin)
+        return super()._positions(seq_len) * scale
 
     def extra_repr(self) -> str:
         """Append the original training context length to the base repr."""
@@ -379,20 +430,33 @@ class LongRoPEScaledRotaryEmbedding(RotaryPositionEmbedding):
             dtype=dtype,
         )
 
+    def _build_cos_sin(
+        self, seq_len: int, factors: torch.Tensor
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        """Build the float32 cos/sin table for one factor regime."""
+        base_inv_freq = self.inv_freq
+        assert isinstance(base_inv_freq, torch.Tensor)
+        inv_freq = base_inv_freq * factors.to(base_inv_freq.device)
+        positions = torch.arange(
+            seq_len, device=base_inv_freq.device, dtype=torch.float32
+        )
+        freqs = torch.outer(positions, inv_freq.to(torch.float32))
+        return torch.cos(freqs), torch.sin(freqs)
+
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         """Apply LongRoPE with the appropriate frequency factor."""
         seq_len = x.size(-2)
-        factors = (
-            self.long_factor
-            if seq_len > self.original_max_position_embeddings
-            else self.short_factor
-        )
-        base_inv_freq = self.inv_freq
+        is_long = seq_len > self.original_max_position_embeddings
+        factors = self.long_factor if is_long else self.short_factor
         assert isinstance(factors, torch.Tensor)
-        assert isinstance(base_inv_freq, torch.Tensor)
-        inv_freq = base_inv_freq * factors.to(base_inv_freq.device)
-        positions = torch.arange(seq_len, device=x.device, dtype=torch.float32)
-        freqs = torch.einsum("s,f->sf", positions, inv_freq.to(torch.float32))
-        cos = torch.cos(freqs).to(x.dtype)
-        sin = torch.sin(freqs).to(x.dtype)
+        # Each factor regime gets its own cached table, distinguished by slot.
+        cos, sin = _cos_sin_with_cache(
+            self,
+            seq_len,
+            x.dtype,
+            self.max_seq_len,
+            self.dim // 2,
+            lambda length: self._build_cos_sin(length, factors),
+            slot="_long" if is_long else "_short",
+        )
         return apply_rotary_pos_emb(x, cos, sin)

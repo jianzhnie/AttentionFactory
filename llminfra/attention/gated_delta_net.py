@@ -107,6 +107,14 @@ class GatedDeltaNet(BaseAttention):
             device=hidden_state.device,
             dtype=hidden_state.dtype,
         )
+        outputs: list[torch.Tensor] = []
+
+        # Hoist step-invariant tensor ops out of the recurrence: the gate
+        # complements and (for ``normalize``) the per-step scalar gates are
+        # computed once for the whole sequence instead of per step.
+        gate_u = gate.unsqueeze(-1)  # (batch, heads, seq, feature_dim, 1)
+        keep_gate = 1.0 - gate_u
+        gate_scalar = gate.mean(dim=-1) if self.normalize else None
         denominator = torch.zeros(
             batch_size,
             self.num_heads,
@@ -114,23 +122,26 @@ class GatedDeltaNet(BaseAttention):
             device=hidden_state.device,
             dtype=hidden_state.dtype,
         )
-        outputs: list[torch.Tensor] = []
 
         for step in range(seq_len):
-            gate_t = gate[:, :, step]
+            gate_t = gate_u[:, :, step]  # (batch, heads, feature_dim, 1)
             key_t = key[:, :, step]
             value_t = value[:, :, step]
-            query_t = query[:, :, step]
 
-            state = (1.0 - gate_t).unsqueeze(-1) * state
-            state = state + gate_t.unsqueeze(-1) * (
-                key_t.unsqueeze(-1) * value_t.unsqueeze(-2)
+            # addcmul fuses ``keep * state + gate * (k ⊗ v)`` into one kernel.
+            state = torch.addcmul(
+                keep_gate[:, :, step] * state,
+                gate_t,
+                key_t.unsqueeze(-1) * value_t.unsqueeze(-2),
             )
-            gate_scalar = gate_t.mean(dim=-1, keepdim=True)
-            denominator = (1.0 - gate_scalar) * denominator + gate_scalar
-
-            output_t = torch.einsum("bhf,bhfd->bhd", query_t, state)
+            # (batch, heads, 1, f) @ (batch, heads, f, d); cheaper per step
+            # than einsum, whose equation parsing dominates tiny matmuls.
+            output_t = torch.matmul(query[:, :, step].unsqueeze(-2), state).squeeze(-2)
             if self.normalize:
+                # ``gate_scalar`` is always computed when normalize is set.
+                assert gate_scalar is not None
+                scalar_t = gate_scalar[:, :, step].unsqueeze(-1)
+                denominator = (1.0 - scalar_t) * denominator + scalar_t
                 safe_denominator = denominator.clamp_min(
                     torch.finfo(denominator.dtype).eps
                 )

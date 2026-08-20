@@ -122,9 +122,6 @@ class CompressedSparseAttention(BaseAttention):
             block_indices,
             scores.device,
         )
-        sparse_mask = sparse_mask.expand(
-            batch_size, self.num_heads, seq_len, compressed_len
-        )
         if attention_mask is not None:
             # Compress the key mask to block granularity: a block stays
             # visible if any of its source tokens is valid.
