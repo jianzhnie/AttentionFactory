@@ -198,9 +198,7 @@ def test_positional_factory_new_modes():
 
 def test_positional_factory_2d_rejects_extra_kwargs():
     assert isinstance(
-        get_positional_encoding(
-            "2d", dim=8, max_blocks=4, max_positions_per_block=4
-        ),
+        get_positional_encoding("2d", dim=8, max_blocks=4, max_positions_per_block=4),
         TwoDimensionalPositionEmbedding,
     )
     with pytest.raises(ValueError, match="unsupported 2d"):

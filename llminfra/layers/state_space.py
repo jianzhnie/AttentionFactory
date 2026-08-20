@@ -163,11 +163,18 @@ class Mamba2Layer(nn.Module):
         u: torch.Tensor,
         b: torch.Tensor,
         dt: torch.Tensor,
+        a: torch.Tensor,
     ) -> tuple[torch.Tensor, torch.Tensor]:
-        """Discretize diagonal A and input-dependent B with a zero-order hold."""
-        a = -torch.exp(self.A_log).to(dtype=u.dtype)
-        a_bar = torch.exp(dt[..., None] * a[None, None])
-        b_bar = dt[..., None] * b[:, :, None, :] * u[..., None]
+        """Discretize one time step of diagonal A and input-dependent B.
+
+        Applies the zero-order hold for a single step so the scans never
+        materialize ``(batch, seq, d_inner, d_state)`` tensors: ``u``/``dt``
+        are shaped ``(batch, d_inner)``, ``b`` is ``(batch, d_state)`` and
+        ``a`` is the full ``(d_inner, d_state)`` diagonal matrix. Both
+        returned tensors are shaped ``(batch, d_inner, d_state)``.
+        """
+        a_bar = torch.exp(dt[:, :, None] * a)
+        b_bar = dt[:, :, None] * b[:, None, :] * u[:, :, None]
         return a_bar, b_bar
 
     def _recurrent_scan(
@@ -179,10 +186,11 @@ class Mamba2Layer(nn.Module):
         state: torch.Tensor,
     ) -> tuple[torch.Tensor, torch.Tensor]:
         """Evaluate the selective recurrence one time step at a time."""
-        a_bar, b_bar = self._discretize(u, b, dt)
+        a = -torch.exp(self.A_log).to(dtype=u.dtype)
         outputs: list[torch.Tensor] = []
         for step in range(u.size(1)):
-            state = a_bar[:, step] * state + b_bar[:, step]
+            a_bar, b_bar = self._discretize(u[:, step], b[:, step], dt[:, step], a)
+            state = a_bar * state + b_bar
             y = torch.einsum("bin,bn->bi", state, c[:, step])
             outputs.append(y + self.D * u[:, step])
         return torch.stack(outputs, dim=1), state
@@ -197,15 +205,16 @@ class Mamba2Layer(nn.Module):
         chunk_size: int,
     ) -> tuple[torch.Tensor, torch.Tensor]:
         """Evaluate the same recurrence with associative chunk boundaries."""
-        a_bar, b_bar = self._discretize(u, b, dt)
+        a = -torch.exp(self.A_log).to(dtype=u.dtype)
         outputs: list[torch.Tensor] = []
         for start in range(0, u.size(1), chunk_size):
             end = min(start + chunk_size, u.size(1))
             decay = torch.ones_like(state)
             local_state = torch.zeros_like(state)
             for step in range(start, end):
-                decay = decay * a_bar[:, step]
-                local_state = a_bar[:, step] * local_state + b_bar[:, step]
+                a_bar, b_bar = self._discretize(u[:, step], b[:, step], dt[:, step], a)
+                decay = decay * a_bar
+                local_state = a_bar * local_state + b_bar
                 step_state = decay * state + local_state
                 y = torch.einsum("bin,bn->bi", step_state, c[:, step])
                 outputs.append(y + self.D * u[:, step])

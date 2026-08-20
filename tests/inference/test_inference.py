@@ -2,6 +2,7 @@
 
 import pytest
 import torch
+import torch.nn.functional as F
 
 import llminfra.inference as inference
 from llminfra import (
@@ -195,3 +196,65 @@ def test_sparse_indexer_handles_empty_sequence() -> None:
     block_indices = indexer(torch.randn(3, 0, 8))
     assert block_indices.shape == (3, 2, 0, 2)
     assert block_indices.dtype == torch.long
+
+
+def _loop_indexer_reference(
+    indexer: BlockSparseIndexer, hidden_state: torch.Tensor
+) -> torch.Tensor:
+    """Slow per-query-block selection, mirroring the original loop."""
+    batch_size, seq_len, _ = hidden_state.size()
+    padded_len = (
+        (seq_len + indexer.block_size - 1) // indexer.block_size
+    ) * indexer.block_size
+    if padded_len != seq_len:
+        hidden_state = F.pad(hidden_state, (0, 0, 0, padded_len - seq_len))
+    block_count = padded_len // indexer.block_size
+    block_vectors = hidden_state.view(
+        batch_size, block_count, indexer.block_size, indexer.hidden_size
+    ).mean(dim=2)
+    scores = indexer.score_proj(block_vectors).transpose(1, 2)
+    rows: list[torch.Tensor] = []
+    for query_block in range(block_count):
+        candidate_scores = scores[:, :, : query_block + 1] if indexer.causal else scores
+        count = min(indexer.top_k, candidate_scores.size(-1))
+        selected = torch.topk(candidate_scores, count, dim=-1).indices
+        if count < indexer.top_k:
+            last = candidate_scores.size(-1) - 1
+            selected = F.pad(selected, (0, indexer.top_k - count), value=last)
+        rows.append(selected)
+    return torch.stack(rows, dim=2)
+
+
+def test_sparse_indexer_vectorized_matches_loop_reference() -> None:
+    torch.manual_seed(0)
+    configs = [
+        # (seq_len, block_size, top_k, num_heads, batch_size)
+        (8, 2, 4, 4, 2),  # divisible, top_k < block_count
+        (7, 2, 4, 4, 2),  # ragged tail block
+        (5, 2, 8, 1, 3),  # top_k > block_count
+        (3, 4, 2, 2, 1),  # single padded block
+        (16, 4, 1, 8, 2),  # top_k = 1
+        (9, 3, 3, 2, 4),  # divisible
+    ]
+    for causal in (True, False):
+        for seq_len, block_size, top_k, num_heads, batch_size in configs:
+            indexer = BlockSparseIndexer(
+                16,
+                num_heads,
+                block_size=block_size,
+                top_k=top_k,
+                max_seq_len=32,
+                causal=causal,
+            )
+            hidden_state = torch.randn(batch_size, seq_len, 16)
+            actual = indexer(hidden_state)
+            expected = _loop_indexer_reference(indexer, hidden_state)
+            assert actual.dtype == torch.long
+            assert torch.equal(actual, expected), (
+                causal,
+                seq_len,
+                block_size,
+                top_k,
+                num_heads,
+                batch_size,
+            )

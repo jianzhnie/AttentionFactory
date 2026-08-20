@@ -308,9 +308,7 @@ class PositionInterpolation(RotaryPositionEmbedding):
         """Apply interpolated positions to ``x``."""
         scale = self.original_max_position_embeddings / self.max_seq_len
         seq_len = x.size(-2)
-        positions = (
-            torch.arange(seq_len, device=x.device, dtype=torch.float32) * scale
-        )
+        positions = torch.arange(seq_len, device=x.device, dtype=torch.float32) * scale
         freqs = torch.einsum("s,f->sf", positions, self.inv_freq.to(torch.float32))
         cos = torch.cos(freqs).to(x.dtype)
         sin = torch.sin(freqs).to(x.dtype)

@@ -195,6 +195,58 @@ def test_linear_attention_non_causal_runs():
     assert torch.isfinite(out).all()
 
 
+def _causal_cumsum_reference(module, x, attention_mask=None):
+    """Slow reference: the previous per-step ``(s, f, d)`` cumsum implementation."""
+    query = module._split(module.q_proj(x), module.feature_dim)
+    key = module._split(module.k_proj(x), module.feature_dim)
+    value = module.split_head(module.v_proj(x))
+    mask = module._key_padding_mask(attention_mask, x.size(0))
+
+    query = module._feature_map(query)
+    key = module._feature_map(key)
+    if mask is not None:
+        key = key * mask.unsqueeze(-1)
+        value = value * mask.unsqueeze(-1)
+
+    kv_state = torch.einsum("bhsf,bhsd->bhsfd", key, value).cumsum(dim=2)
+    out_unnorm = torch.einsum("bhsf,bhsfd->bhsd", query, kv_state)
+    normalizer = torch.einsum("bhsf,bhsf->bhs", query, key.cumsum(dim=2))
+    eps = torch.finfo(normalizer.dtype).eps
+    safe = torch.where(
+        normalizer >= 0, normalizer.clamp_min(eps), normalizer.clamp_max(-eps)
+    )
+    out = out_unnorm / safe.unsqueeze(-1)
+    out = out.where(normalizer.unsqueeze(-1) != 0, torch.zeros_like(out))
+    return module.o_proj(module.combine_head(out))
+
+
+@pytest.mark.parametrize("seq_len", [1, 5, 16, 17, 40])
+@pytest.mark.parametrize("kernel", ["elu", "relu", "linear"])
+def test_linear_attention_chunked_matches_cumsum_reference(seq_len, kernel):
+    """The chunked causal scan must equal the per-step cumsum reference.
+
+    Compared in float64: the identity ("linear") kernel amplifies float32
+    accumulation-order noise through small normalizers, which is benign
+    rounding, not an algorithmic difference.
+    """
+    module = (
+        LinearAttention(
+            HIDDEN, HEADS, feature_dim=16, kernel=kernel, causal=True, chunk_size=16
+        )
+        .double()
+        .eval()
+    )
+    x = make_hidden_state(BATCH, seq_len, HIDDEN).double()
+    mask = torch.ones(BATCH, 1, 1, seq_len, dtype=torch.bool)
+    mask[0, 0, 0, -2:] = False  # padding must contribute zero to the state
+
+    for m in (None, mask):
+        reference = _causal_cumsum_reference(module, x, m)
+        torch.testing.assert_close(
+            module(x, attention_mask=m), reference, rtol=1e-5, atol=1e-6
+        )
+
+
 def test_linear_attention_causal_does_not_see_future():
     """Perturbing the last token must not change earlier outputs."""
     module = LinearAttention(HIDDEN, HEADS, kernel="linear", causal=True).eval()

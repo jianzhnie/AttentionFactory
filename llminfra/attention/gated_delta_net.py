@@ -2,8 +2,14 @@
 
 Gated DeltaNet is the linear-attention family behind Qwen3-Next and Kimi
 Delta Attention (KDA). The exact production variants use chunkwise
-parallelism and custom kernels; this module keeps the recurrent delta-rule
+parallelism and custom kernels; this module keeps the recurrent gated
 state update readable for study and small experiments.
+
+Despite the historical name, the update implemented here is gated *linear*
+attention, ``S = (1 - g) S + g · k ⊗ v``: the gate interpolates between the
+old state and the new key/value outer product. The delta rule proper —
+with the error-correction term ``v - Sᵀk`` — is implemented in
+``kimi_delta_attention.KimiDeltaAttention``.
 """
 
 from __future__ import annotations
@@ -15,7 +21,13 @@ from .base_attention import BaseAttention, validate_attention_inputs
 
 
 class GatedDeltaNet(BaseAttention):
-    """Recurrent gated delta-rule linear attention.
+    """Recurrent gated linear attention, ``S = (1 - g) S + g · k ⊗ v``.
+
+    The sigmoid write gate interpolates between the previous state and the
+    new key/value outer product. This is *not* the delta rule: there is no
+    error-correction term ``v - Sᵀk``. See
+    :class:`~llminfra.attention.kimi_delta_attention.KimiDeltaAttention` for
+    a delta-rule implementation.
 
     Args:
         hidden_size: Dimensionality of input and output features.

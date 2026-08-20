@@ -38,12 +38,106 @@ def _fixed_token_model(token_id: int, vocab_size: int = 16):
     return model
 
 
+def _scripted_model(table: dict, default_token: int, vocab_size: int = 8):
+    """Deterministic model with a per-row script of argmax predictions.
+
+    Rows are identified by their first token; ``table`` maps that token to a
+    cyclic list of predicted tokens per position.
+    """
+
+    def model(input_ids: torch.Tensor) -> torch.Tensor:
+        logits = torch.zeros(input_ids.size(0), input_ids.size(1), vocab_size)
+        for row_index in range(input_ids.size(0)):
+            script = table.get(int(input_ids[row_index, 0]))
+            for position in range(input_ids.size(1)):
+                token = (
+                    default_token if script is None else script[position % len(script)]
+                )
+                logits[row_index, position, token] = 1.0
+        return logits
+
+    return model
+
+
+def _row_by_row(decoder: SpeculativeDecoder, input_ids: torch.Tensor) -> torch.Tensor:
+    """Reference path: decode each row independently (original behavior)."""
+    rows = [decoder(row[None])[0] for row in input_ids]
+    output = input_ids.new_full(
+        (len(rows), max(row.numel() for row in rows)), decoder.pad_token_id
+    )
+    for index, row in enumerate(rows):
+        output[index, : row.numel()] = row
+    return output
+
+
 def test_speculative_decoder_accepts_deterministic_tokens() -> None:
     model = _fixed_token_model(1)
     decoder = SpeculativeDecoder(model, model, num_speculative_tokens=3)
     output = decoder(torch.zeros(2, 4, dtype=torch.long))
     assert output.shape == (2, 7)
     assert (output[:, 4:] == 1).all()
+
+
+def test_batched_draft_matches_row_by_row() -> None:
+    """Batched drafting must be token-for-token identical to per-row decoding."""
+    input_ids = torch.zeros(2, 4, dtype=torch.long)
+    cases = [
+        # Every draft accepted, bonus token appended.
+        (_fixed_token_model(1), _fixed_token_model(1), True, 6),
+        # Every draft rejected at the first step (correction appended).
+        (_fixed_token_model(1), _fixed_token_model(2), True, 0),
+    ]
+    for draft_model, target_model, append_bonus, expected_accepted in cases:
+        decoder = SpeculativeDecoder(
+            draft_model,
+            target_model,
+            num_speculative_tokens=3,
+            append_bonus_token=append_bonus,
+        )
+        batched = decoder(input_ids)
+        assert decoder.last_num_accepted == expected_accepted
+        assert torch.equal(batched, _row_by_row(decoder, input_ids))
+
+
+def test_batched_draft_with_varying_acceptance_matches_row_by_row() -> None:
+    """Rows accept different lengths (full, partial, none) with padding."""
+    draft_model = _scripted_model({}, default_token=5)
+    target_model = _scripted_model(
+        {
+            1: [5],  # accepts all drafts plus the bonus token
+            2: [0, 0, 5, 5, 2],  # accepts two drafts, then a correction
+            3: [0, 0, 7],  # rejects the first draft
+        },
+        default_token=5,
+    )
+    draft_calls = 0
+
+    def counting_draft(input_ids: torch.Tensor) -> torch.Tensor:
+        nonlocal draft_calls
+        draft_calls += 1
+        return draft_model(input_ids)
+
+    decoder = SpeculativeDecoder(
+        counting_draft,
+        target_model,
+        num_speculative_tokens=3,
+        append_bonus_token=True,
+    )
+    input_ids = torch.tensor([[1, 0, 0], [2, 0, 0], [3, 0, 0]])
+    batched = decoder(input_ids)
+    assert decoder.last_num_accepted == 3 + 2 + 0
+    # Batched drafting issues one draft call per speculative step,
+    # not one per (row, step) pair.
+    assert draft_calls == 3
+    expected = torch.tensor(
+        [
+            [1, 0, 0, 5, 5, 5, 5],
+            [2, 0, 0, 5, 5, 2, 0],
+            [3, 0, 0, 7, 0, 0, 0],
+        ]
+    )
+    assert torch.equal(batched, expected)
+    assert torch.equal(batched, _row_by_row(decoder, input_ids))
 
 
 def test_eagle_speculator_and_versioned_interfaces() -> None:

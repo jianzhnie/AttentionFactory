@@ -92,6 +92,22 @@ def test_mamba2_empty_sequence():
     assert state.ssm.shape == (BATCH, HIDDEN, 8)
 
 
+def test_mamba2_per_step_discretize_matches_full_materialization():
+    """Per-step ZOH discretization must match slicing the full tensors."""
+    layer = Mamba2Layer(HIDDEN, d_state=8).eval()
+    u = torch.randn(BATCH, SEQ, layer.d_inner)
+    b = torch.randn(BATCH, SEQ, layer.d_state)
+    dt = torch.rand(BATCH, SEQ, layer.d_inner) * 0.1
+    a = -torch.exp(layer.A_log).to(dtype=u.dtype)
+
+    full_a_bar = torch.exp(dt[..., None] * a[None, None])
+    full_b_bar = dt[..., None] * b[:, :, None, :] * u[..., None]
+    for step in range(SEQ):
+        a_bar, b_bar = layer._discretize(u[:, step], b[:, step], dt[:, step], a)
+        torch.testing.assert_close(a_bar, full_a_bar[:, step], atol=1e-6, rtol=1e-6)
+        torch.testing.assert_close(b_bar, full_b_bar[:, step], atol=1e-6, rtol=1e-6)
+
+
 def test_transformer_block_shape_and_gradient():
     block = TransformerBlock(
         HIDDEN,

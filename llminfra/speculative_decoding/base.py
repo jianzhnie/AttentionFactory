@@ -57,9 +57,11 @@ class SpeculativeDecoder(nn.Module):
     def forward(self, input_ids: torch.Tensor) -> torch.Tensor:
         """Generate one speculative block.
 
-        Draft tokens are rolled out autoregressively and every batch row is
-        verified independently. Because rows may accept different numbers of
-        tokens, shorter results are right-padded with ``pad_token_id``.
+        Draft tokens are rolled out autoregressively for the whole batch in
+        parallel (one ``draft_model`` call per speculative step), while
+        every batch row is verified independently. Because rows may accept
+        different numbers of tokens, shorter results are right-padded with
+        ``pad_token_id``.
 
         Returns:
             Input ids concatenated with accepted tokens (plus one bonus
@@ -70,10 +72,18 @@ class SpeculativeDecoder(nn.Module):
             raise ValueError("input_ids must have shape (batch, seq)")
         if input_ids.size(1) < 1:
             raise ValueError("input sequence must contain at least one token")
+        drafted, draft_step_logits = self._draft(input_ids)
+        target_input = torch.cat([input_ids, drafted], dim=-1)
+        target_logits = self.target_model(target_input)
         rows: list[torch.Tensor] = []
         total_accepted = 0
-        for row in input_ids:
-            decoded, num_accepted = self._decode_row(row[None])
+        for row_index in range(input_ids.size(0)):
+            decoded, num_accepted = self._verify_row(
+                input_ids[row_index : row_index + 1],
+                drafted[row_index : row_index + 1],
+                [logits[row_index : row_index + 1] for logits in draft_step_logits],
+                target_logits[row_index : row_index + 1],
+            )
             rows.append(decoded[0])
             total_accepted += num_accepted
         max_length = max(row.numel() for row in rows)
@@ -87,8 +97,10 @@ class SpeculativeDecoder(nn.Module):
         self.last_num_accepted = total_accepted
         return output
 
-    def _decode_row(self, input_ids: torch.Tensor) -> tuple[torch.Tensor, int]:
-        """Autoregressively draft and independently verify one batch row."""
+    def _draft(
+        self, input_ids: torch.Tensor
+    ) -> tuple[torch.Tensor, list[torch.Tensor]]:
+        """Autoregressively draft tokens for all batch rows in parallel."""
         draft_tokens: list[torch.Tensor] = []
         draft_step_logits: list[torch.Tensor] = []
         draft_input = input_ids
@@ -98,10 +110,16 @@ class SpeculativeDecoder(nn.Module):
             draft_step_logits.append(logits)
             draft_tokens.append(token[:, None])
             draft_input = torch.cat([draft_input, token[:, None]], dim=-1)
+        return torch.cat(draft_tokens, dim=-1), draft_step_logits
 
-        drafted = torch.cat(draft_tokens, dim=-1)
-        target_input = torch.cat([input_ids, drafted], dim=-1)
-        target_logits = self.target_model(target_input)
+    def _verify_row(
+        self,
+        input_ids: torch.Tensor,
+        drafted: torch.Tensor,
+        draft_step_logits: list[torch.Tensor],
+        target_logits: torch.Tensor,
+    ) -> tuple[torch.Tensor, int]:
+        """Independently verify one batch row against its draft tokens."""
         prompt_length = input_ids.size(1)
         accepted: list[torch.Tensor] = []
         num_accepted = 0

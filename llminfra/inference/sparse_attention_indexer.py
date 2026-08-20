@@ -71,18 +71,47 @@ class BlockSparseIndexer(nn.Module):
         ).mean(dim=2)
         scores = self.score_proj(block_vectors).transpose(1, 2)
 
-        rows: list[torch.Tensor] = []
-        for query_block in range(block_count):
-            candidate_scores = (
-                scores[:, :, : query_block + 1] if self.causal else scores
+        # Vectorized selection: give every query block one row of key-block
+        # scores, mask future key blocks to -inf under causal, then take one
+        # batched topk over the last dimension.
+        block_ids = torch.arange(block_count, device=scores.device)
+        count = min(self.top_k, block_count)
+        candidate_scores = scores.unsqueeze(2)
+        if self.causal:
+            future_blocks = block_ids[None, :] > block_ids[:, None]
+            candidate_scores = candidate_scores.masked_fill(
+                future_blocks, float("-inf")
             )
-            count = min(self.top_k, candidate_scores.size(-1))
-            selected = torch.topk(candidate_scores, count, dim=-1).indices
-            if count < self.top_k:
-                last = candidate_scores.size(-1) - 1
-                selected = F.pad(selected, (0, self.top_k - count), value=last)
-            rows.append(selected)
-        return torch.stack(rows, dim=2)
+        else:
+            candidate_scores = candidate_scores.expand(
+                batch_size, self.num_heads, block_count, block_count
+            )
+        selected = torch.topk(candidate_scores, count, dim=-1).indices
+        if self.causal:
+            # Slots that fell on masked (-inf) positions correspond to the
+            # loop version's padding: fill them with the query block index.
+            valid_counts = torch.clamp(block_ids + 1, max=count)
+            padding = (
+                torch.arange(count, device=scores.device)[None, :]
+                >= valid_counts[:, None]
+            )
+            selected = torch.where(
+                padding, block_ids[:, None].expand(block_count, count), selected
+            )
+        if count < self.top_k:
+            # Fewer blocks than top_k: pad like the loop version, with the
+            # last valid block index (per query block when causal).
+            if self.causal:
+                pad = block_ids.view(1, 1, block_count, 1).expand(
+                    batch_size, self.num_heads, block_count, self.top_k - count
+                )
+            else:
+                pad = selected.new_full(
+                    (batch_size, self.num_heads, block_count, self.top_k - count),
+                    block_count - 1,
+                )
+            selected = torch.cat([selected, pad], dim=-1)
+        return selected
 
     def extra_repr(self) -> str:
         return (

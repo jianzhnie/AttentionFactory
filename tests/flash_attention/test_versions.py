@@ -148,9 +148,7 @@ def test_mixed_input_dtypes_raise(version):
 
 
 @pytest.mark.parametrize("version", MODULES.values(), ids=MODULES.keys())
-@pytest.mark.parametrize(
-    "case", ["empty_q", "empty_kv", "zero_head_dim"]
-)
+@pytest.mark.parametrize("case", ["empty_q", "empty_kv", "zero_head_dim"])
 def test_degenerate_shapes_raise(version, case):
     """Empty sequences / zero head dims must raise a descriptive ValueError."""
     q, k, v = make_qkv(1, 1, 4, 4, 8, 8)

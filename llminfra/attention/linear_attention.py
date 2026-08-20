@@ -25,6 +25,12 @@ class LinearAttention(BaseAttention):
         feature_dim: Feature dimension of the kernel feature map.
         kernel: One of ``"elu"``, ``"relu"`` or ``"linear"``.
         causal: Whether keys after the current query are masked out.
+        chunk_size: Tokens per chunk in the causal scan. The causal path
+            keeps a running ``(feature_dim, head_dim)`` state per head and
+            only materializes one chunk at a time, so peak memory is
+            ``O(chunk_size * feature_dim * head_dim + chunk_size**2)``
+            instead of ``O(seq_len * feature_dim * head_dim)``. It is a
+            performance knob and does not change the result.
         dropout: Dropout applied to the output when training.
         bias: Whether linear projections use biases.
     """
@@ -36,16 +42,20 @@ class LinearAttention(BaseAttention):
         feature_dim: int | None = None,
         kernel: str = "elu",
         causal: bool = True,
+        chunk_size: int = 64,
         dropout: float = 0.0,
         bias: bool = True,
     ) -> None:
         super().__init__(hidden_size, num_heads, dropout, bias)
         if kernel not in {"elu", "relu", "linear"}:
             raise ValueError(f"Unknown linear attention kernel: {kernel}")
+        if chunk_size < 1:
+            raise ValueError(f"chunk_size must be >= 1, got {chunk_size}")
 
         self.feature_dim = feature_dim or self.head_dim
         self.kernel_name = kernel
         self.causal = bool(causal)
+        self.chunk_size = int(chunk_size)
 
         self.q_proj = nn.Linear(hidden_size, num_heads * self.feature_dim, bias=bias)
         self.k_proj = nn.Linear(hidden_size, num_heads * self.feature_dim, bias=bias)
@@ -81,12 +91,7 @@ class LinearAttention(BaseAttention):
             value = value * key_padding_mask.unsqueeze(-1)
 
         if self.causal:
-            # Causal form: out[s] = q_s · sum_{s'<=s} (k_s' ⊗ v_s'). The
-            # outer products accumulate over the same position axis, so no
-            # future values can leak in.
-            kv_state = torch.einsum("bhsf,bhsd->bhsfd", key, value).cumsum(dim=2)
-            out_unnorm = torch.einsum("bhsf,bhsfd->bhsd", query, kv_state)
-            normalizer = torch.einsum("bhsf,bhsf->bhs", query, key.cumsum(dim=2))
+            out_unnorm, normalizer = self._causal_scan(query, key, value)
         else:
             # Non-causal form: out = q · sum_s (k_s ⊗ v_s); the (f, d) state
             # is shared by all positions.
@@ -108,6 +113,59 @@ class LinearAttention(BaseAttention):
         if self.training and self.dropout_prob > 0:
             output = self.dropout(output)
         return output
+
+    def _causal_scan(
+        self, query: torch.Tensor, key: torch.Tensor, value: torch.Tensor
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        """Chunked causal scan returning unnormalized outputs and normalizers.
+
+        Causal form: ``out[s] = q_s · sum_{s'<=s} (k_s' ⊗ v_s')``. Instead of
+        materializing the per-step ``(batch, heads, seq, f, d)`` cumsum, a
+        running ``(f, d)`` state per head is carried across chunks: each chunk
+        adds its intra-chunk causal contribution plus ``phi(q) @ state`` for
+        the history. Peak memory drops from ``O(s·f·d)`` to
+        ``O(chunk_size·f·d + chunk_size²)``. Masked keys/values are already
+        zeroed by the caller, so they contribute nothing to the state.
+        """
+        batch_size, _, seq_len, _ = query.shape
+        state = query.new_zeros(
+            batch_size, self.num_heads, self.feature_dim, self.head_dim
+        )
+        key_state = query.new_zeros(batch_size, self.num_heads, self.feature_dim)
+        out_parts: list[torch.Tensor] = []
+        norm_parts: list[torch.Tensor] = []
+
+        for start in range(0, seq_len, self.chunk_size):
+            stop = min(start + self.chunk_size, seq_len)
+            q_chunk = query[:, :, start:stop]
+            k_chunk = key[:, :, start:stop]
+            v_chunk = value[:, :, start:stop]
+
+            # Intra-chunk: causally masked phi(q) phi(k)^T applied to v.
+            scores = torch.einsum("bhsf,bhtf->bhst", q_chunk, k_chunk)
+            future = torch.triu(
+                torch.ones(
+                    stop - start,
+                    stop - start,
+                    dtype=torch.bool,
+                    device=query.device,
+                ),
+                diagonal=1,
+            )
+            scores = scores.masked_fill(future, 0.0)
+            local = torch.einsum("bhst,bhtd->bhsd", scores, v_chunk)
+            # Inter-chunk: attend to the running state of previous chunks.
+            history = torch.einsum("bhsf,bhfd->bhsd", q_chunk, state)
+            out_parts.append(local + history)
+
+            local_norm = torch.einsum("bhsf,bhsf->bhs", q_chunk, k_chunk.cumsum(dim=2))
+            history_norm = torch.einsum("bhsf,bhf->bhs", q_chunk, key_state)
+            norm_parts.append(local_norm + history_norm)
+
+            state = state + torch.einsum("bhsf,bhsd->bhfd", k_chunk, v_chunk)
+            key_state = key_state + k_chunk.sum(dim=2)
+
+        return torch.cat(out_parts, dim=2), torch.cat(norm_parts, dim=2)
 
     def _split(self, x: torch.Tensor, feature_dim: int) -> torch.Tensor:
         """Split a projection into ``(batch, heads, seq, feature_dim)``."""
@@ -144,5 +202,6 @@ class LinearAttention(BaseAttention):
     def extra_repr(self) -> str:
         return (
             f"{super().extra_repr()}, feature_dim={self.feature_dim}, "
-            f"kernel={self.kernel_name}, causal={self.causal}"
+            f"kernel={self.kernel_name}, causal={self.causal}, "
+            f"chunk_size={self.chunk_size}"
         )

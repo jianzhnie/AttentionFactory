@@ -212,34 +212,42 @@ def forward(
     scheduler_trace: list[dict[str, Any]] = []
 
     for wave in schedule:
-        main_outputs = []
-        for task in wave:
-            # Main role: with one Q tile resident for this wave, step through the
-            # K/V tiles and produce the corresponding score tiles.
-            main_outputs.append(
-                (
-                    task,
-                    *block_scores_and_mask(
-                        q=q,
-                        k=k,
-                        q_slice=task.q_slice,
-                        k_slice=task.k_slice,
-                        causal=causal,
-                        key_padding_mask=key_padding_mask,
-                    ),
-                )
+        # Main role: with one Q tile resident for this wave, step through the
+        # K/V tiles and produce the corresponding score tiles. The three role
+        # stages are written as generators, so each score block is handed
+        # lazily from one role to the next and released right after the
+        # correction merge: peak memory stays one (block_q, block_kv) score
+        # block instead of the whole (block_q, kv_len) row of a wave. That
+        # lazy hand-off also matches real FA4, where the roles run
+        # concurrently in different warpgroups rather than phase by phase.
+        main_outputs = (
+            (
+                task,
+                *block_scores_and_mask(
+                    q=q,
+                    k=k,
+                    q_slice=task.q_slice,
+                    k_slice=task.k_slice,
+                    causal=causal,
+                    key_padding_mask=key_padding_mask,
+                ),
             )
+            for task in wave
+        )
 
-        softmax_outputs = []
-        for task, scores, valid_mask in main_outputs:
-            # Softmax role: update the per-row statistics and build the local
-            # weighted-value contribution from the score tile.
-            block_max, block_sum, weighted_values = compute_block_softmax(
-                scores,
-                valid_mask,
-                v[:, :, task.k_slice, :],
+        # Softmax role: update the per-row statistics and build the local
+        # weighted-value contribution from the score tile.
+        softmax_outputs = (
+            (
+                task,
+                *compute_block_softmax(
+                    scores,
+                    valid_mask,
+                    v[:, :, task.k_slice, :],
+                ),
             )
-            softmax_outputs.append((task, block_max, block_sum, weighted_values))
+            for task, scores, valid_mask in main_outputs
+        )
 
         for task, block_max, block_sum, weighted_values in softmax_outputs:
             # Correction role: merge the new tile's contribution into the running
@@ -326,35 +334,43 @@ def backward(
     scheduler_trace: list[dict[str, Any]] = []
 
     for wave in schedule:
-        main_outputs = []
-        for task in wave:
-            # Backward follows the same Q-major wave ordering so the educational
-            # implementation stays aligned with the forward scheduling story.
-            scores, valid_mask = block_scores_and_mask(
-                q=q,
-                k=k,
-                q_slice=task.q_slice,
-                k_slice=task.k_slice,
-                causal=causal,
-                key_padding_mask=key_padding_mask,
+        # Backward follows the same Q-major wave ordering so the educational
+        # implementation stays aligned with the forward scheduling story. As in
+        # the forward pass, the generator pipeline keeps only one score block
+        # alive at a time instead of materializing the wave's whole row.
+        main_outputs = (
+            (
+                task,
+                *block_scores_and_mask(
+                    q=q,
+                    k=k,
+                    q_slice=task.q_slice,
+                    k_slice=task.k_slice,
+                    causal=causal,
+                    key_padding_mask=key_padding_mask,
+                ),
             )
-            main_outputs.append((task, scores, valid_mask))
+            for task in wave
+        )
 
-        softmax_outputs = []
-        for task, scores, valid_mask in main_outputs:
-            # The derivative formulas remain exact attention derivatives. The FA4
-            # distinction here is the role/schedule decomposition, not new math.
-            local_grad_q, local_grad_k, local_grad_v = compute_block_gradients(
-                q_block=q[:, :, task.q_slice, :],
-                k_block=k[:, :, task.k_slice, :],
-                v_block=v[:, :, task.k_slice, :],
-                out_block=forward_result.out[:, :, task.q_slice, :],
-                grad_out_block=grad_out[:, :, task.q_slice, :],
-                scores=scores,
-                valid_mask=valid_mask,
-                lse_block=forward_result.lse[:, :, task.q_slice, :],
+        # The derivative formulas remain exact attention derivatives. The FA4
+        # distinction here is the role/schedule decomposition, not new math.
+        softmax_outputs = (
+            (
+                task,
+                *compute_block_gradients(
+                    q_block=q[:, :, task.q_slice, :],
+                    k_block=k[:, :, task.k_slice, :],
+                    v_block=v[:, :, task.k_slice, :],
+                    out_block=forward_result.out[:, :, task.q_slice, :],
+                    grad_out_block=grad_out[:, :, task.q_slice, :],
+                    scores=scores,
+                    valid_mask=valid_mask,
+                    lse_block=forward_result.lse[:, :, task.q_slice, :],
+                ),
             )
-            softmax_outputs.append((task, local_grad_q, local_grad_k, local_grad_v))
+            for task, scores, valid_mask in main_outputs
+        )
 
         for task, local_grad_q, local_grad_k, local_grad_v in softmax_outputs:
             grad_q[:, :, task.q_slice, :] += local_grad_q
