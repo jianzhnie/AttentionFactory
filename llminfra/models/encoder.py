@@ -55,6 +55,7 @@ class EncoderOnlyModel(nn.Module):
         norm_type: Final normalization, ``"layernorm"`` or ``"rmsnorm"``.
         output_head: Optional classification, token, reward, embedding, or
             custom tensor-to-tensor head.
+
     """
 
     def __init__(

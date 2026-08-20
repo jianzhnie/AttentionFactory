@@ -37,6 +37,7 @@ class KimiDeltaAttention(BaseAttention):
     rejected because KDA does not materialize a quadratic attention matrix.
     ``attention_mask`` is interpreted as a key-padding mask; arbitrary dense
     query/key masks are not representable by this linear recurrence.
+
     """
 
     def __init__(
@@ -148,10 +149,11 @@ class KimiDeltaAttention(BaseAttention):
         core_output = self.combine_head(core_output)
         if self.gate_proj is not None:
             core_output = core_output * torch.sigmoid(self.gate_proj(hidden_state))
-        output = self.o_proj(core_output)
+        output: torch.Tensor = self.o_proj(core_output)
         if valid is not None:
             output = output * valid.transpose(1, 2).to(output.dtype)
-        return self.dropout(output)
+        output = self.dropout(output)
+        return output
 
     def _split(self, x: torch.Tensor) -> torch.Tensor:
         """Split ``(batch, seq, heads * feature_dim)`` projections."""
@@ -186,6 +188,7 @@ class KimiDeltaAttention(BaseAttention):
         return mask.bool()
 
     def extra_repr(self) -> str:
+        """Return a string representation of the module's extra information."""
         return (
             f"{super().extra_repr()}, feature_dim={self.feature_dim}, "
             f"beta_init={self.beta_init}, decay_init={self.decay_init}, "

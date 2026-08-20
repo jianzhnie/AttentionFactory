@@ -16,6 +16,7 @@ def apply_rotary_pos_emb(
         x: Tensor with an even final dimension.
         cos: Cosine frequencies broadcastable to ``x``.
         sin: Sine frequencies broadcastable to ``x``.
+
     """
     if x.size(-1) % 2 != 0:
         raise ValueError("RoPE requires an even head dimension")
@@ -45,6 +46,7 @@ class RotaryPositionEmbedding(BasePositionalEncoding):
         dim: Rotated feature dimension, normally ``head_dim``.
         base: RoPE base frequency.
         max_seq_len: Maximum sequence length used for precomputed frequencies.
+
     """
 
     def __init__(

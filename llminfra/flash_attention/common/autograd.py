@@ -78,6 +78,8 @@ class TiledAttentionFunction(torch.autograd.Function):
 
     @staticmethod
     def backward(
+        # The same opaque autograd context as in `forward`; the torch stubs
+        # export no precise type for it.
         ctx: Any,
         grad_out: torch.Tensor,
     ) -> tuple[

@@ -1,3 +1,5 @@
+"""Multi-head latent attention that projects Q/K/V through latent spaces."""
+
 from __future__ import annotations
 
 import torch
@@ -7,8 +9,7 @@ from .base_attention import BaseAttention, validate_attention_inputs
 
 
 class MultiHeadLatentAttention(BaseAttention):
-    """
-    Multi-head Latent Attention module that operates on latent space representations.
+    """Multi-head Latent Attention module that operates on latent space representations.
 
     This implementation extends the standard multi-head attention mechanism to
     work with latent space representations: queries, keys and values are
@@ -40,6 +41,7 @@ class MultiHeadLatentAttention(BaseAttention):
         v_up_proj (nn.Linear): Value projection back to hidden size.
         output_proj (nn.Linear): Linear projection for output vectors.
         dropout (nn.Dropout): Dropout layer for attention weights.
+
     """
 
     def __init__(
@@ -82,8 +84,7 @@ class MultiHeadLatentAttention(BaseAttention):
         attention_mask: torch.Tensor | None = None,
         return_attention_weights: bool = False,
     ) -> torch.Tensor | tuple[torch.Tensor, torch.Tensor]:
-        """
-        Forward pass of the Multi-head Latent Attention module.
+        """Forward pass of the Multi-head Latent Attention module.
 
         Args:
             hidden_state (torch.Tensor): Input tensor of shape (batch_size,
@@ -101,6 +102,7 @@ class MultiHeadLatentAttention(BaseAttention):
                 Output tensor of shape (batch_size, seq_len, hidden_size).
                 If return_attention_weights is True, returns a tuple
                 (output, attention_weights).
+
         """
         validate_attention_inputs(hidden_state, attention_mask, self.num_heads)
 
@@ -127,7 +129,7 @@ class MultiHeadLatentAttention(BaseAttention):
         )
 
         # Weighted sum of values, merge heads, output projection
-        output = torch.matmul(attention_weights, value)
+        output: torch.Tensor = torch.matmul(attention_weights, value)
         output = self.output_proj(self.combine_head(output))
 
         if return_attention_weights:

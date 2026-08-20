@@ -18,6 +18,7 @@ class FlashAttentionConfig:
             This is a teaching/debugging aid: the per-tile trace entries read
             GPU tensors on the host, so on CUDA each tile costs a host-device
             sync. Performance-sensitive runs should set this to ``False``.
+
     """
 
     block_size_q: int = 1024

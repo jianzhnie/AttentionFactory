@@ -75,6 +75,7 @@ def get_version_module(version: str) -> ModuleType:
 
     Raises:
         ValueError: If ``version`` is not a known FlashAttention version.
+
     """
     try:
         return VERSION_REGISTRY[version]
@@ -125,6 +126,7 @@ def flash_attention(
 
     Raises:
         ValueError: If ``version`` is not a known FlashAttention version.
+
     """
     try:
         attention_fn = ATTENTION_FN_REGISTRY[version]
@@ -159,6 +161,7 @@ class FlashAttention(nn.Module):
 
     Raises:
         ValueError: If ``version`` is not a known FlashAttention version.
+
     """
 
     def __init__(

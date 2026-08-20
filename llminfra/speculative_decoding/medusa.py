@@ -33,7 +33,8 @@ class MedusaPredictionHead(nn.Module):
 
     def forward(self, hidden_state: torch.Tensor) -> torch.Tensor:
         refined = hidden_state + F.silu(self.residual(hidden_state))
-        return self.projection(refined)
+        logits: torch.Tensor = self.projection(refined)
+        return logits
 
 
 class MedusaHead(nn.Module):
@@ -50,6 +51,7 @@ class MedusaHead(nn.Module):
     reference convention makes the component usable without a base LM head;
     a serving runtime may reserve head zero for the base model and shift the
     auxiliary offsets accordingly.
+
     """
 
     def __init__(
@@ -90,6 +92,7 @@ class MedusaHead(nn.Module):
         Returns:
             A pair ``(token_ids, scores)``, both shaped
             ``(batch, num_heads, top_k)``.
+
         """
         if not 1 <= top_k <= self.vocab_size:
             raise ValueError(f"top_k must be in [1, {self.vocab_size}]")
@@ -98,6 +101,7 @@ class MedusaHead(nn.Module):
         return result.indices, result.values
 
     def extra_repr(self) -> str:
+        """Return a string representation of the module's extra information."""
         return (
             f"hidden_size={self.hidden_size}, vocab_size={self.vocab_size}, "
             f"num_heads={self.num_heads}"

@@ -33,6 +33,7 @@ class LinearAttention(BaseAttention):
             performance knob and does not change the result.
         dropout: Dropout applied to the output when training.
         bias: Whether linear projections use biases.
+
     """
 
     def __init__(
@@ -106,7 +107,7 @@ class LinearAttention(BaseAttention):
         safe_normalizer = torch.where(
             normalizer >= 0, normalizer.clamp_min(eps), normalizer.clamp_max(-eps)
         )
-        output = out_unnorm / safe_normalizer.unsqueeze(-1)
+        output: torch.Tensor = out_unnorm / safe_normalizer.unsqueeze(-1)
         output = output.where(normalizer.unsqueeze(-1) != 0, torch.zeros_like(output))
         output = self.combine_head(output)
         output = self.o_proj(output)
@@ -200,6 +201,7 @@ class LinearAttention(BaseAttention):
         return attention_mask.bool()
 
     def extra_repr(self) -> str:
+        """Return a string representation of the module's extra information."""
         return (
             f"{super().extra_repr()}, feature_dim={self.feature_dim}, "
             f"kernel={self.kernel_name}, causal={self.causal}, "

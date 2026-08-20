@@ -29,6 +29,7 @@ class SpeculativeDecoder(nn.Module):
             the target logits after a fully accepted draft block (the
             standard speculative decoding behavior). Defaults to False to
             preserve the original block-size-only output contract.
+
     """
 
     def __init__(
@@ -67,6 +68,7 @@ class SpeculativeDecoder(nn.Module):
             Input ids concatenated with accepted tokens (plus one bonus
             token when ``append_bonus_token`` is enabled and every draft
             was accepted).
+
         """
         if input_ids.dim() != 2:
             raise ValueError("input_ids must have shape (batch, seq)")
@@ -203,6 +205,7 @@ class SpeculativeDecoder(nn.Module):
         return torch.multinomial(probabilities, 1)
 
     def extra_repr(self) -> str:
+        """Return a string representation of the module's extra information."""
         return (
             f"num_speculative_tokens={self.num_speculative_tokens}, "
             f"temperature={self.temperature}, "

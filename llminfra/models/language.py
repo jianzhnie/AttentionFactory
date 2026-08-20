@@ -62,6 +62,7 @@ class CausalLMModel(nn.Module):
         mtp_loss_weight: Weight applied to the MTP loss when labels are given.
         norm_type: ``"rmsnorm"`` or ``"layernorm"`` inside blocks.
         norm_style: ``"pre"``, ``"post"``, ``"sandwich"`` or ``"deepnorm"``.
+
     """
 
     def __init__(
@@ -224,6 +225,7 @@ class CausalLMModel(nn.Module):
                 have been constructed with ``num_mtp_predictions > 0``.
             position_ids: Optional multimodal position ids. This is consumed
                 by ``mrope``; other positional modules use implicit indices.
+
         """
         if (input_ids is None) == (inputs_embeds is None):
             raise ValueError("provide exactly one of input_ids or inputs_embeds")

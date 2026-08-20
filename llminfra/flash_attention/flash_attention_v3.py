@@ -63,6 +63,7 @@ class TileBuffer:
         k_block: The (possibly FP8-simulated) key tile.
         v_block: The (possibly FP8-simulated) value tile.
         fp8_meta: Per-tile quantization scales/amaxes when ``fp8`` is enabled.
+
     """
 
     buffer_id: int
@@ -182,6 +183,7 @@ def forward(
     Returns:
         A `ForwardResult` with the attention output, the per-row log-sum-exp,
         and the final online-softmax statistics.
+
     """
     config = config or FlashAttentionConfig()
     q, k, key_padding_mask = prepare_inputs(
@@ -346,6 +348,7 @@ def backward(
     Raises:
         ValueError: If ``config.fp8`` is True. Like the official FA3 release,
             the FP8 path supports forward only.
+
     """
     config = config or FlashAttentionConfig()
     if config.fp8:

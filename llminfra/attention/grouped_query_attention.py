@@ -1,3 +1,5 @@
+"""Grouped-query attention that shares key/value heads across query groups."""
+
 from __future__ import annotations
 
 import torch
@@ -7,11 +9,12 @@ from .base_attention import BaseAttention, validate_attention_inputs
 
 
 class GroupedQueryAttention(BaseAttention):
-    """
-    Group Query Attention module as described in "GQA: Training Generalized
-    Multi-Query Transformer Models from Multi-Head Checkpoints" (Chen et al., 2023).
+    """Group Query Attention module (GQA).
 
-    This implementation is a hybrid between Multi-Head Attention and
+    Implements the attention variant described in "GQA: Training Generalized
+    Multi-Query Transformer Models from Multi-Head Checkpoints"
+    (Chen et al., 2023). This implementation is a hybrid between
+    Multi-Head Attention and
     Multi-Query Attention, where queries are grouped and each group shares a
     single key and value head. This reduces memory usage and speeds up
     inference while maintaining performance closer to Multi-Head Attention
@@ -43,6 +46,7 @@ class GroupedQueryAttention(BaseAttention):
         v_proj (nn.Linear): Linear projection for value vectors (one per group).
         o_proj (nn.Linear): Linear projection for output vectors.
         dropout (nn.Dropout): Dropout layer for attention weights.
+
     """
 
     def __init__(
@@ -86,8 +90,7 @@ class GroupedQueryAttention(BaseAttention):
         attention_mask: torch.Tensor | None = None,
         return_attention_weights: bool = False,
     ) -> torch.Tensor | tuple[torch.Tensor, torch.Tensor]:
-        """
-        Forward pass of the Group Query Attention module.
+        """Forward pass of the Group Query Attention module.
 
         Args:
             hidden_state (torch.Tensor): Input tensor of shape (batch_size,
@@ -105,6 +108,7 @@ class GroupedQueryAttention(BaseAttention):
                 Output tensor of shape (batch_size, seq_len, hidden_size).
                 If return_attention_weights is True, returns a tuple
                 (output, attention_weights).
+
         """
         validate_attention_inputs(hidden_state, attention_mask, self.num_heads)
 
@@ -128,7 +132,7 @@ class GroupedQueryAttention(BaseAttention):
         )
 
         # Weighted sum of values, merge heads, output projection
-        output = torch.matmul(attention_weights, value)
+        output: torch.Tensor = torch.matmul(attention_weights, value)
         output = self.o_proj(self.combine_head(output))
 
         if return_attention_weights:
@@ -136,8 +140,7 @@ class GroupedQueryAttention(BaseAttention):
         return output
 
     def split_head_grouped(self, x: torch.Tensor) -> torch.Tensor:
-        """
-        Split the input tensor into grouped attention heads for keys and values.
+        """Split the input tensor into grouped attention heads for keys and values.
 
         This method splits keys/values into groups, then expands each to serve
         multiple query heads in the same group.
@@ -148,6 +151,7 @@ class GroupedQueryAttention(BaseAttention):
 
         Returns:
             torch.Tensor: Tensor of shape (batch_size, num_heads, seq_len, head_dim).
+
         """
         batch_size, seq_len, _ = x.size()
 

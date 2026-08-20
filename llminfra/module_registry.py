@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from typing import Any
+from collections.abc import Callable
+from typing import cast
 
 from .attention.alibi_attention import ALiBiAttention
 from .attention.base_attention import BaseAttention
@@ -58,7 +59,7 @@ def build_attention(
     name: str,
     hidden_size: int,
     num_heads: int,
-    **kwargs: Any,
+    **kwargs: object,
 ) -> BaseAttention:
     """Build an attention module by registry name.
 
@@ -72,7 +73,10 @@ def build_attention(
         raise ValueError(
             f"Unknown attention: {name}; available: {list_attentions()}"
         ) from exc
-    return factory(hidden_size=hidden_size, num_heads=num_heads, **kwargs)
+    # Registry entries share only the base-class signature; the remaining
+    # keyword arguments are specific to each concrete architecture.
+    constructor = cast("Callable[..., BaseAttention]", factory)
+    return constructor(hidden_size=hidden_size, num_heads=num_heads, **kwargs)
 
 
 def list_attentions() -> list[str]:
@@ -86,7 +90,7 @@ def build_positional_encoding(
     dim: int,
     num_heads: int | None = None,
     max_seq_len: int = 4096,
-    **kwargs: Any,
+    **kwargs: object,
 ) -> BasePositionalEncoding:
     """Build a positional encoding module by name."""
     return get_positional_encoding(

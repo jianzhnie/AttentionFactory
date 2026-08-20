@@ -27,6 +27,7 @@ class SlidingWindowAttention(BaseAttention):
         dropout: Dropout probability for attention weights.
         bias: Whether linear projections use biases.
         causal: If True, the window only covers positions ``<= query``.
+
     """
 
     def __init__(
@@ -88,7 +89,7 @@ class SlidingWindowAttention(BaseAttention):
         combined_mask = self._combine_with_input_mask(sliding_mask, attention_mask)
 
         attention_weights = self.compute_attention_weights(scores, combined_mask)
-        output = torch.matmul(attention_weights, value)
+        output: torch.Tensor = torch.matmul(attention_weights, value)
         output = self.o_proj(self.combine_head(output))
 
         if return_attention_weights:
@@ -136,6 +137,7 @@ class SlidingWindowAttention(BaseAttention):
         return sliding_mask & attention_mask.bool()
 
     def extra_repr(self) -> str:
+        """Return a string representation of the module's extra information."""
         return (
             f"{super().extra_repr()}, window_size={self.window_size}, "
             f"num_kv_groups={self.num_kv_groups}, causal={self.causal}"

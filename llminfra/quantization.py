@@ -9,7 +9,7 @@ replace vendor FP8/INT8 kernels used by production inference engines.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Literal
+from typing import Any, Literal, cast
 
 import torch
 from torch import nn
@@ -31,6 +31,7 @@ class QuantizationConfig:
         quantize_inputs: Fake-quantize tensor inputs.
         quantize_outputs: Fake-quantize tensor outputs.
         eps: Lower bound for scale values.
+
     """
 
     mode: QuantizationMode = "int8"
@@ -156,17 +157,21 @@ class QATWrapper(nn.Module):
 
     def forward(self, *args: object, **kwargs: object) -> object:
         """Run the wrapped module with the configured fake quantization."""
-        call_args = self._map_tensors(args) if self.config.quantize_inputs else args
-        call_kwargs = (
-            self._map_tensors(kwargs) if self.config.quantize_inputs else kwargs
-        )
+        if self.config.quantize_inputs:
+            # ``_map_tensors`` preserves the outer container type; the casts
+            # only recover what the ``object`` annotation cannot express.
+            call_args = cast("tuple[Any, ...]", self._map_tensors(args))
+            call_kwargs = cast("dict[str, Any]", self._map_tensors(kwargs))
+        else:
+            call_args = args
+            call_kwargs = kwargs
 
         if self.config.quantize_weights:
             state: dict[str, torch.Tensor] = {}
             for name, parameter in self.module.named_parameters():
                 state[name] = self.weight_quantizer(parameter)
             state.update(dict(self.module.named_buffers()))
-            output = functional_call(self.module, state, call_args, call_kwargs)
+            output: object = functional_call(self.module, state, call_args, call_kwargs)
         else:
             output = self.module(*call_args, **call_kwargs)
 
@@ -175,6 +180,7 @@ class QATWrapper(nn.Module):
         return output
 
     def extra_repr(self) -> str:
+        """Show the quantization mode and wrapped module type in ``repr``."""
         return f"mode={self.config.mode!r}, module={type(self.module).__name__}"
 
 

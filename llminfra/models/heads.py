@@ -26,6 +26,7 @@ def pool_hidden_state(
 
     Returns:
         Tensor shaped ``(batch, hidden_size)``.
+
     """
     if hidden_state.dim() != 3:
         raise ValueError("hidden_state must have shape (batch, seq, hidden)")

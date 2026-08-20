@@ -1,3 +1,5 @@
+"""Standard multi-head self-attention with per-head scaled dot products."""
+
 from __future__ import annotations
 
 import torch
@@ -7,11 +9,11 @@ from .base_attention import BaseAttention, validate_attention_inputs
 
 
 class MultiHeadAttention(BaseAttention):
-    """
-    Multi-Head Attention module as described in "Attention is All You Need"
-    (Vaswani et al., 2017).
+    """Multi-Head Attention module (MHA).
 
-    This implementation splits the input into multiple heads, computes
+    Implements the attention mechanism described in "Attention is All You
+    Need" (Vaswani et al., 2017). This implementation splits the input
+    into multiple heads, computes
     attention independently for each head, and then concatenates the results.
     This allows the model to focus on different parts of the input
     simultaneously.
@@ -38,6 +40,7 @@ class MultiHeadAttention(BaseAttention):
         v_proj (nn.Linear): Linear projection for value vectors.
         o_proj (nn.Linear): Linear projection for output vectors.
         dropout (nn.Dropout): Dropout layer for attention weights.
+
     """
 
     def __init__(
@@ -66,8 +69,7 @@ class MultiHeadAttention(BaseAttention):
         attention_mask: torch.Tensor | None = None,
         return_attention_weights: bool = False,
     ) -> torch.Tensor | tuple[torch.Tensor, torch.Tensor]:
-        """
-        Forward pass of the Multi-Head Attention module.
+        """Forward pass of the Multi-Head Attention module.
 
         Args:
             hidden_state (torch.Tensor): Input tensor of shape (batch_size,
@@ -85,6 +87,7 @@ class MultiHeadAttention(BaseAttention):
                 Output tensor of shape (batch_size, seq_len, hidden_size).
                 If return_attention_weights is True, returns a tuple
                 (output, attention_weights).
+
         """
         validate_attention_inputs(hidden_state, attention_mask, self.num_heads)
 
@@ -110,7 +113,7 @@ class MultiHeadAttention(BaseAttention):
         )
 
         # Weighted sum of values, merge heads, output projection
-        output = torch.matmul(attention_weights, value)
+        output: torch.Tensor = torch.matmul(attention_weights, value)
         output = self.o_proj(self.combine_head(output))
 
         if return_attention_weights:

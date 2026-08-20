@@ -15,6 +15,7 @@ class RMSNorm(nn.Module):
         hidden_size: Feature dimension.
         eps: Small value added to the variance for numerical stability.
         elementwise_affine: Whether to use a learnable per-dimension weight.
+
     """
 
     def __init__(
@@ -59,6 +60,7 @@ class LayerNorm(nn.Module):
         hidden_size: Feature dimension.
         eps: Small value added to the variance for numerical stability.
         bias: Whether to use a learnable per-dimension bias.
+
     """
 
     def __init__(
@@ -106,6 +108,7 @@ class DeepNorm(nn.Module):
         alpha: Residual scaling factor. Defaults to 1.0 (plain post-norm
             residual, no scaling).
         eps: Epsilon of the internal :class:`LayerNorm`.
+
     """
 
     def __init__(
@@ -130,6 +133,7 @@ class DeepNorm(nn.Module):
 
         Returns:
             ``norm(alpha * residual + sublayer_output)``.
+
         """
         return cast(torch.Tensor, self.norm(residual * self.alpha + sublayer_output))
 
@@ -150,6 +154,7 @@ class LayerScale(nn.Module):
     Args:
         hidden_size: Feature dimension.
         init_value: Initial value of every per-channel scale.
+
     """
 
     def __init__(self, hidden_size: int, init_value: float = 1.0) -> None:

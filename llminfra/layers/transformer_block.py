@@ -58,6 +58,7 @@ class TransformerBlock(nn.Module):
             mixing for both attention and FFN branches.
         hc_mult: Number of residual streams used by each mHC mixer.
         sinkhorn_iters: Sinkhorn normalization iterations for mHC.
+
     """
 
     def __init__(

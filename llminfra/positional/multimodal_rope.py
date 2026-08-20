@@ -25,6 +25,7 @@ class MultiModalRotaryPositionEmbedding(BasePositionalEncoding):
         base: RoPE base frequency.
         max_seq_len: Documented maximum sequence length.
         dtype: Buffer dtype for inverse frequencies.
+
     """
 
     def __init__(
@@ -68,6 +69,7 @@ class MultiModalRotaryPositionEmbedding(BasePositionalEncoding):
                 ``(batch, heads, seq, dim)``.
             position_ids: Optional integer/float tensor shaped
                 ``(axes, batch, seq)`` or ``(axes, seq)``.
+
         """
         if x.dim() not in {3, 4}:
             raise ValueError(

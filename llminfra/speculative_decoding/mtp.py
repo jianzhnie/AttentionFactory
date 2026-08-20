@@ -21,6 +21,7 @@ class MTPDecoder(nn.Module):
     Args:
         mtp_head: Head producing one logit tensor for each future position.
         target_model: Callable mapping token ids to target-model logits.
+
     """
 
     def __init__(
@@ -35,6 +36,31 @@ class MTPDecoder(nn.Module):
     def forward(
         self, input_ids: torch.Tensor, hidden_state: torch.Tensor
     ) -> torch.Tensor:
+        """Draft tokens with the MTP head and verify them with the target model.
+
+        Each head of ``mtp_head`` contributes one greedy draft token: the
+        argmax of that head's logits at the final position of
+        ``hidden_state``. The draft tokens are appended to ``input_ids`` and
+        scored by the target model, which verifies the draft
+        position-by-position: a draft token is accepted while the target's
+        argmax at the corresponding position agrees with it. Verification
+        stops at the first mismatch (batch-wide, any row), where the rejected
+        draft token is replaced by the correct target-model token, so every
+        emitted token is an exact target-model argmax output.
+
+        Args:
+            input_ids: Prompt token ids of shape ``(batch, seq)``.
+            hidden_state: Backbone hidden states of shape
+                ``(batch, seq, hidden_size)`` with the same batch size as
+                ``input_ids``; only the final position feeds the draft heads.
+
+        Returns:
+            ``input_ids`` concatenated with the emitted tokens, of shape
+            ``(batch, seq + k)`` where ``k`` ranges from 1 (immediate
+            mismatch, only the correcting target token) to
+            ``mtp_head.num_predictions`` (all draft tokens accepted).
+
+        """
         if input_ids.dim() != 2:
             raise ValueError("input_ids must have shape (batch, seq)")
         if hidden_state.dim() != 3 or hidden_state.size(0) != input_ids.size(0):
@@ -65,6 +91,7 @@ class MultiTokenPredictionHead(nn.Module):
         hidden_size: Hidden state dimension.
         vocab_size: Vocabulary size.
         num_predictions: Number of future tokens predicted per step.
+
     """
 
     def __init__(
@@ -89,6 +116,7 @@ class MultiTokenPredictionHead(nn.Module):
         return [head(hidden_state) for head in self.heads]
 
     def extra_repr(self) -> str:
+        """Return a string representation of the module's extra information."""
         return (
             f"hidden_size={self.hidden_size}, vocab_size={self.vocab_size}, "
             f"num_predictions={self.num_predictions}"
@@ -132,6 +160,7 @@ def mtp_loss(
 
     Returns:
         Scalar loss tensor (weighted mean of per-step cross-entropies).
+
     """
     if num_future is None:
         num_future = head.num_predictions

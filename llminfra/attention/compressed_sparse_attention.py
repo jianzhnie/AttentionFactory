@@ -41,6 +41,7 @@ class CompressedSparseAttention(BaseAttention):
         fallback selection for the first query block also only points at
         entry 0. Their attention weights are all-masked, so those positions
         produce an all-zero output (via ``nan_to_num``).
+
     """
 
     def __init__(
@@ -98,6 +99,7 @@ class CompressedSparseAttention(BaseAttention):
             block_indices: Optional explicit selected blocks, shape
                 ``(heads, num_q_blocks, top_k)`` or
                 ``(batch, heads, num_q_blocks, top_k)``.
+
         """
         validate_attention_inputs(hidden_state, attention_mask, self.num_heads)
         batch_size, seq_len, _ = hidden_state.size()
@@ -138,7 +140,7 @@ class CompressedSparseAttention(BaseAttention):
             sparse_mask = sparse_mask & key_blocks[:, None, None, :]
 
         weights = self.compute_attention_weights(scores, sparse_mask)
-        output = torch.matmul(weights, value)
+        output: torch.Tensor = torch.matmul(weights, value)
         output = self.o_proj(self.combine_head(output))
         if return_attention_weights:
             return output, weights
@@ -241,6 +243,7 @@ class CompressedSparseAttention(BaseAttention):
         return torch.stack(rows, dim=2)
 
     def extra_repr(self) -> str:
+        """Return a string representation of the module's extra information."""
         return (
             f"{super().extra_repr()}, compress_ratio={self.compress_ratio}, "
             f"num_kv_groups={self.num_kv_groups}, top_k={self.top_k}, "

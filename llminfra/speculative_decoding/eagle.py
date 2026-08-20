@@ -24,6 +24,7 @@ class EagleSpeculator(nn.Module):
         append_bonus_token: When True, take one extra "bonus" token (argmax
             of the final target logits) after a fully accepted draft block.
             Defaults to False to preserve the original output contract.
+
     """
 
     def __init__(
@@ -88,6 +89,7 @@ class EagleSpeculator(nn.Module):
         return torch.cat([input_ids, *accepted], dim=-1)
 
     def extra_repr(self) -> str:
+        """Return a string representation of the module's extra information."""
         return (
             f"num_speculative_tokens={self.num_speculative_tokens}, "
             f"append_bonus_token={self.append_bonus_token}"

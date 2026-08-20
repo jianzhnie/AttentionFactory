@@ -31,6 +31,7 @@ class BlockSparseAttention(BaseAttention):
         dropout: Dropout probability for attention weights.
         bias: Whether linear projections use biases.
         causal: Whether to enforce causal masking in addition to block sparsity.
+
     """
 
     def __init__(
@@ -108,7 +109,7 @@ class BlockSparseAttention(BaseAttention):
         combined_mask = self._combine_with_input_mask(sparse_mask, attention_mask)
 
         attention_weights = self.compute_attention_weights(scores, combined_mask)
-        output = torch.matmul(attention_weights, value)
+        output: torch.Tensor = torch.matmul(attention_weights, value)
         output = self.o_proj(self.combine_head(output))
 
         if return_attention_weights:
@@ -228,6 +229,7 @@ class BlockSparseAttention(BaseAttention):
         return sparse_mask & attention_mask.bool()
 
     def extra_repr(self) -> str:
+        """Return a string representation of the module's extra information."""
         return (
             f"{super().extra_repr()}, block_size={self.block_size}, "
             f"num_kv_groups={self.num_kv_groups}, top_k={self.top_k}, "

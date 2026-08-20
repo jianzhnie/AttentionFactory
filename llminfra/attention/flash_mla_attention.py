@@ -29,6 +29,7 @@ class FlashMLA(nn.Module):
         ``prefill`` *records* latent KV states in ``latent_cache`` for
         inspection, but ``decode`` does not attend to the cache — this
         simulates the cache-oriented interface, not the cached computation.
+
     """
 
     def __init__(
@@ -51,7 +52,7 @@ class FlashMLA(nn.Module):
 
     def prefill(self, hidden_state: torch.Tensor) -> torch.Tensor:
         """Run the attention layer and store latent KV states."""
-        output = self.mla(hidden_state)
+        output: torch.Tensor = self.mla(hidden_state)
         with torch.no_grad():
             latent = self.mla.kv_down_proj(hidden_state)
             self.latent_cache.append(latent.detach())
@@ -59,12 +60,13 @@ class FlashMLA(nn.Module):
 
     def decode(self, hidden_state: torch.Tensor) -> torch.Tensor:
         """Run one decode step using the same latent interface."""
-        return self.mla(hidden_state)
+        output: torch.Tensor = self.mla(hidden_state)
+        return output
 
     def reset_cache(self) -> None:
         """Clear the simulated latent cache."""
         self.latent_cache.clear()
 
     def forward(self, hidden_state: torch.Tensor) -> torch.Tensor:
-        """Default forward behavior equals ``prefill``."""
+        """Run the default forward path, equivalent to ``prefill``."""
         return self.prefill(hidden_state)

@@ -21,6 +21,7 @@ class ForwardResult:
         normalizers: Final per-row softmax denominators (float32).
         row_max: Final per-row running maxima (float32).
         saved_state: Optional debug metadata (loop order, pipeline traces).
+
     """
 
     out: torch.Tensor

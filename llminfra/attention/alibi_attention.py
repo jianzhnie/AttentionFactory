@@ -54,7 +54,7 @@ class ALiBiAttention(BaseAttention):
         scores = torch.matmul(query, key.transpose(-1, -2)) * self.scale_factor
         scores = scores + self.alibi(seq_len).to(scores.dtype)
         weights = self.compute_attention_weights(scores, attention_mask)
-        output = torch.matmul(weights, value)
+        output: torch.Tensor = torch.matmul(weights, value)
         output = self.o_proj(self.combine_head(output))
         if return_attention_weights:
             return output, weights
@@ -75,6 +75,7 @@ class ALiBiAttention(BaseAttention):
         return x.reshape(batch_size, self.num_heads, seq_len, self.head_dim)
 
     def extra_repr(self) -> str:
+        """Return a string representation of the module's extra information."""
         return f"{super().extra_repr()}, num_kv_groups={self.num_kv_groups}"
 
 

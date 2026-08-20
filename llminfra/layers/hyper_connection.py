@@ -35,6 +35,7 @@ class ManifoldConstrainedHyperConnection(nn.Module):
         sinkhorn_iters: Number of normalization iterations for the mixing
             matrix.  More iterations improve the doubly-stochastic constraint.
         init_scale: Initial branch contribution before stream mixing.
+
     """
 
     def __init__(

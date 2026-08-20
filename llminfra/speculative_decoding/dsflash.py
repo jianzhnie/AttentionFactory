@@ -104,7 +104,7 @@ class DSparkDecoder(nn.Module):
             append_bonus_token=self.append_bonus_token,
             pad_token_id=self.pad_token_id,
         )
-        output = decoder(input_ids)
+        output: torch.Tensor = decoder(input_ids)
         self.scheduler.update(
             decoder.last_num_accepted,
             decoder.last_num_drafted,
@@ -112,6 +112,7 @@ class DSparkDecoder(nn.Module):
         return output
 
     def extra_repr(self) -> str:
+        """Return a string representation of the module's extra information."""
         return (
             f"draft_length={self.scheduler.draft_length}, "
             f"temperature={self.temperature}, "

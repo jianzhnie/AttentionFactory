@@ -30,6 +30,7 @@ class LightningAttention(BaseAttention):
             past blocks); this flag controls the intra-block softmax mask.
         dropout: Dropout applied to the output.
         bias: Whether linear projections use biases.
+
     """
 
     def __init__(
@@ -140,7 +141,7 @@ class LightningAttention(BaseAttention):
             state = state + torch.einsum("bhsf,bhsd->bhfd", k_block, v_block)
             normalizer = normalizer + k_block.sum(dim=(2, 3), keepdim=True)
 
-        output = torch.cat(outputs, dim=2)
+        output: torch.Tensor = torch.cat(outputs, dim=2)
         output = self.o_proj(self.combine_head(output))
         if self.training and self.dropout_prob > 0:
             output = self.dropout(output)
@@ -179,6 +180,7 @@ class LightningAttention(BaseAttention):
         return attention_mask.bool()
 
     def extra_repr(self) -> str:
+        """Return a string representation of the module's extra information."""
         return (
             f"{super().extra_repr()}, feature_dim={self.feature_dim}, "
             f"block_size={self.block_size}, kernel={self.kernel_name}, "

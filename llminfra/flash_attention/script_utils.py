@@ -30,6 +30,7 @@ def validate_fp8_support(
     Raises:
         ValueError: If the FP8 request is not supported for the given
             version / script / benchmark combination.
+
     """
     if not fp8:
         return

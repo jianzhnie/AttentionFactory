@@ -134,6 +134,7 @@ class T5RelativePositionBias(BasePositionalEncoding):
         max_distance: Distances at or beyond this value share the final bucket.
         bidirectional: Use separate positive/negative buckets for encoders.
         max_seq_len: Default length when :meth:`forward` receives no input.
+
     """
 
     def __init__(

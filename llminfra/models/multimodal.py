@@ -44,6 +44,7 @@ class VisionEncoderAdapter(nn.Module):
             encoder.
         hidden_size: Model hidden dimension to project into.
         bias: Whether to use a bias in the projection.
+
     """
 
     def __init__(self, vision_dim: int, hidden_size: int, bias: bool = True) -> None:
@@ -66,6 +67,7 @@ class VisionEncoderAdapter(nn.Module):
 
         Returns:
             Tensor of shape ``(batch, num_patches, hidden_size)``.
+
         """
         if vision_features.dim() != 3:
             raise ValueError("vision_features must be 3D")
@@ -74,9 +76,11 @@ class VisionEncoderAdapter(nn.Module):
                 f"vision_features last dim must be {self.vision_dim}, "
                 f"got {vision_features.size(-1)}"
             )
-        return self.proj(vision_features)
+        projected: torch.Tensor = self.proj(vision_features)
+        return projected
 
     def extra_repr(self) -> str:
+        """Report the projection dimensions shown in the module ``repr``."""
         return f"vision_dim={self.vision_dim}, hidden_size={self.hidden_size}"
 
 
@@ -95,6 +99,7 @@ class CrossAttentionFuser(CrossAttention):
         num_heads: Number of attention heads. Must divide ``hidden_size``.
         dropout: Dropout probability for attention weights.
         bias: Whether to use bias in the linear projections.
+
     """
 
     # Late fusion reuses the cross-attention signature (separate text/vision
@@ -123,6 +128,7 @@ class CrossAttentionFuser(CrossAttention):
             Fused tensor of shape ``(batch, text_len, hidden_size)``, and
             optionally the weights of shape ``(batch, num_heads, text_len,
             num_patches)``.
+
         """
         return super().forward(
             text_state,
@@ -152,6 +158,7 @@ def build_multimodal_position_ids(
     All examples in a dense batch must contain the same number of vision
     tokens. Text positions begin after the largest axis coordinate, matching
     the non-overlapping multimodal position convention used by mRoPE models.
+
     """
     if image_grid_thw.dim() != 2 or image_grid_thw.size(-1) != 3:
         raise ValueError("image_grid_thw must have shape (batch, 3)")
@@ -232,6 +239,9 @@ class MultimodalCausalLM(nn.Module):
         max_seq_len: int = 4096,
         attention_name: str = "gqa",
         attention_kwargs: dict[str, Any] | None = None,
+        # Forwarded verbatim to ``CausalLMModel``; the values are the
+        # heterogeneous option types of that constructor, so they stay Any
+        # (plain object/TypedDict were verified to break mypy here).
         **language_model_kwargs: Any,
     ) -> None:
         super().__init__()

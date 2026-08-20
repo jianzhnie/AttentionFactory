@@ -81,6 +81,7 @@ def get_activation(name: str) -> Callable[[torch.Tensor], torch.Tensor]:
 
     Raises:
         ValueError: If ``name`` is not a registered activation.
+
     """
     if name not in ACTIVATIONS:
         raise ValueError(

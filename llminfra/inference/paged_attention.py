@@ -103,6 +103,7 @@ class PagedAttentionCache:
             seq_id: Logical sequence id.
             key: Shape ``(seq_len, num_heads, head_dim)``.
             value: Same shape as ``key``.
+
         """
         if key.dim() != 3 or value.dim() != 3:
             raise ValueError("key and value must have shape (seq, heads, head_dim)")
@@ -203,6 +204,7 @@ def paged_attention(
 
     Returns:
         Output tensor of shape ``(q_len, num_heads, head_dim)``.
+
     """
     if query.dim() != 3:
         raise ValueError("query must have shape (q_len, heads, head_dim)")

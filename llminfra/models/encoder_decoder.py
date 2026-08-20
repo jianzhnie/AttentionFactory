@@ -41,6 +41,7 @@ class CrossAttention(BaseAttention):
         dropout: Dropout probability for attention weights. Defaults to 0.0
             so the module is deterministic in eval-style teaching examples.
         bias: Whether to use bias in the linear projections.
+
     """
 
     def __init__(
@@ -83,6 +84,7 @@ class CrossAttention(BaseAttention):
             Output tensor of shape ``(batch, q_len, hidden_size)``, and
             optionally the weights of shape ``(batch, num_heads, q_len,
             kv_len)``.
+
         """
         if query_state.dim() != 3 or key_value_state.dim() != 3:
             raise ValueError("query_state and key_value_state must be 3D")
@@ -120,6 +122,7 @@ class EncoderBlock(nn.Module):
         intermediate_size: FFN intermediate dimension.
         norm_eps: RMSNorm epsilon.
         dropout: Dropout probability for the attention weights.
+
     """
 
     def __init__(
@@ -155,6 +158,7 @@ class EncoderBlock(nn.Module):
 
         Returns:
             Tensor of shape ``(batch, src_len, hidden_size)``.
+
         """
         hidden_state = hidden_state + self.attention(
             self.norm1(hidden_state), attention_mask=attention_mask
@@ -183,6 +187,7 @@ class DecoderBlock(nn.Module):
         intermediate_size: FFN intermediate dimension.
         norm_eps: RMSNorm epsilon.
         dropout: Dropout probability for the attention weights.
+
     """
 
     def __init__(
@@ -228,6 +233,7 @@ class DecoderBlock(nn.Module):
 
         Returns:
             Tensor of shape ``(batch, tgt_len, hidden_size)``.
+
         """
         hidden_state = hidden_state + self.self_attention(
             self.norm1(hidden_state), attention_mask=self_attention_mask
@@ -268,6 +274,7 @@ class EncoderDecoderModel(nn.Module):
         dropout: Dropout probability for the attention weights.
         tie_word_embeddings: Share the LM head weight with the token
             embedding (as T5 does). Defaults to True.
+
     """
 
     def __init__(
@@ -344,6 +351,7 @@ class EncoderDecoderModel(nn.Module):
 
         Returns:
             Logits of shape ``(batch, tgt_len, vocab_size)``.
+
         """
         if src_ids.dim() != 2 or tgt_ids.dim() != 2:
             raise ValueError("src_ids and tgt_ids must have shape (batch, seq_len)")

@@ -23,6 +23,7 @@ class BlockSparseIndexer(nn.Module):
         idempotently, so the padding does not double-count attention. Block
         scores are means over zero-padded tails, so the final partial block
         is scored slightly low.
+
     """
 
     def __init__(
@@ -114,6 +115,7 @@ class BlockSparseIndexer(nn.Module):
         return selected
 
     def extra_repr(self) -> str:
+        """Return a string representation of the module's extra information."""
         return (
             f"hidden_size={self.hidden_size}, num_heads={self.num_heads}, "
             f"block_size={self.block_size}, top_k={self.top_k}, "

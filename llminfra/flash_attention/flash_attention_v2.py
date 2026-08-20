@@ -68,6 +68,7 @@ def forward(
     Returns:
         A `ForwardResult` with the attention output, the per-row log-sum-exp,
         and the final online-softmax statistics.
+
     """
     config = config or FlashAttentionConfig()
     q, k, key_padding_mask = prepare_inputs(
@@ -182,6 +183,7 @@ def backward(
 
     Returns:
         A `BackwardResult` with the gradients grad_q, grad_k and grad_v.
+
     """
     config = config or FlashAttentionConfig()
     q, k, key_padding_mask = prepare_inputs(

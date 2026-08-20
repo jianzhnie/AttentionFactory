@@ -35,6 +35,7 @@ def ring_attention(
         v: Shape ``(batch, heads, kv_len, value_dim)``.
         causal: Apply causal masking.
         num_chunks: Number of sequence chunks.
+
     """
     if q.dim() != 4 or k.dim() != 4 or v.dim() != 4:
         raise ValueError("q, k, v must be 4D tensors")
@@ -132,6 +133,7 @@ def distributed_ring_attention(
 
     Returns:
         Exact local-query outputs shaped like ``v`` except for sequence length.
+
     """
     if not dist.is_available() or not dist.is_initialized():
         raise RuntimeError("distributed_ring_attention requires torch.distributed")
@@ -198,7 +200,8 @@ def _rotate_to_next_rank(
     flat_size = tensor.numel()
     send = tensor.new_zeros((world_size, flat_size))
     send[(rank + 1) % world_size] = tensor.reshape(-1)
-    received = dist_nn.all_to_all_single(
+    # torch.distributed.nn's autograd-aware collectives are untyped.
+    received: torch.Tensor = dist_nn.all_to_all_single(  # type: ignore[no-untyped-call]
         torch.empty_like(send),
         send,
         group=process_group,
@@ -221,6 +224,7 @@ class RingAttention(BaseAttention):
     The forward pass is always causal and does not support
     ``attention_mask``; use another attention module if you need padding or
     custom masks.
+
     """
 
     def __init__(
@@ -258,6 +262,7 @@ class RingAttention(BaseAttention):
             ValueError: If ``return_attention_weights`` is True or an
                 ``attention_mask`` is passed (chunked causal attention does
                 not support custom masks).
+
         """
         if return_attention_weights:
             raise ValueError("RingAttention does not materialize attention weights")
@@ -268,7 +273,7 @@ class RingAttention(BaseAttention):
         k = self.split_head(self.k_proj(hidden_state))
         v = self.split_head(self.v_proj(hidden_state))
         if self.distributed:
-            output = distributed_ring_attention(
+            output: torch.Tensor = distributed_ring_attention(
                 q,
                 k,
                 v,
@@ -289,6 +294,7 @@ class RingAttention(BaseAttention):
         return output
 
     def extra_repr(self) -> str:
+        """Return a string representation of the module's extra information."""
         return (
             f"{super().extra_repr()}, num_chunks={self.num_chunks}, "
             f"distributed={self.distributed}"

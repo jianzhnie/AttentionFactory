@@ -79,6 +79,7 @@ class BaseAttention(nn.Module, ABC):
 
         Returns:
             Output tensor and optionally attention weights
+
         """
 
     def split_head(self, x: torch.Tensor, num_heads: int | None = None) -> torch.Tensor:
@@ -92,6 +93,7 @@ class BaseAttention(nn.Module, ABC):
 
         Returns:
             Tensor of shape (batch_size, num_heads, seq_len, head_dim)
+
         """
         num_heads = num_heads or self.num_heads
         batch_size, seq_len, features = x.size()
@@ -119,6 +121,7 @@ class BaseAttention(nn.Module, ABC):
 
         Returns:
             The (possibly normalized) query and key tensors.
+
         """
         if not self.qk_norm:
             return query, key
@@ -132,6 +135,7 @@ class BaseAttention(nn.Module, ABC):
 
         Returns:
             Tensor of shape (batch_size, seq_len, hidden_size)
+
         """
         batch_size, _, seq_len, _ = x.size()
         return (
@@ -149,6 +153,7 @@ class BaseAttention(nn.Module, ABC):
 
         Returns:
             Masked attention scores
+
         """
         if attention_mask is not None:
             attention_scores = torch.masked_fill(
@@ -170,13 +175,15 @@ class BaseAttention(nn.Module, ABC):
         Returns:
             Normalized attention weights. Rows whose keys are all masked are
             defined to be all-zero (softmax over all ``-inf`` would be NaN).
+
         """
         attention_scores = self.apply_attention_mask(attention_scores, attention_mask)
-        attention_weights = torch.softmax(attention_scores, dim=-1)
+        attention_weights: torch.Tensor = torch.softmax(attention_scores, dim=-1)
         # Fully masked rows produce NaN in the softmax; define their weights
         # (and therefore their output) as zero instead.
         attention_weights = torch.nan_to_num(attention_weights, nan=0.0)
-        return self.dropout(attention_weights)
+        attention_weights = self.dropout(attention_weights)
+        return attention_weights
 
     @staticmethod
     def _init_projections(*modules: nn.Linear) -> None:
@@ -209,6 +216,7 @@ def validate_attention_inputs(
 
     Raises:
         ValueError: If input tensors have invalid shapes
+
     """
     if hidden_state.dim() != 3:
         raise ValueError(f"hidden_state must be 3D, got {hidden_state.dim()}D")

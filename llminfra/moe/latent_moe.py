@@ -18,6 +18,7 @@ class LatentMoE(nn.Module):
         intermediate_size: Expert FFN intermediate dimension.
         top_k: Number of experts selected per token.
         residual: If True, add the input to the projected output.
+
     """
 
     def __init__(

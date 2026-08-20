@@ -39,6 +39,7 @@ class GatedDeltaNet(BaseAttention):
         normalize: If True, divide the recurrent output by the accumulated
             gate denominator. This is a teaching convenience; exact models
             may not use it.
+
     """
 
     def __init__(
@@ -136,7 +137,7 @@ class GatedDeltaNet(BaseAttention):
                 output_t = output_t / safe_denominator
             outputs.append(output_t)
 
-        output = torch.stack(outputs, dim=2)
+        output: torch.Tensor = torch.stack(outputs, dim=2)
         output = self.o_proj(self.combine_head(output))
         if self.training and self.dropout_prob > 0:
             output = self.dropout(output)
@@ -169,6 +170,7 @@ class GatedDeltaNet(BaseAttention):
         return attention_mask.bool()
 
     def extra_repr(self) -> str:
+        """Return a string representation of the module's extra information."""
         return (
             f"{super().extra_repr()}, feature_dim={self.feature_dim}, "
             f"beta_init={self.beta_init}, normalize={self.normalize}"

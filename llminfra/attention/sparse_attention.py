@@ -9,6 +9,7 @@ but do not replace the fused block-gather kernels used by production systems.
 from __future__ import annotations
 
 import math
+from typing import cast
 
 import torch
 import torch.nn.functional as F
@@ -35,6 +36,7 @@ class QueryKeyBlockIndexer(nn.Module):
     Notes:
         Hard ``topk`` indices are discrete. Use :meth:`routing_scores` when an
         auxiliary distillation or ranking loss should train the indexer.
+
     """
 
     def __init__(
@@ -146,6 +148,7 @@ class QueryKeyBlockIndexer(nn.Module):
         return block_sum / counts.to(hidden_state.dtype)[None, :, None]
 
     def extra_repr(self) -> str:
+        """Return a string representation of the module's extra information."""
         return (
             f"hidden_size={self.hidden_size}, num_index_heads={self.num_index_heads}, "
             f"block_size={self.block_size}, top_k={self.top_k}, "
@@ -197,7 +200,8 @@ class DynamicSparseAttention(BaseAttention):
 
     def select_blocks(self, hidden_state: torch.Tensor) -> torch.Tensor:
         """Return the hard block choices used by the sparse attention path."""
-        return self.indexer(hidden_state)
+        # Module calls return Any in torch's stubs; the indexer yields a Tensor.
+        return cast(torch.Tensor, self.indexer(hidden_state))
 
     def routing_scores(self, hidden_state: torch.Tensor) -> torch.Tensor:
         """Return differentiable index scores for an auxiliary routing loss."""
@@ -211,11 +215,14 @@ class DynamicSparseAttention(BaseAttention):
     ) -> torch.Tensor | tuple[torch.Tensor, torch.Tensor]:
         """Select blocks and execute exact attention on selected tokens."""
         validate_attention_inputs(hidden_state, attention_mask, self.num_heads)
-        return self.sparse_attention(
-            hidden_state,
-            attention_mask=attention_mask,
-            return_attention_weights=return_attention_weights,
-            block_indices=self.select_blocks(hidden_state),
+        return cast(
+            "torch.Tensor | tuple[torch.Tensor, torch.Tensor]",
+            self.sparse_attention(
+                hidden_state,
+                attention_mask=attention_mask,
+                return_attention_weights=return_attention_weights,
+                block_indices=self.select_blocks(hidden_state),
+            ),
         )
 
 
@@ -271,7 +278,7 @@ class MiniMaxSparseAttention(DynamicSparseAttention):
 
     def select_blocks(self, hidden_state: torch.Tensor) -> torch.Tensor:
         """Return group selections expanded over their query heads."""
-        group_indices = self.indexer(hidden_state)
+        group_indices: torch.Tensor = self.indexer(hidden_state)
         return group_indices.repeat_interleave(self.heads_per_group, dim=1)
 
     def routing_scores(self, hidden_state: torch.Tensor) -> torch.Tensor:
@@ -361,12 +368,13 @@ class HierarchicalCompressedAttention(BaseAttention):
             attention_mask=attention_mask,
         )
         gate = torch.sigmoid(self.mix_logit).to(hidden_state.dtype)
-        output = gate * fine_output + (1.0 - gate) * coarse_output
+        output: torch.Tensor = gate * fine_output + (1.0 - gate) * coarse_output
         if return_attention_weights:
             return output, fine_weights
         return output
 
     def extra_repr(self) -> str:
+        """Return a string representation of the module's extra information."""
         return (
             f"{super().extra_repr()}, fine_compress_ratio="
             f"{self.fine_compress_ratio}, coarse_compress_ratio="

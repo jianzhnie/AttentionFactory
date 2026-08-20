@@ -8,6 +8,8 @@ provides a simple routing wrapper around ``LinearAttention`` and
 
 from __future__ import annotations
 
+from typing import cast
+
 import torch
 
 from .base_attention import BaseAttention, validate_attention_inputs
@@ -27,6 +29,7 @@ class HybridAttention(BaseAttention):
         num_kv_groups: KV groups used by the full attention branch.
         dropout: Dropout probability for full attention weights.
         bias: Whether linear projections use biases.
+
     """
 
     def __init__(
@@ -75,18 +78,27 @@ class HybridAttention(BaseAttention):
         """Route ``layer_index`` to linear or full attention."""
         validate_attention_inputs(hidden_state, attention_mask, self.num_heads)
         if self.is_linear_layer(layer_index):
-            return self.linear_attention(
+            # Module calls return Any in torch's stubs; both submodules are
+            # attention modules with the same declared return type.
+            return cast(
+                "torch.Tensor | tuple[torch.Tensor, torch.Tensor]",
+                self.linear_attention(
+                    hidden_state,
+                    attention_mask=attention_mask,
+                    return_attention_weights=return_attention_weights,
+                ),
+            )
+        return cast(
+            "torch.Tensor | tuple[torch.Tensor, torch.Tensor]",
+            self.full_attention(
                 hidden_state,
                 attention_mask=attention_mask,
                 return_attention_weights=return_attention_weights,
-            )
-        return self.full_attention(
-            hidden_state,
-            attention_mask=attention_mask,
-            return_attention_weights=return_attention_weights,
+            ),
         )
 
     def extra_repr(self) -> str:
+        """Return a string representation of the module's extra information."""
         return (
             f"{super().extra_repr()}, "
             f"linear_interval={self.linear_interval}, "

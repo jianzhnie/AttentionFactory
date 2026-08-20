@@ -111,6 +111,7 @@ class ClampedSwiGLUFFN(_GatedFFN):
             to the gated product before the down projection.
         alpha: Scale applied to the up projection before clamping.
         bias: Whether the linear projections use biases.
+
     """
 
     def __init__(
@@ -175,6 +176,7 @@ def build_feed_forward(
     Raises:
         ValueError: If ``kind`` is unknown, or ``kind="custom"`` is used
             without a ``ratio``.
+
     """
     if hidden_size < 1 or multiple_of < 1:
         raise ValueError("hidden_size and multiple_of must be >= 1")

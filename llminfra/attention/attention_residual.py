@@ -32,4 +32,5 @@ class AttentionResidual(nn.Module):
         return hidden_state + self.weight * attention_output
 
     def extra_repr(self) -> str:
+        """Return a string representation of the module's extra information."""
         return f"hidden_size={self.hidden_size}, init_scale={self.init_scale}"

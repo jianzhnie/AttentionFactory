@@ -71,7 +71,17 @@ select = [
     "RUF",   # Ruff-specific rules
 ]
 ignore = [
+    # Classes are documented in the class docstring (Google style), not in
+    # `__init__`; pydocstyle recommends disabling D107 for that convention.
+    "D107",
+    # Incompatible-rule pairs: keep the ruff defaults (D211, D212) explicit.
+    "D203",
+    "D213",
 ]
+
+[tool.ruff.lint.per-file-ignores]
+# Test functions need neither annotations nor docstrings.
+"tests/**" = ["ANN", "D"]
 
 [tool.ruff.lint.isort]
 known-first-party = ["llminfra"]

@@ -48,6 +48,7 @@ class HybridSSMBlock(nn.Module):
             token (weights are shared across positions). Defaults to one
             fresh ``MultiHeadAttention`` per ``"attn"`` token.
         d_state: SSM state dimension for each ``Mamba2Layer``.
+
     """
 
     def __init__(
@@ -100,6 +101,7 @@ class HybridSSMBlock(nn.Module):
 
         Returns:
             Final hidden states, same shape as the input.
+
         """
         for layer in self.layers:
             if isinstance(layer, Mamba2Layer):
@@ -140,6 +142,7 @@ class HybridLayerStack(nn.Module):
         full_attention: Optional custom full-attention module.
         dropout: Dropout on mixer and FFN residual branches.
         norm_eps: RMSNorm epsilon.
+
     """
 
     def __init__(

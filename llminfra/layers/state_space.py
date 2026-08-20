@@ -19,6 +19,7 @@ class Mamba2State:
             ``(batch, d_inner, d_state)``.
         convolution: Previous unprojected convolution inputs shaped
             ``(batch, d_inner, conv_kernel - 1)``.
+
     """
 
     ssm: torch.Tensor
@@ -46,6 +47,7 @@ class Mamba2Layer(nn.Module):
         dt_min: Minimum selective discretization step.
         dt_max: Maximum selective discretization step.
         bias: Enable biases on projections and the causal convolution.
+
     """
 
     def __init__(
@@ -235,6 +237,7 @@ class Mamba2Layer(nn.Module):
             state: Optional state returned by a previous call.
             scan: ``"recurrent"`` or mathematically equivalent ``"chunked"``.
             chunk_size: Positive chunk width for ``scan="chunked"``.
+
         """
         if x.dim() != 3 or x.size(-1) != self.hidden_size:
             raise ValueError(f"x must have shape (batch, seq, {self.hidden_size})")
