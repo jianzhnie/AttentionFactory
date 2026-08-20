@@ -236,7 +236,9 @@ class DynamicNTKRotaryEmbedding(BasePositionalEncoding):
         )
         # Memo for cos/sin tables of scaled (beyond-original-context) lengths,
         # keyed by (seq_len, device); bounded and rebuilt after device moves.
-        self._scaled_cache: dict[tuple[int, str], tuple[torch.Tensor, torch.Tensor]] = {}
+        self._scaled_cache: dict[
+            tuple[int, str], tuple[torch.Tensor, torch.Tensor]
+        ] = {}
 
     def _build_cos_sin(self, seq_len: int) -> tuple[torch.Tensor, torch.Tensor]:
         """Build the unscaled float32 cos/sin table for short sequences."""
@@ -336,7 +338,9 @@ class PartialRotaryPositionEmbedding(RotaryPositionEmbedding):
             raise ValueError(
                 f"x last dim {x.size(-1)} must equal full_dim {self.full_dim}"
             )
-        rotated = super().forward(x[..., : self.rotated_dim])
+        # The channel slice is non-contiguous; one small copy lets the
+        # rotary kernel use its contiguous fast path.
+        rotated = super().forward(x[..., : self.rotated_dim].contiguous())
         return torch.cat([rotated, x[..., self.rotated_dim :]], dim=-1)
 
     def extra_repr(self) -> str:
@@ -430,7 +434,7 @@ class LongRoPEScaledRotaryEmbedding(RotaryPositionEmbedding):
             dtype=dtype,
         )
 
-    def _build_cos_sin(
+    def _build_factored_cos_sin(
         self, seq_len: int, factors: torch.Tensor
     ) -> tuple[torch.Tensor, torch.Tensor]:
         """Build the float32 cos/sin table for one factor regime."""
@@ -456,7 +460,7 @@ class LongRoPEScaledRotaryEmbedding(RotaryPositionEmbedding):
             x.dtype,
             self.max_seq_len,
             self.dim // 2,
-            lambda length: self._build_cos_sin(length, factors),
+            lambda length: self._build_factored_cos_sin(length, factors),
             slot="_long" if is_long else "_short",
         )
         return apply_rotary_pos_emb(x, cos, sin)

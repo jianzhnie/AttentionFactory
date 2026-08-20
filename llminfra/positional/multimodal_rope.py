@@ -81,23 +81,28 @@ class MultiModalRotaryPositionEmbedding(BasePositionalEncoding):
         seq_len = x.size(-2)
         num_axes = len(self.mrope_section)
 
-        if position_ids is None:
-            positions = torch.arange(seq_len, device=x.device).expand(
-                num_axes, batch_size, seq_len
-            )
-        else:
-            positions = position_ids.to(device=x.device)
-            if positions.dim() == 2:
-                positions = positions[:, None, :].expand(-1, batch_size, -1)
-            expected = (num_axes, batch_size, seq_len)
-            if tuple(positions.shape) != expected:
-                raise ValueError(
-                    f"position_ids must have shape {expected}, "
-                    f"got {tuple(positions.shape)}"
-                )
-
         inv_freq = self.inv_freq
         assert isinstance(inv_freq, torch.Tensor)
+        if position_ids is None:
+            # Text-only fast path: every axis receives the token index, so
+            # the per-axis loop collapses into one outer product whose
+            # (seq, freq) cos/sin broadcasts over batch and heads.
+            positions = torch.arange(seq_len, device=x.device, dtype=x.dtype)
+            frequency = torch.outer(positions, inv_freq.to(dtype=x.dtype))
+            cos = frequency.cos()
+            sin = frequency.sin()
+            return apply_rotary_pos_emb(x, cos, sin)
+
+        positions = position_ids.to(device=x.device)
+        if positions.dim() == 2:
+            positions = positions[:, None, :].expand(-1, batch_size, -1)
+        expected = (num_axes, batch_size, seq_len)
+        if tuple(positions.shape) != expected:
+            raise ValueError(
+                f"position_ids must have shape {expected}, "
+                f"got {tuple(positions.shape)}"
+            )
+
         frequencies: list[torch.Tensor] = []
         start = 0
         for axis, section in enumerate(self.mrope_section):
