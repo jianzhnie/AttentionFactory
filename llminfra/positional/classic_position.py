@@ -82,7 +82,8 @@ class SinusoidalPositionEmbedding(BasePositionalEncoding):
         encoding = self.encoding
         assert isinstance(encoding, torch.Tensor)
         positional = encoding[positions].to(dtype=x.dtype)
-        return self.dropout(x + positional)
+        output: torch.Tensor = self.dropout(x + positional)
+        return output
 
 
 class LearnedAbsolutePositionEmbedding(BasePositionalEncoding):
@@ -117,7 +118,8 @@ class LearnedAbsolutePositionEmbedding(BasePositionalEncoding):
             self.max_seq_len,
             position_ids,
         )
-        return self.dropout(x + self.embedding(positions))
+        output: torch.Tensor = self.dropout(x + self.embedding(positions))
+        return output
 
 
 class T5RelativePositionBias(BasePositionalEncoding):
@@ -172,7 +174,7 @@ class T5RelativePositionBias(BasePositionalEncoding):
         memory = torch.arange(resolved_key_length, device=device)[None, :]
         relative_position = memory - context
         buckets = self._relative_position_bucket(relative_position)
-        values = self.relative_attention_bias(buckets)
+        values: torch.Tensor = self.relative_attention_bias(buckets)
         return values.permute(2, 0, 1).unsqueeze(0)
 
     def _resolve_lengths(

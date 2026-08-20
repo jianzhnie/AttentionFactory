@@ -213,12 +213,16 @@ class EncoderOnlyModel(nn.Module):
             self.output_head,
             SequenceClassificationHead | RewardModelHead | EmbeddingHead,
         ):
-            return self.output_head(hidden_state, attention_mask)
+            output: torch.Tensor = self.output_head(hidden_state, attention_mask)
+            return output
         if isinstance(self.output_head, TokenClassificationHead):
-            return self.output_head(hidden_state)
-        return self.output_head(hidden_state)
+            output = self.output_head(hidden_state)
+            return output
+        output = self.output_head(hidden_state)
+        return output
 
     def extra_repr(self) -> str:
+        """Report the architecture hyperparameters shown in the module ``repr``."""
         return (
             f"vocab_size={self.vocab_size}, hidden_size={self.hidden_size}, "
             f"num_layers={self.num_layers}, num_heads={self.num_heads}, "

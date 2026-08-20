@@ -112,6 +112,7 @@ class HybridSSMBlock(nn.Module):
         return hidden_state
 
     def extra_repr(self) -> str:
+        """Show the sublayer pattern and layer sizes in ``repr(self)``."""
         return (
             f"hidden_size={self.hidden_size}, num_heads={self.num_heads}, "
             f"pattern={':'.join(self.pattern)}"
@@ -258,6 +259,7 @@ class HybridLayerStack(nn.Module):
         return hidden_state
 
     def extra_repr(self) -> str:
+        """Show the layer map and stack settings in ``repr(self)``."""
         return (
             f"hidden_size={self.hidden_size}, num_heads={self.num_heads}, "
             f"layer_map={':'.join(self.layer_map)}, "

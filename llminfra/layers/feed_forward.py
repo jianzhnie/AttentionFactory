@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import cast
+
 import torch
 import torch.nn.functional as F
 from torch import nn
@@ -28,9 +30,10 @@ class SwiGLUFFN(nn.Module):
         self._init_weights()
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
+        """Compute ``down(silu(gate(x)) * up(x))`` over the last dimension."""
         gate = F.silu(self.gate_proj(x))
         up = self.up_proj(x)
-        return self.down_proj(gate * up)
+        return cast(torch.Tensor, self.down_proj(gate * up))
 
     def _init_weights(self) -> None:
         for module in (self.gate_proj, self.up_proj, self.down_proj):
@@ -39,6 +42,7 @@ class SwiGLUFFN(nn.Module):
                 nn.init.zeros_(module.bias)
 
     def extra_repr(self) -> str:
+        """Show the hidden and intermediate sizes in ``repr(self)``."""
         return (
             f"hidden_size={self.hidden_size}, "
             f"intermediate_size={self.intermediate_size}"
@@ -66,7 +70,8 @@ class FeedForward(nn.Module):
         self._init_weights()
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        return self.w2(self._activation(self.w1(x)))
+        """Compute ``w2(activation(w1(x)))`` over the last dimension."""
+        return cast(torch.Tensor, self.w2(self._activation(self.w1(x))))
 
     def _activation(self, x: torch.Tensor) -> torch.Tensor:
         if self.activation_name == "gelu":

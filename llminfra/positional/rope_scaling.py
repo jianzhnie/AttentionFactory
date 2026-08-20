@@ -284,6 +284,7 @@ class PartialRotaryPositionEmbedding(RotaryPositionEmbedding):
         return torch.cat([rotated, x[..., self.rotated_dim :]], dim=-1)
 
     def extra_repr(self) -> str:
+        """Show the full dimension, rotated dimension, and rotary factor."""
         return (
             f"full_dim={self.full_dim}, rotated_dim={self.rotated_dim}, "
             f"partial_rotary_factor={self.partial_rotary_factor}"
@@ -315,6 +316,7 @@ class PositionInterpolation(RotaryPositionEmbedding):
         return apply_rotary_pos_emb(x, cos, sin)
 
     def extra_repr(self) -> str:
+        """Append the original training context length to the base repr."""
         return (
             f"{super().extra_repr()}, "
             f"original_max_position_embeddings="

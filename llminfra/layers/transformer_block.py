@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import cast
+
 import torch
 from torch import nn
 
@@ -165,9 +167,11 @@ class TransformerBlock(nn.Module):
     ) -> torch.Tensor:
         """Add the attention output back, optionally through the learned gate."""
         if self.attention_mhc is not None:
-            return self.attention_mhc(hidden_state, attention_output)
+            return cast(
+                torch.Tensor, self.attention_mhc(hidden_state, attention_output)
+            )
         if self.attn_res is not None:
-            return self.attn_res(hidden_state, attention_output)
+            return cast(torch.Tensor, self.attn_res(hidden_state, attention_output))
         return hidden_state + attention_output
 
     def _add_ffn_residual(
@@ -175,7 +179,7 @@ class TransformerBlock(nn.Module):
     ) -> torch.Tensor:
         """Add the FFN branch through plain residual or mHC mixing."""
         if self.ffn_mhc is not None:
-            return self.ffn_mhc(hidden_state, ffn_output)
+            return cast(torch.Tensor, self.ffn_mhc(hidden_state, ffn_output))
         return hidden_state + ffn_output
 
     def forward(
@@ -235,7 +239,8 @@ class TransformerBlock(nn.Module):
             if self.deepnorm1 is None or self.deepnorm2 is None:
                 raise RuntimeError("deepnorm modules were not initialized")
             hidden_state = self.deepnorm1(hidden_state, attention_output)
-            return self.deepnorm2(hidden_state, self.ffn_scale(self.ffn(hidden_state)))
+            ffn_output = self.ffn_scale(self.ffn(hidden_state))
+            return cast(torch.Tensor, self.deepnorm2(hidden_state, ffn_output))
         if self.norm_style == "sandwich":
             if self.norm3 is None or self.norm4 is None:
                 raise RuntimeError("sandwich norms were not initialized")
@@ -245,8 +250,11 @@ class TransformerBlock(nn.Module):
             if self.norm1 is None or self.norm2 is None:
                 raise RuntimeError("post-norm modules were not initialized")
             hidden_state = self.norm1(hidden_state)
-            return self.norm2(
-                self._add_ffn_residual(hidden_state, self.ffn(hidden_state))
+            return cast(
+                torch.Tensor,
+                self.norm2(
+                    self._add_ffn_residual(hidden_state, self.ffn(hidden_state))
+                ),
             )
         if self.norm2 is None:
             raise RuntimeError("norm2 was not initialized")
@@ -266,25 +274,28 @@ class TransformerBlock(nn.Module):
             if self.deepnorm1 is None:
                 raise RuntimeError("deepnorm module was not initialized")
             combined = attention_output + self.ffn_scale(self.ffn(hidden_state))
-            return self.deepnorm1(hidden_state, combined)
+            return cast(torch.Tensor, self.deepnorm1(hidden_state, combined))
         if self.norm_style == "post":
             if self.norm1 is None:
                 raise RuntimeError("norm1 was not initialized")
             ffn_output = self.ffn_scale(self.ffn(hidden_state))
             hidden_state = self._add_attention_residual(hidden_state, attention_output)
-            return self.norm1(hidden_state + ffn_output)
+            return cast(torch.Tensor, self.norm1(hidden_state + ffn_output))
         if self.norm2 is None:
             raise RuntimeError("norm2 was not initialized")
-        ffn_output = self.ffn_scale(self.ffn(self.norm2(hidden_state)))
+        ffn_output = cast(
+            torch.Tensor, self.ffn_scale(self.ffn(self.norm2(hidden_state)))
+        )
         if self.norm_style == "sandwich":
             if self.norm3 is None or self.norm4 is None:
                 raise RuntimeError("sandwich norms were not initialized")
             attention_output = self.norm3(attention_output)
-            ffn_output = self.norm4(ffn_output)
+            ffn_output = cast(torch.Tensor, self.norm4(ffn_output))
         hidden_state = self._add_attention_residual(hidden_state, attention_output)
         return hidden_state + ffn_output
 
     def extra_repr(self) -> str:
+        """Summarize the block's layout and norm settings in ``repr(self)``."""
         return (
             f"hidden_size={self.hidden_size}, num_heads={self.num_heads}, "
             f"intermediate_size={self.intermediate_size}, "

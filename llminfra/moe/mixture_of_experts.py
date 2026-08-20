@@ -36,7 +36,9 @@ class ExpertFFN(nn.Module):
         self._init_weights()
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        return self.w2(self._activation(self.w1(x)))
+        """Apply the gated-style FFN ``w2(act(w1(x)))`` to the input."""
+        output: torch.Tensor = self.w2(self._activation(self.w1(x)))
+        return output
 
     def _activation(self, x: torch.Tensor) -> torch.Tensor:
         if self.activation_name == "silu":
@@ -85,6 +87,7 @@ class TopKRouter(nn.Module):
             straight-through hard mask. The forward weights are the unbiased
             softmax/sigmoid scores of the selected experts (matching the
             top-k path); the gumbel probabilities only provide gradients.
+
     """
 
     def __init__(
@@ -216,9 +219,11 @@ class TopKRouter(nn.Module):
 
     def routing_logits(self, x: torch.Tensor) -> torch.Tensor:
         """Return raw router logits without training noise."""
-        return self.router(x)
+        logits: torch.Tensor = self.router(x)
+        return logits
 
     def extra_repr(self) -> str:
+        """Describe the router's configuration in ``repr(self)``."""
         return (
             f"hidden_size={self.hidden_size}, num_experts={self.num_experts}, "
             f"top_k={self.top_k}, add_noise={self.add_noise}, "
@@ -247,6 +252,7 @@ class ExpertChoiceRouter(nn.Module):
         hidden_size: Input feature dimension.
         num_experts: Number of routed experts.
         top_tokens: Number of tokens each expert selects.
+
     """
 
     def __init__(
@@ -270,6 +276,7 @@ class ExpertChoiceRouter(nn.Module):
         Args:
             x: Token features of shape ``(num_tokens, hidden_size)`` with
                 ``num_tokens >= top_tokens``.
+
         """
         if x.size(0) < self.top_tokens:
             raise ValueError(
@@ -282,6 +289,7 @@ class ExpertChoiceRouter(nn.Module):
         return weights, token_indices
 
     def extra_repr(self) -> str:
+        """Describe the router's configuration in ``repr(self)``."""
         return (
             f"hidden_size={self.hidden_size}, num_experts={self.num_experts}, "
             f"top_tokens={self.top_tokens}"
@@ -300,6 +308,7 @@ class MixtureOfExperts(nn.Module):
             surviving experts of that token are renormalized to sum to 1
             (tokens whose experts were all dropped contribute nothing this
             step). Teaching simplification of expert-level dropout.
+
     """
 
     def __init__(
@@ -357,6 +366,7 @@ class MixtureOfExperts(nn.Module):
         return output.view_as(x)
 
     def extra_repr(self) -> str:
+        """Describe the layer's configuration in ``repr(self)``."""
         return (
             f"hidden_size={self.hidden_size}, num_experts={self.num_experts}, "
             f"intermediate_size={self.intermediate_size}, top_k={self.top_k}, "
@@ -404,12 +414,14 @@ class DeepSeekMoE(nn.Module):
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         """Return routed output plus shared-expert output."""
-        shared = self.shared_experts[0](x)
+        shared: torch.Tensor = self.shared_experts[0](x)
         for expert in self.shared_experts[1:]:
             shared = shared + expert(x)
-        return self.routed(x) + shared
+        routed: torch.Tensor = self.routed(x)
+        return routed + shared
 
     def extra_repr(self) -> str:
+        """Describe the layer's configuration in ``repr(self)``."""
         return (
             f"hidden_size={self.hidden_size}, "
             f"num_routed_experts={self.num_routed_experts}, "
@@ -561,14 +573,15 @@ class ExpertParallelMoE(nn.Module):
 
         send_features = flat[assignment_tokens[order]].contiguous()
         received_features = flat.new_empty(total_received, self.hidden_size)
-        received_features = dist_nn.all_to_all_single(
+        # torch.distributed.nn.functional collectives are untyped in torch.
+        received_features = dist_nn.all_to_all_single(  # type: ignore[no-untyped-call]
             received_features,
             send_features,
             output_split_sizes=recv_splits,
             input_split_sizes=send_splits,
             group=self.process_group,
         )
-        received_weights = dist_nn.all_to_all_single(
+        received_weights = dist_nn.all_to_all_single(  # type: ignore[no-untyped-call]
             assignment_weights.new_empty(total_received),
             assignment_weights[order].contiguous(),
             output_split_sizes=recv_splits,
@@ -608,7 +621,7 @@ class ExpertParallelMoE(nn.Module):
                 expert_output * received_weights[selected, None],
             )
 
-        returned = dist_nn.all_to_all_single(
+        returned = dist_nn.all_to_all_single(  # type: ignore[no-untyped-call]
             flat.new_empty(order.numel(), self.hidden_size),
             received_output,
             output_split_sizes=send_splits,
@@ -619,6 +632,7 @@ class ExpertParallelMoE(nn.Module):
         return output.index_add(0, assignment_tokens[order], returned)
 
     def extra_repr(self) -> str:
+        """Describe the layer's configuration in ``repr(self)``."""
         return (
             f"hidden_size={self.hidden_size}, num_experts={self.num_experts}, "
             f"world_size={self.world_size}, rank={self.rank}, "
@@ -638,6 +652,7 @@ def load_balance_loss(
         router_logits: Shape ``(num_tokens, num_experts)``.
         expert_indices: Shape ``(num_tokens, top_k)``.
         num_experts: Number of routed experts.
+
     """
     if router_logits.size(-1) != num_experts:
         raise ValueError("router_logits last dim must equal num_experts")
@@ -669,6 +684,7 @@ def router_z_loss(router_logits: torch.Tensor) -> torch.Tensor:
 
     Returns:
         Scalar z-loss tensor.
+
     """
     log_z = torch.logsumexp(router_logits, dim=-1)
     return (log_z * log_z).mean()

@@ -32,11 +32,14 @@ def get_positional_encoding(
     dim: int,
     num_heads: int | None = None,
     max_seq_len: int = 4096,
+    # Heterogeneous per-encoding constructor options are forwarded as-is;
+    # each branch validates the keys it requires before constructing.
     **kwargs: Any,
 ) -> BasePositionalEncoding:
     """Create a positional encoding module by name.
 
     Supported names are returned by :func:`list_positional_encodings`.
+    Extra keyword arguments are forwarded to the chosen module's constructor.
     """
     if name in {"none", "nope"}:
         return NoPositionEncoding(dim, max_seq_len=max_seq_len)

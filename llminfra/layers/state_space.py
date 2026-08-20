@@ -267,6 +267,7 @@ class Mamba2Layer(nn.Module):
         return output, Mamba2State(ssm_state, convolution_state)
 
     def extra_repr(self) -> str:
+        """Show hidden/inner/state dims and conv kernel in ``repr(self)``."""
         return (
             f"hidden_size={self.hidden_size}, d_inner={self.d_inner}, "
             f"d_state={self.d_state}, conv_kernel={self.conv_kernel}"

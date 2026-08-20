@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import cast
+
 import torch
 from torch import nn
 
@@ -39,6 +41,7 @@ class RMSNorm(nn.Module):
         return normalized
 
     def extra_repr(self) -> str:
+        """Show hidden size, eps, and the affine flag in ``repr(self)``."""
         return (
             f"hidden_size={self.hidden_size}, eps={self.eps}, "
             f"elementwise_affine={self.elementwise_affine}"
@@ -84,6 +87,7 @@ class LayerNorm(nn.Module):
         return normalized
 
     def extra_repr(self) -> str:
+        """Show hidden size and eps in ``repr(self)``."""
         return f"hidden_size={self.hidden_size}, eps={self.eps}"
 
 
@@ -127,9 +131,10 @@ class DeepNorm(nn.Module):
         Returns:
             ``norm(alpha * residual + sublayer_output)``.
         """
-        return self.norm(residual * self.alpha + sublayer_output)
+        return cast(torch.Tensor, self.norm(residual * self.alpha + sublayer_output))
 
     def extra_repr(self) -> str:
+        """Show hidden size and the residual scale alpha in ``repr(self)``."""
         return f"hidden_size={self.hidden_size}, alpha={self.alpha}"
 
 
@@ -158,4 +163,5 @@ class LayerScale(nn.Module):
         return x * self.weight
 
     def extra_repr(self) -> str:
+        """Show hidden size and the initial scale value in ``repr(self)``."""
         return f"hidden_size={self.hidden_size}, init_value={self.init_value}"

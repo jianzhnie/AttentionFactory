@@ -49,12 +49,13 @@ class LatentMoE(nn.Module):
         """Project to latent space, route experts, then project back."""
         latent = self.down_proj(x)
         routed = self.moe(latent)
-        output = self.up_proj(routed)
+        output: torch.Tensor = self.up_proj(routed)
         if self.residual:
             output = output + x
         return output
 
     def extra_repr(self) -> str:
+        """Describe the module's hyperparameters in ``repr(self)``."""
         return (
             f"hidden_size={self.hidden_size}, latent_size={self.latent_size}, "
             f"num_experts={self.num_experts}, top_k={self.top_k}, "

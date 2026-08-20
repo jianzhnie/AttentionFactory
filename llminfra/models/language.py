@@ -292,7 +292,7 @@ class CausalLMModel(nn.Module):
                 hidden_state = hidden_state * query_padding_mask
 
         hidden_state = self.norm(hidden_state)
-        logits = self.lm_head(hidden_state)
+        logits: torch.Tensor = self.lm_head(hidden_state)
         if query_padding_mask is not None:
             logits = logits * query_padding_mask
         mtp_logits: list[torch.Tensor] | None = None
@@ -386,6 +386,7 @@ class CausalLMModel(nn.Module):
         return causal & padding.bool()
 
     def extra_repr(self) -> str:
+        """Report the architecture configuration shown in the module ``repr``."""
         return (
             f"vocab_size={self.vocab_size}, hidden_size={self.hidden_size}, "
             f"num_layers={self.num_layers}, num_heads={self.num_heads}, "

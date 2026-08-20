@@ -25,7 +25,7 @@ that same support boundary.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, cast
 
 import torch
 
@@ -327,11 +327,18 @@ def backward(
     running grad_q / grad_k / grad_v accumulators.
 
     Args:
-        q, k, v: The same tensors the forward pass was called with.
+        q: Queries, as passed to `forward`, shape
+            ``(batch, heads, q_len, head_dim)``.
+        k: Keys, as passed to `forward`, shape
+            ``(batch, heads, kv_len, head_dim)``.
+        v: Values, as passed to `forward`, shape
+            ``(batch, heads, kv_len, value_dim)``.
         grad_out: Gradient w.r.t. the forward output, same shape as
             ``forward_result.out``.
         forward_result: The result returned by `forward`.
-        causal, key_padding_mask, config: Must match the forward call.
+        causal: Must match the forward call.
+        key_padding_mask: Must match the forward call.
+        config: Must match the forward call.
 
     Returns:
         A `BackwardResult` with the gradients grad_q, grad_k and grad_v.
@@ -450,6 +457,11 @@ def flash_attention_v3(
     autograd graph: ``loss.backward()`` routes through this module's tiled
     `backward` implementation. Arguments match `forward`.
     """
-    return TiledAttentionFunction.apply(
-        q, k, v, causal, key_padding_mask, config, forward, backward
+    # `Function.apply` is untyped in the torch stubs; it returns the forward
+    # output tensor, so cast the Any result back.
+    return cast(
+        torch.Tensor,
+        TiledAttentionFunction.apply(  # type: ignore[no-untyped-call]
+            q, k, v, causal, key_padding_mask, config, forward, backward
+        ),
     )

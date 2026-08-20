@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import math
 from collections.abc import Callable
+from typing import cast
 
 import torch
 from torch import nn
@@ -41,7 +42,7 @@ class _GatedFFN(nn.Module):
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         gate = self.activation(self.gate_proj(x))
         up = self.up_proj(x)
-        return self.down_proj(gate * up)
+        return cast(torch.Tensor, self.down_proj(gate * up))
 
     def _init_weights(self) -> None:
         for module in (self.gate_proj, self.up_proj, self.down_proj):
@@ -125,12 +126,14 @@ class ClampedSwiGLUFFN(_GatedFFN):
         self.alpha = float(alpha)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
+        """Apply SiLU gating with the clamped up-projection and product."""
         gate = self.activation(self.gate_proj(x))
         up = (self.up_proj(x) * self.alpha).clamp(max=self.swiglu_limit)
         hidden = (gate * up).clamp(-self.swiglu_limit, self.swiglu_limit)
-        return self.down_proj(hidden)
+        return cast(torch.Tensor, self.down_proj(hidden))
 
     def extra_repr(self) -> str:
+        """Show the layer sizes and clamp settings in ``repr(self)``."""
         return (
             f"hidden_size={self.hidden_size}, "
             f"intermediate_size={self.intermediate_size}, "

@@ -19,6 +19,8 @@ shape without reproducing the CUDA launch details.
 
 from __future__ import annotations
 
+from typing import cast
+
 import torch
 
 from .common import (
@@ -165,11 +167,18 @@ def backward(
     finished grad_q tile is written back.
 
     Args:
-        q, k, v: The same tensors the forward pass was called with.
+        q: Queries, as passed to `forward`, shape
+            ``(batch, heads, q_len, head_dim)``.
+        k: Keys, as passed to `forward`, shape
+            ``(batch, heads, kv_len, head_dim)``.
+        v: Values, as passed to `forward`, shape
+            ``(batch, heads, kv_len, value_dim)``.
         grad_out: Gradient w.r.t. the forward output, same shape as
             ``forward_result.out``.
         forward_result: The result returned by `forward`.
-        causal, key_padding_mask, config: Must match the forward call.
+        causal: Must match the forward call.
+        key_padding_mask: Must match the forward call.
+        config: Must match the forward call.
 
     Returns:
         A `BackwardResult` with the gradients grad_q, grad_k and grad_v.
@@ -249,6 +258,11 @@ def flash_attention_v2(
     autograd graph: ``loss.backward()`` routes through this module's tiled
     `backward` implementation. Arguments match `forward`.
     """
-    return TiledAttentionFunction.apply(
-        q, k, v, causal, key_padding_mask, config, forward, backward
+    # `Function.apply` is untyped in the torch stubs; it returns the forward
+    # output tensor, so cast the Any result back.
+    return cast(
+        torch.Tensor,
+        TiledAttentionFunction.apply(  # type: ignore[no-untyped-call]
+            q, k, v, causal, key_padding_mask, config, forward, backward
+        ),
     )

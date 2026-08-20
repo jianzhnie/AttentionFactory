@@ -48,8 +48,8 @@ class TwoDimensionalPositionEmbedding(BasePositionalEncoding):
             positions.min() < 0 or positions.max() >= self.max_positions_per_block
         ):
             raise ValueError("positions must be in [0, max_positions_per_block)")
-        block = self.block_embeddings(block_ids)
-        position = self.position_embeddings(positions)
+        block: torch.Tensor = self.block_embeddings(block_ids)
+        position: torch.Tensor = self.position_embeddings(positions)
         if block.dim() == x.dim() - 1:
             block = block.unsqueeze(0)
             position = position.unsqueeze(0)

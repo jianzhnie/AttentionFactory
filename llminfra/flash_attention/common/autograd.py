@@ -30,6 +30,8 @@ class TiledAttentionFunction(torch.autograd.Function):
 
     @staticmethod
     def forward(
+        # PyTorch hands us an opaque context object with no exported type;
+        # arbitrary attributes are how non-tensor state is carried to backward.
         ctx: Any,
         q: torch.Tensor,
         k: torch.Tensor,
@@ -40,6 +42,29 @@ class TiledAttentionFunction(torch.autograd.Function):
         forward_impl: ForwardImpl,
         backward_impl: BackwardImpl,
     ) -> torch.Tensor:
+        """Run the wrapped tiled forward and stash what `backward` needs.
+
+        Args:
+            ctx: Autograd context populated by PyTorch. The inputs, the output
+                and the per-row log-sum-exp are saved via
+                ``ctx.save_for_backward``; the call configuration is stored as
+                plain attributes.
+            q: Queries, shape ``(batch, heads, q_len, head_dim)``.
+            k: Keys, shape ``(batch, heads, kv_len, head_dim)``.
+            v: Values, shape ``(batch, heads, kv_len, value_dim)``.
+            causal: Apply a causal mask, as in the wrapped implementation.
+            key_padding_mask: Optional mask of shape ``(batch, kv_len)``;
+                ``True`` marks valid key positions.
+            config: Tiling and debug knobs; ``FlashAttentionConfig()``
+                defaults are used when ``None``.
+            forward_impl: The version-specific tiled forward implementation.
+            backward_impl: The matching tiled backward implementation, stored
+                on ``ctx`` for `backward`.
+
+        Returns:
+            The attention output tensor, with the autograd graph recorded.
+
+        """
         config = config or FlashAttentionConfig()
         result = forward_impl(
             q, k, v, causal=causal, key_padding_mask=key_padding_mask, config=config
@@ -53,7 +78,8 @@ class TiledAttentionFunction(torch.autograd.Function):
 
     @staticmethod
     def backward(
-        ctx: Any, grad_out: torch.Tensor
+        ctx: Any,
+        grad_out: torch.Tensor,
     ) -> tuple[
         torch.Tensor,
         torch.Tensor,
@@ -64,6 +90,22 @@ class TiledAttentionFunction(torch.autograd.Function):
         None,
         None,
     ]:
+        """Recompute per-tile probabilities and return the input gradients.
+
+        Only the gradients for ``q``, ``k`` and ``v`` are real; the trailing
+        ``None`` slots correspond to the non-differentiable arguments of
+        `forward`.
+
+        Args:
+            ctx: Autograd context carrying the tensors and call configuration
+                saved by `forward`.
+            grad_out: Gradient w.r.t. the forward output.
+
+        Returns:
+            ``(grad_q, grad_k, grad_v)`` followed by five ``None`` slots, one
+            return slot per `forward` argument.
+
+        """
         q, k, v, out, lse = ctx.saved_tensors
         # Rebuild the minimal forward result the tiled backward needs.
         forward_result = ForwardResult(out=out, lse=lse)

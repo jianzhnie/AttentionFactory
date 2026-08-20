@@ -42,6 +42,7 @@ class QuantizationConfig:
     eps: float = 1e-8
 
     def __post_init__(self) -> None:
+        """Reject unsupported modes and non-positive ``eps`` values."""
         if self.mode not in {"int4", "int8", "fp8_e4m3"}:
             raise ValueError(f"Unsupported quantization mode: {self.mode!r}")
         if self.eps <= 0:
@@ -74,7 +75,9 @@ class FakeQuantizer(nn.Module):
         return tuple(dim for dim in range(tensor.dim()) if dim != axis)
 
     def _fake_symmetric_integer(self, tensor: torch.Tensor, bits: int) -> torch.Tensor:
-        qmax = 2 ** (bits - 1) - 1
+        # Annotated explicitly because ``int.__pow__`` is typed as returning
+        # ``Any`` in typeshed (negative exponents yield floats).
+        qmax: int = 2 ** (bits - 1) - 1
         reduce_dims = self._reduction_dims(tensor)
         if reduce_dims:
             max_abs = tensor.detach().abs().amax(dim=reduce_dims, keepdim=True)
@@ -101,6 +104,7 @@ class FakeQuantizer(nn.Module):
         return torch.where(magnitude == 0, torch.zeros_like(rounded), rounded)
 
     def extra_repr(self) -> str:
+        """Show the quantizer mode and channel configuration in ``repr``."""
         return (
             f"mode={self.config.mode!r}, "
             f"per_channel={self.config.per_channel}, "
@@ -133,7 +137,13 @@ class QATWrapper(nn.Module):
         )
         self.weight_quantizer = FakeQuantizer(weight_config)
 
-    def _map_tensors(self, value: Any) -> Any:
+    def _map_tensors(self, value: object) -> object:
+        """Recursively fake-quantize every tensor in a nested structure.
+
+        Tuples, lists and dicts are rebuilt with each tensor leaf passed
+        through the activation quantizer; non-tensor leaves are returned
+        unchanged.
+        """
         if isinstance(value, torch.Tensor):
             return self.activation_quantizer(value)
         if isinstance(value, tuple):
@@ -144,7 +154,7 @@ class QATWrapper(nn.Module):
             return {key: self._map_tensors(item) for key, item in value.items()}
         return value
 
-    def forward(self, *args: Any, **kwargs: Any) -> Any:
+    def forward(self, *args: object, **kwargs: object) -> object:
         """Run the wrapped module with the configured fake quantization."""
         call_args = self._map_tensors(args) if self.config.quantize_inputs else args
         call_kwargs = (

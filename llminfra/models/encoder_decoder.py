@@ -103,7 +103,7 @@ class CrossAttention(BaseAttention):
             attention_scores, attention_mask
         )
 
-        output = torch.matmul(attention_weights, value)
+        output: torch.Tensor = torch.matmul(attention_weights, value)
         output = self.o_proj(self.combine_head(output))
 
         if return_attention_weights:
@@ -159,9 +159,11 @@ class EncoderBlock(nn.Module):
         hidden_state = hidden_state + self.attention(
             self.norm1(hidden_state), attention_mask=attention_mask
         )
-        return hidden_state + self.ffn(self.norm2(hidden_state))
+        output: torch.Tensor = hidden_state + self.ffn(self.norm2(hidden_state))
+        return output
 
     def extra_repr(self) -> str:
+        """Report the block dimensions shown in the module ``repr``."""
         return (
             f"hidden_size={self.hidden_size}, num_heads={self.num_heads}, "
             f"intermediate_size={self.intermediate_size}"
@@ -235,9 +237,11 @@ class DecoderBlock(nn.Module):
             encoder_output,
             attention_mask=cross_attention_mask,
         )
-        return hidden_state + self.ffn(self.norm3(hidden_state))
+        output: torch.Tensor = hidden_state + self.ffn(self.norm3(hidden_state))
+        return output
 
     def extra_repr(self) -> str:
+        """Report the block dimensions shown in the module ``repr``."""
         return (
             f"hidden_size={self.hidden_size}, num_heads={self.num_heads}, "
             f"intermediate_size={self.intermediate_size}"
@@ -382,9 +386,11 @@ class EncoderDecoderModel(nn.Module):
                 cross_attention_mask=src_padding,
             )
         hidden_state = self.decoder_norm(hidden_state)
-        return self.lm_head(hidden_state)
+        logits: torch.Tensor = self.lm_head(hidden_state)
+        return logits
 
     def extra_repr(self) -> str:
+        """Report the architecture hyperparameters shown in the module ``repr``."""
         return (
             f"vocab_size={self.vocab_size}, hidden_size={self.hidden_size}, "
             f"num_encoder_layers={self.num_encoder_layers}, "

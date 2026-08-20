@@ -116,6 +116,7 @@ class MultiModalRotaryPositionEmbedding(BasePositionalEncoding):
         return apply_rotary_pos_emb(x, cos, sin)
 
     def extra_repr(self) -> str:
+        """Show the dimension, per-axis rotary-pair split, base, and length."""
         return (
             f"dim={self.dim}, mrope_section={self.mrope_section}, "
             f"base={self.base}, max_seq_len={self.max_seq_len}"

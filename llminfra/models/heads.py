@@ -91,7 +91,8 @@ class SequenceClassificationHead(nn.Module):
     ) -> torch.Tensor:
         """Return logits shaped ``(batch, num_labels)``."""
         pooled = pool_hidden_state(hidden_state, attention_mask, self.pooling)
-        return self.projection(self.dropout(pooled))
+        logits: torch.Tensor = self.projection(self.dropout(pooled))
+        return logits
 
 
 class TokenClassificationHead(nn.Module):
@@ -120,7 +121,8 @@ class TokenClassificationHead(nn.Module):
             raise ValueError(
                 "hidden_state must have shape (batch, seq_len, hidden_size)"
             )
-        return self.projection(self.dropout(hidden_state))
+        logits: torch.Tensor = self.projection(self.dropout(hidden_state))
+        return logits
 
 
 class RewardModelHead(nn.Module):
@@ -147,7 +149,8 @@ class RewardModelHead(nn.Module):
     ) -> torch.Tensor:
         """Return rewards shaped ``(batch,)``."""
         pooled = pool_hidden_state(hidden_state, attention_mask, self.pooling)
-        return self.projection(self.dropout(pooled)).squeeze(-1)
+        reward: torch.Tensor = self.projection(self.dropout(pooled)).squeeze(-1)
+        return reward
 
 
 class EmbeddingHead(nn.Module):
