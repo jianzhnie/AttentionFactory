@@ -302,9 +302,7 @@ class MultimodalCausalLM(nn.Module):
             if (image_grid_thw < 1).any():
                 raise ValueError("all image grid dimensions must be >= 1")
             token_counts = image_grid_thw.prod(dim=-1)
-            if not torch.equal(
-                token_counts, token_counts[:1].expand_as(token_counts)
-            ):
+            if not torch.equal(token_counts, token_counts[:1].expand_as(token_counts)):
                 raise ValueError("dense batches require equal image token counts")
             if int(token_counts[0].item()) != vision_length:
                 raise ValueError(

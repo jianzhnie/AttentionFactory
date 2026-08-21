@@ -68,10 +68,7 @@ class NGramSpeculator(nn.Module):
                 accepted.append(token.view(1))
                 if token != draft[row_index, index]:
                     break
-            if (
-                self.append_bonus_token
-                and len(accepted) == self.num_speculative_tokens
-            ):
+            if self.append_bonus_token and len(accepted) == self.num_speculative_tokens:
                 accepted.append(bonus_tokens[row_index].view(1))
             rows.append(torch.cat((row, *accepted)))
         output = input_ids.new_full(

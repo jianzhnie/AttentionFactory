@@ -178,9 +178,7 @@ def bench_encoder() -> None:
             max_seq_len=seq,
             type_vocab_size=2,
         ).eval()
-        _time_encoder(
-            name, model, _rand_ids(batch, seq, 8192), _rand_mask(batch, seq)
-        )
+        _time_encoder(name, model, _rand_ids(batch, seq, 8192), _rand_mask(batch, seq))
 
 
 def bench_encoder_decoder() -> None:

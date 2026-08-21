@@ -99,8 +99,7 @@ class MultiModalRotaryPositionEmbedding(BasePositionalEncoding):
         expected = (num_axes, batch_size, seq_len)
         if tuple(positions.shape) != expected:
             raise ValueError(
-                f"position_ids must have shape {expected}, "
-                f"got {tuple(positions.shape)}"
+                f"position_ids must have shape {expected}, got {tuple(positions.shape)}"
             )
 
         frequencies: list[torch.Tensor] = []

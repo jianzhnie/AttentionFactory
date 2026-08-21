@@ -119,6 +119,7 @@ def bench_qat_wrapper() -> None:
         config = QuantizationConfig(mode="int8", **overrides)  # type: ignore[arg-type]
         wrapped = build_quantized(module, config=config)
         for backward in (False, True):
+
             def run(wrapped: nn.Module = wrapped, backward: bool = backward) -> None:
                 x_ref = x.detach().requires_grad_(backward)
                 out = wrapped(x_ref)

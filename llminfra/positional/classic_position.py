@@ -130,9 +130,7 @@ class LearnedAbsolutePositionEmbedding(BasePositionalEncoding):
                 raise ValueError(f"x must end in (seq_len, {self.dim})")
             if x.size(-2) > self.max_seq_len:
                 raise ValueError("position_ids contain an out-of-range position")
-            output: torch.Tensor = self.dropout(
-                x + self.embedding.weight[: x.size(-2)]
-            )
+            output: torch.Tensor = self.dropout(x + self.embedding.weight[: x.size(-2)])
             return output
         positions = _resolve_position_ids(
             x,

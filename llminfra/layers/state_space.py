@@ -165,9 +165,10 @@ class Mamba2Layer(nn.Module):
         weight = self.conv1d.weight[:, 0, :]  # (d_inner, conv_kernel)
         convolved = weight[:, 0][None, :, None] * history[..., :seq_len]
         for tap in range(1, self.conv_kernel):
-            convolved = convolved + weight[:, tap][None, :, None] * history[
-                ..., tap : tap + seq_len
-            ]
+            convolved = (
+                convolved
+                + weight[:, tap][None, :, None] * history[..., tap : tap + seq_len]
+            )
         if self.conv1d.bias is not None:
             convolved = convolved + self.conv1d.bias[None, :, None]
         next_state = history[..., -(self.conv_kernel - 1) :]

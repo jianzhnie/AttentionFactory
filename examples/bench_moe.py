@@ -143,9 +143,7 @@ def main() -> None:
             row = f"{shape_name:<14}{mode:<9}"
             for bench_name in bench_names:
                 inp = x.reshape(-1, hidden) if bench_name == "ec_router" else x
-                timed = partial(
-                    _run_once, bench_name, modules, inp, backward=backward
-                )
+                timed = partial(_run_once, bench_name, modules, inp, backward=backward)
                 ms = _median_time(timed)
                 row += f"{ms * 1e3:>12.1f} "
             print(row, flush=True)

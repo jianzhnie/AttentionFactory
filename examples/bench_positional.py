@@ -70,7 +70,11 @@ def _rope_family() -> list[tuple[str, Callable[[], object], torch.Tensor]]:
     factors = [1.0] * (dim // 2)
     rows: list[tuple[str, Callable[[], object], torch.Tensor]] = [
         ("rope", lambda: RotaryPositionEmbedding(dim, max_seq_len=max_seq), x),
-        ("rope-long", lambda: RotaryPositionEmbedding(dim, max_seq_len=max_seq), x_long),  # noqa: E501
+        (
+            "rope-long",
+            lambda: RotaryPositionEmbedding(dim, max_seq_len=max_seq),
+            x_long,
+        ),
         ("yarn", lambda: YaRNScaledRotaryEmbedding(dim, max_seq, yarn_params), x),
         (
             "ntk",
